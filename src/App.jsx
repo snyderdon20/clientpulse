@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { createClient } from "@supabase/supabase-js";
 
 // ─── RESPONSIVE HOOK ─────────────────────────────────────────────────────────
 function useIsMobile(bp = 640) {
@@ -3501,12 +3502,8 @@ let _supabase = null;
 
 const initSupabase = (url, anonKey) => {
   if (!url || !anonKey) return null;
-  // Lazy-load Supabase client via CDN
-  if (window.__supabase) {
-    _supabase = window.__supabase.createClient(url, anonKey);
-    return _supabase;
-  }
-  return null;
+  _supabase = createClient(url, anonKey);
+  return _supabase;
 };
 
 const getSupabase = () => _supabase;
@@ -3598,18 +3595,12 @@ function useSupabaseDB(supabaseUrl, supabaseAnonKey) {
 
   useEffect(() => {
     if (!supabaseUrl || !supabaseAnonKey) { setDbReady(false); return; }
-    if (window.__supabase) {
+    try {
       initSupabase(supabaseUrl, supabaseAnonKey);
-      setDbReady(true); return;
+      setDbReady(true);
+    } catch (e) {
+      setDbError(e.message || "Failed to initialize Supabase");
     }
-    const existing = document.getElementById("supabase-sdk");
-    if (existing) { existing.addEventListener("load", () => { window.__supabase = window.supabase; initSupabase(supabaseUrl, supabaseAnonKey); setDbReady(true); }); return; }
-    const script = document.createElement("script");
-    script.id = "supabase-sdk";
-    script.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js";
-    script.onload = () => { window.__supabase = window.supabase; initSupabase(supabaseUrl, supabaseAnonKey); setDbReady(true); };
-    script.onerror = () => setDbError("Failed to load Supabase client");
-    document.head.appendChild(script);
   }, [supabaseUrl, supabaseAnonKey]);
 
   const loadAll = async () => {
@@ -3699,47 +3690,40 @@ function useSupabaseAuth(supabaseUrl, supabaseAnonKey) {
 
   useEffect(() => {
     if (!supabaseUrl || !supabaseAnonKey) { setLoading(false); return; }
+    const sb = getSupabase() || initSupabase(supabaseUrl, supabaseAnonKey);
+    if (!sb) { setLoading(false); return; }
 
-    const setup = () => {
-      const sb = window.__supabase?.createClient(supabaseUrl, supabaseAnonKey);
-      if (!sb) { setLoading(false); return; }
+    let subscription;
+    sb.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setUser(session.user);
+        sb.from("staff").select("*").eq("id", session.user.id).single()
+          .then(({ data }) => setStaff(data || { role: "staff", full_name: "Staff" }))
+          .catch(() => setStaff({ role: "staff", full_name: "Staff" }))
+          .finally(() => setLoading(false));
+      } else {
+        setLoading(false);
+      }
+    });
 
-      sb.auth.getSession().then(({ data: { session } }) => {
-        if (session?.user) {
-          setUser(session.user);
-          sb.from("staff").select("*").eq("id", session.user.id).single()
-            .then(({ data }) => setStaff(data || { role: "staff", full_name: "Staff" }))
-            .catch(() => setStaff({ role: "staff", full_name: "Staff" }))
-            .finally(() => setLoading(false));
-        } else {
-          setLoading(false);
-        }
-      });
-
-      const { data: { subscription } } = sb.auth.onAuthStateChange((_event, session) => {
-        if (session?.user) {
-          setUser(session.user);
-          sb.from("staff").select("*").eq("id", session.user.id).single()
-            .then(({ data }) => setStaff(data || { role: "staff", full_name: "Staff" }))
-            .catch(() => setStaff({ role: "staff", full_name: "Staff" }))
-            .finally(() => setLoading(false));
-        } else {
-          setUser(null); setStaff(null); setLoading(false);
-        }
-      });
-      return () => subscription.unsubscribe();
-    };
-
-    // Wait for Supabase SDK to be available
-    if (window.__supabase) { setup(); return; }
-    const check = setInterval(() => { if (window.__supabase) { clearInterval(check); setup(); } }, 100);
-    const timeout = setTimeout(() => { clearInterval(check); setLoading(false); }, 8000);
-    return () => { clearInterval(check); clearTimeout(timeout); };
+    const { data } = sb.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUser(session.user);
+        sb.from("staff").select("*").eq("id", session.user.id).single()
+          .then(({ data: d }) => setStaff(d || { role: "staff", full_name: "Staff" }))
+          .catch(() => setStaff({ role: "staff", full_name: "Staff" }))
+          .finally(() => setLoading(false));
+      } else {
+        setUser(null); setStaff(null); setLoading(false);
+      }
+    });
+    subscription = data.subscription;
+    return () => subscription?.unsubscribe();
   }, [supabaseUrl, supabaseAnonKey]);
 
   const signIn = async (email, password) => {
     setError(null);
-    const sb = window.__supabase?.createClient(supabaseUrl, supabaseAnonKey);
+    const sb = getSupabase();
     if (!sb) { setError("Database not configured"); return false; }
     const { error: err } = await sb.auth.signInWithPassword({ email, password });
     if (err) { setError(err.message); return false; }
@@ -3747,13 +3731,13 @@ function useSupabaseAuth(supabaseUrl, supabaseAnonKey) {
   };
 
   const signOut = async () => {
-    const sb = window.__supabase?.createClient(supabaseUrl, supabaseAnonKey);
+    const sb = getSupabase();
     if (sb) await sb.auth.signOut();
     setUser(null); setStaff(null);
   };
 
   const resetPassword = async (email) => {
-    const sb = window.__supabase?.createClient(supabaseUrl, supabaseAnonKey);
+    const sb = getSupabase();
     if (!sb) return false;
     const { error: err } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
     if (err) { setError(err.message); return false; }
