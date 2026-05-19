@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 
 // ─── RESPONSIVE HOOK ─────────────────────────────────────────────────────────
 function useIsMobile(bp = 640) {
@@ -3938,32 +3938,75 @@ function LoginScreen({ onLogin, error, loading, onForgotPassword, noSupabase }) 
   );
 }
 
+// ─── ERROR BOUNDARY ───────────────────────────────────────────────────────────
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error: error.message || "Unknown error" };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fdf6ef", fontFamily: "'DM Sans',sans-serif", padding: 24 }}>
+          <div style={{ maxWidth: 480, textAlign: "center" }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+            <div style={{ fontSize: "18px", fontWeight: "800", color: "#1a120b", marginBottom: 8 }}>Something went wrong</div>
+            <div style={{ fontSize: "13px", color: "#8a7a6a", background: "#fee2e2", padding: "10px 16px", borderRadius: 10, marginBottom: 20, textAlign: "left", fontFamily: "monospace" }}>
+              {this.state.error}
+            </div>
+            <button onClick={() => window.location.reload()}
+              style={{ padding: "10px 24px", borderRadius: 10, background: "linear-gradient(135deg,#a0785a,#7a5640)", color: "#fff", border: "none", fontSize: "14px", fontWeight: "700", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+              Reload app
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ─── APP ROOT ────────────────────────────────────────────────────────────────
-export default function App() {
+function App() {
+  // ── ALL HOOKS MUST BE DECLARED BEFORE ANY CONDITIONAL RETURNS ──
   const [clients, setClients]           = useState(INITIAL_CLIENTS);
   const [templates, setTemplates]       = useState(DEFAULT_TEMPLATES);
   const [tasks, setTasks]               = useState(INITIAL_TASKS);
   const [tab, setTab]                   = useState("dashboard");
+  const [selected, setSelected]         = useState(null);
+  const [filter, setFilter]             = useState("all");
+  const [tagFilter, setTagFilter]       = useState(null);
+  const [search, setSearch]             = useState("");
+  const [globalSearch, setGlobalSearch] = useState("");
+  const [showGS, setShowGS]             = useState(false);
+  const [mockMode, setMockMode]         = useState(true);
+  const [apiKey, setApiKey]             = useState("");
+  const [businessId, setBusinessId]     = useState("");
   const [gmailClientId, setGmailClientId] = useState(() => localStorage.getItem("cp_gmail_client_id") || "");
-  setGlobalGmailClientId(gmailClientId);
-
-  // Supabase credentials
   const [supabaseUrl,     setSupabaseUrl]     = useState(() => localStorage.getItem("cp_sb_url")  || "");
   const [supabaseAnonKey, setSupabaseAnonKey] = useState(() => localStorage.getItem("cp_sb_anon") || "");
   const [dbLoading, setDbLoading] = useState(false);
   const [dbLoadError, setDbLoadError] = useState(null);
   const [usingDB, setUsingDB] = useState(false);
 
-  // Auth
-  const auth = useSupabaseAuth(supabaseUrl, supabaseAnonKey);
-  const noSupabase = !supabaseUrl || !supabaseAnonKey;
+  setGlobalGmailClientId(gmailClientId);
 
+  const noSupabase = !supabaseUrl || !supabaseAnonKey;
+  const auth = useSupabaseAuth(supabaseUrl, supabaseAnonKey);
   const db = useSupabaseDB(supabaseUrl, supabaseAnonKey);
 
-  // Load from Supabase when DB becomes ready and user is authenticated
+  const lapseCount = useMemo(
+    () => clients.filter((c) => ["overdue", "lapsed"].includes(deriveStatus(c))).length,
+    [clients]
+  );
+
+  // Load from Supabase when ready and authenticated
   useEffect(() => {
     if (!db.dbReady || usingDB) return;
-    if (!auth.user && !noSupabase) return; // wait for auth
+    if (!auth.user && !noSupabase) return;
     setDbLoading(true); setDbLoadError(null);
     db.loadAll()
       .then(({ clients: dbClients, tasks: dbTasks }) => {
@@ -3979,21 +4022,6 @@ export default function App() {
         setDbLoading(false);
       });
   }, [db.dbReady, auth.user]);
-
-  const [selected, setSelected]         = useState(null);
-  const [filter, setFilter]             = useState("all");
-  const [tagFilter, setTagFilter]       = useState(null);
-  const [search, setSearch]             = useState("");
-  const [globalSearch, setGlobalSearch] = useState("");
-  const [showGS, setShowGS]             = useState(false);
-  const [mockMode, setMockMode]         = useState(true);
-  const [apiKey, setApiKey]             = useState("");
-  const [businessId, setBusinessId]     = useState("");
-
-  const lapseCount = useMemo(
-    () => clients.filter((c) => ["overdue", "lapsed"].includes(deriveStatus(c))).length,
-    [clients]
-  );
 
   // Auth gate — only active when Supabase is configured
   if (!noSupabase) {
@@ -4295,3 +4323,11 @@ export default function App() {
     </div>
   );
 }
+
+const WrappedApp = () => (
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
+);
+
+export default WrappedApp;
