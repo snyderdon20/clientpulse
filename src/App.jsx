@@ -3497,248 +3497,134 @@ function NavIcon({ item, size = 15 }) {
 }
 
 // ─── SUPABASE INTEGRATION ─────────────────────────────────────────────────────
-// Module-level Supabase client — initialized when credentials are set
-let _supabase = null;
+let _sbClient = null;
+let _sbUrl = '';
+let _sbKey = '';
 
-const initSupabase = (url, anonKey) => {
-  if (!url || !anonKey) return null;
-  _supabase = createClient(url, anonKey);
-  return _supabase;
-};
-
-const getSupabase = () => _supabase;
-
-// Convert Supabase snake_case row → camelCase client object
-const rowToClient = (row) => ({
-  id:                   row.id,
-  vagaroId:             row.vagaro_id,
-  vagaroSynced:         row.vagaro_synced,
-  firstName:            row.first_name,
-  lastName:             row.last_name,
-  email:                row.email,
-  phone:                row.phone,
-  birthday:             row.birthday,
-  customerSince:        row.customer_since,
-  avgVisitIntervalDays: row.avg_visit_interval_days,
-  referredBy:           row.referred_by,
-  careCategory:         row.care_category,
-  redLightStatus:       row.red_light_status,
-  waitlisted:           row.waitlisted,
-  address:              row.address,
-  city:                 row.city,
-  state:                row.state,
-  zip:                  row.zip,
-  tags:                 row.tags || [],
-  goldenNuggets:        row.golden_nuggets || [],
-  appointments:         [],   // loaded separately
-  history:              [],   // loaded separately
-});
-
-// Convert camelCase client → Supabase snake_case row
-const clientToRow = (c) => ({
-  vagaro_id:              c.vagaroId || null,
-  vagaro_synced:          c.vagaroSynced || false,
-  first_name:             c.firstName,
-  last_name:              c.lastName,
-  email:                  c.email || null,
-  phone:                  c.phone || null,
-  birthday:               c.birthday || null,
-  customer_since:         c.customerSince || null,
-  avg_visit_interval_days: c.avgVisitIntervalDays || 30,
-  referred_by:            c.referredBy || null,
-  care_category:          c.careCategory || null,
-  red_light_status:       c.redLightStatus || null,
-  waitlisted:             c.waitlisted || false,
-  address:                c.address || null,
-  city:                   c.city || null,
-  state:                  c.state || null,
-  zip:                    c.zip || null,
-  tags:                   c.tags || [],
-  golden_nuggets:         c.goldenNuggets || [],
-});
-
-const rowToAppt = (row) => ({
-  id:        row.id,
-  date:      row.date,
-  time:      row.time,
-  service:   row.service,
-  duration:  row.duration,
-  therapist: row.therapist,
-  status:    row.status,
-});
-
-const rowToHistory = (row) => ({
-  id:     row.id,
-  type:   row.type,
-  detail: row.detail,
-  by:     row.by,
-  ts:     row.ts,
-  source: row.source,
-  direction: row.direction,
-});
-
-const rowToTask = (row) => ({
-  id:         row.id,
-  title:      row.title,
-  dueDate:    row.due_date,
-  clientId:   row.client_id,
-  createdBy:  row.created_by,
-  done:       row.done,
-  createdAt:  new Date(row.created_at).getTime(),
-});
-
-// ─── SUPABASE HOOK ───────────────────────────────────────────────────────────
-function useSupabaseDB(supabaseUrl, supabaseAnonKey) {
-  const [dbReady, setDbReady] = useState(false);
-  const [dbError, setDbError] = useState(null);
-  const [syncing, setSyncing] = useState(false);
-
-  useEffect(() => {
-    if (!supabaseUrl || !supabaseAnonKey) { setDbReady(false); return; }
-    try {
-      initSupabase(supabaseUrl, supabaseAnonKey);
-      setDbReady(true);
-    } catch (e) {
-      setDbError(e.message || "Failed to initialize Supabase");
-    }
-  }, [supabaseUrl, supabaseAnonKey]);
-
-  const loadAll = async () => {
-    const sb = getSupabase();
-    if (!sb) throw new Error("Supabase not initialized");
-    setSyncing(true);
-    try {
-      const [{ data: clientRows, error: cErr },
-             { data: apptRows,   error: aErr },
-             { data: histRows,   error: hErr },
-             { data: taskRows,   error: tErr }] = await Promise.all([
-        sb.from("clients").select("*").order("created_at", { ascending: false }),
-        sb.from("appointments").select("*").order("date", { ascending: false }),
-        sb.from("history").select("*").order("ts", { ascending: false }),
-        sb.from("tasks").select("*").order("created_at", { ascending: false }),
-      ]);
-      if (cErr) throw cErr; if (aErr) throw aErr; if (hErr) throw hErr; if (tErr) throw tErr;
-      const clients = (clientRows || []).map((row) => {
-        const client = rowToClient(row);
-        client.appointments = (apptRows || []).filter((a) => a.client_id === row.id).map(rowToAppt);
-        client.history = (histRows || []).filter((h) => h.client_id === row.id).map(rowToHistory);
-        return client;
-      });
-      const tasks = (taskRows || []).map(rowToTask);
-      return { clients, tasks };
-    } finally { setSyncing(false); }
-  };
-
-  const saveClient = async (client) => {
-    const sb = getSupabase(); if (!sb) throw new Error("Supabase not initialized");
-    const { error } = await sb.from("clients").upsert({ id: client.id, ...clientToRow(client) });
-    if (error) throw error;
-  };
-
-  const updateClient = async (id, updates) => {
-    const sb = getSupabase(); if (!sb) throw new Error("Supabase not initialized");
-    const rowUpdates = {};
-    if (updates.firstName          !== undefined) rowUpdates.first_name = updates.firstName;
-    if (updates.lastName           !== undefined) rowUpdates.last_name = updates.lastName;
-    if (updates.email              !== undefined) rowUpdates.email = updates.email;
-    if (updates.phone              !== undefined) rowUpdates.phone = updates.phone;
-    if (updates.birthday           !== undefined) rowUpdates.birthday = updates.birthday;
-    if (updates.customerSince      !== undefined) rowUpdates.customer_since = updates.customerSince;
-    if (updates.avgVisitIntervalDays !== undefined) rowUpdates.avg_visit_interval_days = updates.avgVisitIntervalDays;
-    if (updates.referredBy         !== undefined) rowUpdates.referred_by = updates.referredBy;
-    if (updates.careCategory       !== undefined) rowUpdates.care_category = updates.careCategory;
-    if (updates.redLightStatus     !== undefined) rowUpdates.red_light_status = updates.redLightStatus;
-    if (updates.waitlisted         !== undefined) rowUpdates.waitlisted = updates.waitlisted;
-    if (updates.address            !== undefined) rowUpdates.address = updates.address;
-    if (updates.city               !== undefined) rowUpdates.city = updates.city;
-    if (updates.state              !== undefined) rowUpdates.state = updates.state;
-    if (updates.zip                !== undefined) rowUpdates.zip = updates.zip;
-    if (updates.tags               !== undefined) rowUpdates.tags = updates.tags;
-    if (updates.goldenNuggets      !== undefined) rowUpdates.golden_nuggets = updates.goldenNuggets;
-    if (updates.vagaroId           !== undefined) rowUpdates.vagaro_id = updates.vagaroId;
-    if (updates.vagaroSynced       !== undefined) rowUpdates.vagaro_synced = updates.vagaroSynced;
-    if (Object.keys(rowUpdates).length > 0) {
-      const { error } = await sb.from("clients").update(rowUpdates).eq("id", id);
-      if (error) throw error;
-    }
-    if (updates.history && updates.history.length > 0) {
-      const e = updates.history[updates.history.length - 1];
-      await sb.from("history").insert({ id: e.id || uid(), client_id: id, type: e.type, detail: e.detail, by: e.by || "System", ts: e.ts || Date.now(), source: "manual", direction: e.type.startsWith("comm.") ? "outbound" : "internal" }).catch(console.warn);
-    }
-  };
-
-  const saveTask = async (task) => {
-    const sb = getSupabase(); if (!sb) throw new Error("Supabase not initialized");
-    const { error } = await sb.from("tasks").upsert({ id: task.id, title: task.title, due_date: task.dueDate, client_id: task.clientId || null, created_by: task.createdBy, done: task.done });
-    if (error) throw error;
-  };
-
-  const deleteTask = async (id) => {
-    const sb = getSupabase(); if (!sb) throw new Error("Supabase not initialized");
-    const { error } = await sb.from("tasks").delete().eq("id", id);
-    if (error) throw error;
-  };
-
-  return { dbReady, dbError, syncing, loadAll, saveClient, updateClient, saveTask, deleteTask };
+function getSB(url, key) {
+  if (!url || !key) return null;
+  if (_sbClient && url === _sbUrl && key === _sbKey) return _sbClient;
+  _sbClient = createClient(url, key);
+  _sbUrl = url; _sbKey = key;
+  return _sbClient;
 }
 
-function useSupabaseAuth(supabaseUrl, supabaseAnonKey) {
+const rowToClient = (row) => ({
+  id: row.id, vagaroId: row.vagaro_id, vagaroSynced: row.vagaro_synced,
+  firstName: row.first_name, lastName: row.last_name, email: row.email, phone: row.phone,
+  birthday: row.birthday, customerSince: row.customer_since,
+  avgVisitIntervalDays: row.avg_visit_interval_days, referredBy: row.referred_by,
+  careCategory: row.care_category, redLightStatus: row.red_light_status,
+  waitlisted: row.waitlisted, address: row.address, city: row.city, state: row.state, zip: row.zip,
+  tags: row.tags || [], goldenNuggets: row.golden_nuggets || [], appointments: [], history: [],
+});
+
+const clientToRow = (c) => ({
+  vagaro_id: c.vagaroId || null, vagaro_synced: c.vagaroSynced || false,
+  first_name: c.firstName, last_name: c.lastName, email: c.email || null, phone: c.phone || null,
+  birthday: c.birthday || null, customer_since: c.customerSince || null,
+  avg_visit_interval_days: c.avgVisitIntervalDays || 30, referred_by: c.referredBy || null,
+  care_category: c.careCategory || null, red_light_status: c.redLightStatus || null,
+  waitlisted: c.waitlisted || false, address: c.address || null, city: c.city || null,
+  state: c.state || null, zip: c.zip || null, tags: c.tags || [], golden_nuggets: c.goldenNuggets || [],
+});
+
+const rowToAppt = (r) => ({ id: r.id, date: r.date, time: r.time, service: r.service, duration: r.duration, therapist: r.therapist, status: r.status });
+const rowToHistory = (r) => ({ id: r.id, type: r.type, detail: r.detail, by: r.by, ts: r.ts, source: r.source, direction: r.direction });
+const rowToTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, clientId: r.client_id, createdBy: r.created_by, done: r.done, createdAt: new Date(r.created_at).getTime() });
+
+async function dbLoadAll(url, key) {
+  const sb = getSB(url, key); if (!sb) throw new Error('Not connected');
+  const [{ data: cr, error: ce }, { data: ar, error: ae }, { data: hr, error: he }, { data: tr, error: te }] = await Promise.all([
+    sb.from('clients').select('*').order('created_at', { ascending: false }),
+    sb.from('appointments').select('*').order('date', { ascending: false }),
+    sb.from('history').select('*').order('ts', { ascending: false }),
+    sb.from('tasks').select('*').order('created_at', { ascending: false }),
+  ]);
+  if (ce) throw ce; if (ae) throw ae; if (he) throw he; if (te) throw te;
+  const clients = (cr || []).map((row) => {
+    const c = rowToClient(row); c.appointments = (ar||[]).filter((a)=>a.client_id===row.id).map(rowToAppt); c.history = (hr||[]).filter((h)=>h.client_id===row.id).map(rowToHistory); return c;
+  });
+  return { clients, tasks: (tr||[]).map(rowToTask) };
+}
+
+async function dbSaveClient(url, key, client) {
+  const sb = getSB(url, key); if (!sb) return;
+  const { error } = await sb.from('clients').upsert({ id: client.id, ...clientToRow(client) }); if (error) throw error;
+}
+
+async function dbUpdateClient(url, key, id, updates) {
+  const sb = getSB(url, key); if (!sb) return;
+  const m = {};
+  const map = { firstName:'first_name', lastName:'last_name', email:'email', phone:'phone', birthday:'birthday', customerSince:'customer_since', avgVisitIntervalDays:'avg_visit_interval_days', referredBy:'referred_by', careCategory:'care_category', redLightStatus:'red_light_status', waitlisted:'waitlisted', address:'address', city:'city', state:'state', zip:'zip', tags:'tags', goldenNuggets:'golden_nuggets', vagaroId:'vagaro_id', vagaroSynced:'vagaro_synced' };
+  Object.entries(map).forEach(([k,v]) => { if (updates[k] !== undefined) m[v] = updates[k]; });
+  if (Object.keys(m).length > 0) { const { error } = await sb.from('clients').update(m).eq('id', id); if (error) throw error; }
+  if (updates.history?.length > 0) {
+    const e = updates.history[updates.history.length - 1];
+    await sb.from('history').insert({ id: e.id||uid(), client_id: id, type: e.type, detail: e.detail, by: e.by||'System', ts: e.ts||Date.now(), source: 'manual', direction: e.type.startsWith('comm.') ? 'outbound' : 'internal' }).catch(console.warn);
+  }
+}
+
+async function dbSaveTask(url, key, task) {
+  const sb = getSB(url, key); if (!sb) return;
+  const { error } = await sb.from('tasks').upsert({ id: task.id, title: task.title, due_date: task.dueDate, client_id: task.clientId||null, created_by: task.createdBy, done: task.done }); if (error) throw error;
+}
+
+async function dbDeleteTask(url, key, id) {
+  const sb = getSB(url, key); if (!sb) return;
+  const { error } = await sb.from('tasks').delete().eq('id', id); if (error) throw error;
+}
+
+// ─── SUPABASE AUTH HOOK ───────────────────────────────────────────────────────
+function useSupabaseAuth(url, key) {
   const [user,    setUser]    = useState(null);
   const [staff,   setStaff]   = useState(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(null);
 
   useEffect(() => {
-    if (!supabaseUrl || !supabaseAnonKey) { setLoading(false); return; }
-    const sb = getSupabase() || initSupabase(supabaseUrl, supabaseAnonKey);
+    if (!url || !key) { setLoading(false); return; }
+    const sb = getSB(url, key);
     if (!sb) { setLoading(false); return; }
-
-    let subscription;
+    let unsub;
     sb.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         setUser(session.user);
-        sb.from("staff").select("*").eq("id", session.user.id).single()
-          .then(({ data }) => setStaff(data || { role: "staff", full_name: "Staff" }))
-          .catch(() => setStaff({ role: "staff", full_name: "Staff" }))
+        sb.from('staff').select('*').eq('id', session.user.id).single()
+          .then(({ data }) => setStaff(data || { role:'staff', full_name:'Staff' }))
+          .catch(() => setStaff({ role:'staff', full_name:'Staff' }))
           .finally(() => setLoading(false));
-      } else {
-        setLoading(false);
-      }
-    });
+      } else { setLoading(false); }
+    }).catch(() => setLoading(false));
 
-    const { data } = sb.auth.onAuthStateChange((_event, session) => {
+    const { data } = sb.auth.onAuthStateChange((_e, session) => {
       if (session?.user) {
         setUser(session.user);
-        sb.from("staff").select("*").eq("id", session.user.id).single()
-          .then(({ data: d }) => setStaff(d || { role: "staff", full_name: "Staff" }))
-          .catch(() => setStaff({ role: "staff", full_name: "Staff" }))
+        sb.from('staff').select('*').eq('id', session.user.id).single()
+          .then(({ data: d }) => setStaff(d || { role:'staff', full_name:'Staff' }))
+          .catch(() => setStaff({ role:'staff', full_name:'Staff' }))
           .finally(() => setLoading(false));
-      } else {
-        setUser(null); setStaff(null); setLoading(false);
-      }
+      } else { setUser(null); setStaff(null); setLoading(false); }
     });
-    subscription = data.subscription;
-    return () => subscription?.unsubscribe();
-  }, [supabaseUrl, supabaseAnonKey]);
+    unsub = data.subscription;
+    return () => unsub?.unsubscribe();
+  }, [url, key]);
 
   const signIn = async (email, password) => {
     setError(null);
-    const sb = getSupabase();
-    if (!sb) { setError("Database not configured"); return false; }
+    const sb = getSB(url, key); if (!sb) { setError('Database not configured'); return false; }
     const { error: err } = await sb.auth.signInWithPassword({ email, password });
     if (err) { setError(err.message); return false; }
     return true;
   };
 
   const signOut = async () => {
-    const sb = getSupabase();
-    if (sb) await sb.auth.signOut();
+    const sb = getSB(url, key); if (sb) await sb.auth.signOut();
     setUser(null); setStaff(null);
   };
 
   const resetPassword = async (email) => {
-    const sb = getSupabase();
-    if (!sb) return false;
+    const sb = getSB(url, key); if (!sb) return false;
     const { error: err } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
     if (err) { setError(err.message); return false; }
     return true;
@@ -3746,6 +3632,7 @@ function useSupabaseAuth(supabaseUrl, supabaseAnonKey) {
 
   return { user, staff, loading, error, signIn, signOut, resetPassword, setError };
 }
+
 
 // ─── LOGIN SCREEN ─────────────────────────────────────────────────────────────
 function LoginScreen({ onLogin, error, loading, onForgotPassword, noSupabase }) {
@@ -3926,19 +3813,19 @@ function App() {
 
   const noSupabase = !supabaseUrl || !supabaseAnonKey;
   const auth = useSupabaseAuth(supabaseUrl, supabaseAnonKey);
-  const db = useSupabaseDB(supabaseUrl, supabaseAnonKey);
 
   const lapseCount = useMemo(
     () => clients.filter((c) => ["overdue", "lapsed"].includes(deriveStatus(c))).length,
     [clients]
   );
 
-  // Load from Supabase when ready and authenticated
+  // Load from Supabase when authenticated
   useEffect(() => {
-    if (!db.dbReady || usingDB) return;
+    if (usingDB) return;
+    if (!supabaseUrl || !supabaseAnonKey) return;
     if (!auth.user && !noSupabase) return;
     setDbLoading(true); setDbLoadError(null);
-    db.loadAll()
+    dbLoadAll(supabaseUrl, supabaseAnonKey)
       .then(({ clients: dbClients, tasks: dbTasks }) => {
         if (dbClients.length > 0 || dbTasks.length > 0) {
           setClients(dbClients);
@@ -3951,7 +3838,7 @@ function App() {
         setDbLoadError(e.message || "Failed to load from database");
         setDbLoading(false);
       });
-  }, [db.dbReady, auth.user]);
+  }, [supabaseUrl, supabaseAnonKey, auth.user]);
 
   // Auth gate — only active when Supabase is configured
   if (!noSupabase) {
@@ -3995,26 +3882,18 @@ function App() {
 
   const updateClient = useCallback(
     (id, updates) => {
-      // Update local state immediately (optimistic)
       setClients((cs) => cs.map((c) => (c.id === id ? { ...c, ...updates } : c)));
-      // Persist to Supabase if connected
-      if (usingDB) {
-        db.updateClient(id, updates).catch((e) => console.warn("DB updateClient error:", e));
-      }
+      if (usingDB) dbUpdateClient(supabaseUrl, supabaseAnonKey, id, updates).catch((e) => console.warn("DB updateClient:", e));
     },
-    [usingDB, db]
+    [usingDB, supabaseUrl, supabaseAnonKey]
   );
 
   const addClient = useCallback(
     (newClient) => {
       setClients((cs) => [newClient, ...cs]);
-      // Persist to Supabase if connected
-      if (usingDB) {
-        db.saveClient(newClient).catch((e) => console.warn("DB saveClient error:", e));
-      }
-      // TODO (production): POST to Vagaro API here, update newClient.vagaroId and vagaroSynced
+      if (usingDB) dbSaveClient(supabaseUrl, supabaseAnonKey, newClient).catch((e) => console.warn("DB saveClient:", e));
     },
-    [usingDB, db]
+    [usingDB, supabaseUrl, supabaseAnonKey]
   );
 
   const saveTemplate = useCallback(
@@ -4033,9 +3912,9 @@ function App() {
   const handleSaveTask = useCallback(
     (t) => {
       setTasks((ts) => ts.some((x) => x.id === t.id) ? ts.map((x) => x.id === t.id ? t : x) : [...ts, t]);
-      if (usingDB) db.saveTask(t).catch((e) => console.warn("DB saveTask error:", e));
+      if (usingDB) dbSaveTask(supabaseUrl, supabaseAnonKey, t).catch((e) => console.warn("DB saveTask:", e));
     },
-    [usingDB, db]
+    [usingDB, supabaseUrl, supabaseAnonKey]
   );
 
   const handleToggleTask = useCallback(
@@ -4043,19 +3922,19 @@ function App() {
       setTasks((ts) => {
         const updated = ts.map((t) => t.id === id ? { ...t, done: !t.done } : t);
         const task = updated.find((t) => t.id === id);
-        if (usingDB && task) db.saveTask(task).catch((e) => console.warn("DB saveTask error:", e));
+        if (usingDB && task) dbSaveTask(supabaseUrl, supabaseAnonKey, task).catch((e) => console.warn("DB saveTask:", e));
         return updated;
       });
     },
-    [usingDB, db]
+    [usingDB, supabaseUrl, supabaseAnonKey]
   );
 
   const handleDeleteTask = useCallback(
     (id) => {
       setTasks((ts) => ts.filter((t) => t.id !== id));
-      if (usingDB) db.deleteTask(id).catch((e) => console.warn("DB deleteTask error:", e));
+      if (usingDB) dbDeleteTask(supabaseUrl, supabaseAnonKey, id).catch((e) => console.warn("DB deleteTask:", e));
     },
-    [usingDB, db]
+    [usingDB, supabaseUrl, supabaseAnonKey]
   );
 
   const CSS = `
