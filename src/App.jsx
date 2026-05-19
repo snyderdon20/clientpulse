@@ -3733,6 +3733,211 @@ function useSupabaseDB(supabaseUrl, supabaseAnonKey) {
   return { dbReady, dbError, syncing, loadAll, saveClient, updateClient, saveTask, deleteTask };
 }
 
+// ─── SUPABASE AUTH ────────────────────────────────────────────────────────────
+function useSupabaseAuth(supabaseUrl, supabaseAnonKey) {
+  const [user,    setUser]    = useState(null);
+  const [staff,   setStaff]   = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState(null);
+
+  const getClient = () => {
+    if (!supabaseUrl || !supabaseAnonKey) return null;
+    return window.__supabase?.createClient(supabaseUrl, supabaseAnonKey) || null;
+  };
+
+  useEffect(() => {
+    if (!supabaseUrl || !supabaseAnonKey) { setLoading(false); return; }
+    const loadSupabase = () => {
+      const sb = getClient();
+      if (!sb) return;
+      // Check existing session
+      sb.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          setUser(session.user);
+          loadStaff(sb, session.user.id);
+        } else {
+          setLoading(false);
+        }
+      });
+      // Listen for auth changes
+      const { data: { subscription } } = sb.auth.onAuthStateChange((_event, session) => {
+        if (session?.user) {
+          setUser(session.user);
+          loadStaff(sb, session.user.id);
+        } else {
+          setUser(null); setStaff(null); setLoading(false);
+        }
+      });
+      return () => subscription.unsubscribe();
+    };
+
+    if (window.__supabase) { loadSupabase(); return; }
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js";
+    script.onload = () => { window.__supabase = window.supabase; loadSupabase(); };
+    document.head.appendChild(script);
+  }, [supabaseUrl, supabaseAnonKey]);
+
+  const loadStaff = async (sb, userId) => {
+    try {
+      const { data } = await sb.from("staff").select("*").eq("id", userId).single();
+      setStaff(data);
+    } catch (e) {
+      setStaff({ role: "staff", full_name: "Staff" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const signIn = async (email, password) => {
+    setError(null);
+    const sb = getClient();
+    if (!sb) { setError("Database not configured — add Supabase credentials first"); return false; }
+    const { error: err } = await sb.auth.signInWithPassword({ email, password });
+    if (err) { setError(err.message); return false; }
+    return true;
+  };
+
+  const signOut = async () => {
+    const sb = getClient();
+    if (sb) await sb.auth.signOut();
+    setUser(null); setStaff(null);
+  };
+
+  const resetPassword = async (email) => {
+    const sb = getClient();
+    if (!sb) return false;
+    const { error: err } = await sb.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin,
+    });
+    if (err) { setError(err.message); return false; }
+    return true;
+  };
+
+  return { user, staff, loading, error, signIn, signOut, resetPassword, setError };
+}
+
+// ─── LOGIN SCREEN ─────────────────────────────────────────────────────────────
+function LoginScreen({ onLogin, error, loading, onForgotPassword, noSupabase }) {
+  const [email,    setEmail]    = useState("");
+  const [password, setPassword] = useState("");
+  const [showPw,   setShowPw]   = useState(false);
+  const [forgot,   setForgot]   = useState(false);
+  const [sentReset, setSentReset] = useState(false);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    await onLogin(email, password);
+  };
+
+  const handleForgot = async (e) => {
+    e.preventDefault();
+    const ok = await onForgotPassword(email);
+    if (ok) setSentReset(true);
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+      background: "linear-gradient(135deg, #fdf6ef 0%, #f5e8d8 100%)",
+      fontFamily: "'DM Sans', sans-serif", padding: 16,
+    }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');`}</style>
+      <div style={{ width: "100%", maxWidth: 400 }}>
+        {/* Logo */}
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ width: 56, height: 56, borderRadius: 16, background: "linear-gradient(135deg,#a0785a,#7a5640)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px", boxShadow: "0 4px 20px rgba(160,120,90,0.3)" }}>
+            <span style={{ fontSize: 24, color: "#fff", fontWeight: "800" }}>CP</span>
+          </div>
+          <div style={{ fontSize: "22px", fontWeight: "800", color: "#1a120b" }}>Client Pulse</div>
+          <div style={{ fontSize: "13px", color: "#8a7a6a", marginTop: 4 }}>Rapid City Therapeutic Massage</div>
+        </div>
+
+        {/* Card */}
+        <div style={{ background: "#fff", borderRadius: 20, boxShadow: "0 8px 40px rgba(46,36,24,0.12)", padding: 32 }}>
+          {noSupabase ? (
+            <div>
+              <div style={{ fontSize: "14px", fontWeight: "700", color: "#92400e", marginBottom: 8 }}>⚠️ Database not configured</div>
+              <div style={{ fontSize: "13px", color: "#8a7a6a", lineHeight: "1.6" }}>
+                Add your Supabase URL and anon key to enable login. Until then the app runs in demo mode.
+              </div>
+              <button
+                onClick={() => onLogin("demo", "demo")}
+                style={{ width: "100%", marginTop: 20, padding: "13px", borderRadius: 12, background: "linear-gradient(135deg,#a0785a,#7a5640)", color: "#fff", border: "none", fontSize: "14px", fontWeight: "700", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                Continue in demo mode
+              </button>
+            </div>
+          ) : forgot ? (
+            <div>
+              <div style={{ fontSize: "17px", fontWeight: "800", color: "#1a120b", marginBottom: 6 }}>Reset password</div>
+              {sentReset ? (
+                <div style={{ fontSize: "13px", color: "#065f46", background: "#d1fae5", padding: "12px 16px", borderRadius: 10, marginBottom: 16 }}>
+                  ✓ Password reset email sent — check your inbox
+                </div>
+              ) : (
+                <form onSubmit={handleForgot}>
+                  <div style={{ fontSize: "13px", color: "#8a7a6a", marginBottom: 16 }}>Enter your email and we'll send a reset link.</div>
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                    placeholder="your@email.com" required
+                    style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #e8e0d6", fontSize: "14px", marginBottom: 12, fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+                  {error && <div style={{ fontSize: "12px", color: "#dc2626", marginBottom: 10 }}>{error}</div>}
+                  <button type="submit"
+                    style={{ width: "100%", padding: "13px", borderRadius: 12, background: "linear-gradient(135deg,#a0785a,#7a5640)", color: "#fff", border: "none", fontSize: "14px", fontWeight: "700", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                    Send reset link
+                  </button>
+                </form>
+              )}
+              <button onClick={() => { setForgot(false); setSentReset(false); }}
+                style={{ width: "100%", marginTop: 10, padding: "10px", borderRadius: 10, background: "none", border: "none", fontSize: "13px", color: "#8a7a6a", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                ← Back to login
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleLogin}>
+              <div style={{ fontSize: "17px", fontWeight: "800", color: "#1a120b", marginBottom: 20 }}>Sign in</div>
+              {error && (
+                <div style={{ fontSize: "12px", color: "#dc2626", background: "#fee2e2", padding: "10px 14px", borderRadius: 8, marginBottom: 14 }}>
+                  {error}
+                </div>
+              )}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: "11px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Email</label>
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                  placeholder="your@email.com" required autoFocus
+                  style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #e8e0d6", fontSize: "14px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ fontSize: "11px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Password</label>
+                <div style={{ position: "relative" }}>
+                  <input type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••" required
+                    style={{ width: "100%", padding: "12px 44px 12px 14px", borderRadius: 10, border: "1.5px solid #e8e0d6", fontSize: "14px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+                  <button type="button" onClick={() => setShowPw((s) => !s)}
+                    style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#8a7a6a", fontSize: "13px" }}>
+                    {showPw ? "Hide" : "Show"}
+                  </button>
+                </div>
+              </div>
+              <button type="submit" disabled={loading}
+                style={{ width: "100%", padding: "13px", borderRadius: 12, background: "linear-gradient(135deg,#a0785a,#7a5640)", color: "#fff", border: "none", fontSize: "14px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer", fontFamily: "'DM Sans',sans-serif", opacity: loading ? 0.7 : 1 }}>
+                {loading ? "Signing in…" : "Sign in"}
+              </button>
+              <button type="button" onClick={() => setForgot(true)}
+                style={{ width: "100%", marginTop: 10, padding: "10px", borderRadius: 10, background: "none", border: "none", fontSize: "13px", color: "#8a7a6a", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                Forgot password?
+              </button>
+            </form>
+          )}
+        </div>
+
+        <div style={{ textAlign: "center", marginTop: 20, fontSize: "11px", color: "#b0a090" }}>
+          Client Pulse · Rapid City Therapeutic Massage
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── APP ROOT ────────────────────────────────────────────────────────────────
 export default function App() {
   const [clients, setClients]           = useState(INITIAL_CLIENTS);
@@ -3742,18 +3947,23 @@ export default function App() {
   const [gmailClientId, setGmailClientId] = useState(() => localStorage.getItem("cp_gmail_client_id") || "");
   setGlobalGmailClientId(gmailClientId);
 
-  // Supabase credentials — persisted in localStorage
+  // Supabase credentials
   const [supabaseUrl,     setSupabaseUrl]     = useState(() => localStorage.getItem("cp_sb_url")  || "");
   const [supabaseAnonKey, setSupabaseAnonKey] = useState(() => localStorage.getItem("cp_sb_anon") || "");
   const [dbLoading, setDbLoading] = useState(false);
   const [dbLoadError, setDbLoadError] = useState(null);
   const [usingDB, setUsingDB] = useState(false);
 
+  // Auth
+  const auth = useSupabaseAuth(supabaseUrl, supabaseAnonKey);
+  const noSupabase = !supabaseUrl || !supabaseAnonKey;
+
   const db = useSupabaseDB(supabaseUrl, supabaseAnonKey);
 
-  // Load from Supabase when DB becomes ready
+  // Load from Supabase when DB becomes ready and user is authenticated
   useEffect(() => {
     if (!db.dbReady || usingDB) return;
+    if (!auth.user && !noSupabase) return; // wait for auth
     setDbLoading(true); setDbLoadError(null);
     db.loadAll()
       .then(({ clients: dbClients, tasks: dbTasks }) => {
@@ -3768,7 +3978,8 @@ export default function App() {
         setDbLoadError(e.message || "Failed to load from database");
         setDbLoading(false);
       });
-  }, [db.dbReady]);
+  }, [db.dbReady, auth.user]);
+
   const [selected, setSelected]         = useState(null);
   const [filter, setFilter]             = useState("all");
   const [tagFilter, setTagFilter]       = useState(null);
@@ -3783,6 +3994,34 @@ export default function App() {
     () => clients.filter((c) => ["overdue", "lapsed"].includes(deriveStatus(c))).length,
     [clients]
   );
+
+  // Auth gate — only active when Supabase is configured
+  if (!noSupabase) {
+    if (auth.loading) {
+      return (
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg,#fdf6ef,#f5e8d8)", fontFamily: "'DM Sans',sans-serif" }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ width: 56, height: 56, borderRadius: 16, background: "linear-gradient(135deg,#a0785a,#7a5640)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", boxShadow: "0 4px 20px rgba(160,120,90,0.3)" }}>
+              <span style={{ fontSize: 24, color: "#fff", fontWeight: "800" }}>CP</span>
+            </div>
+            <div style={{ fontSize: "14px", color: "#8a7a6a" }}>Loading…</div>
+          </div>
+        </div>
+      );
+    }
+    if (!auth.user) {
+      return (
+        <LoginScreen
+          onLogin={auth.signIn}
+          onForgotPassword={auth.resetPassword}
+          error={auth.error}
+          loading={auth.loading}
+          noSupabase={false}
+        />
+      );
+    }
+  }
+
 
   const searchResults = useMemo(() => {
     if (!globalSearch.trim()) return [];
@@ -3972,9 +4211,21 @@ export default function App() {
 
         <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "5px 10px 5px 5px", background: "#f5ede4", borderRadius: "10px", border: "1px solid #e8e0d6", flexShrink: 0 }}>
           <div style={{ width: "28px", height: "28px", background: "linear-gradient(135deg,#a0785a,#7a5640)", borderRadius: "7px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: "800", color: "#fff" }}>D</div>
-          <div className="header-user-label">
-            <div style={{ fontSize: "12px", fontWeight: "700", color: "#2e2418", lineHeight: 1 }}>Don</div>
-            <div style={{ fontSize: "9px", color: "#a0785a", fontWeight: "700", textTransform: "uppercase", letterSpacing: "1px", marginTop: "1px" }}>Admin</div>
+          <div className="header-user-label" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: "12px", fontWeight: "700", color: "#2e2418", lineHeight: 1 }}>
+                {auth.staff?.full_name?.split(" ")[0] || "Staff"}
+              </div>
+              <div style={{ fontSize: "9px", color: "#a0785a", fontWeight: "700", textTransform: "uppercase", letterSpacing: "1px", marginTop: "1px" }}>
+                {auth.staff?.role || "staff"}
+              </div>
+            </div>
+            {auth.user && (
+              <button onClick={auth.signOut}
+                style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                Sign out
+              </button>
+            )}
           </div>
         </div>
       </header>
