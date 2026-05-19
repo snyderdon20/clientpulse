@@ -1107,26 +1107,29 @@ const CATEGORY_TEMPLATES = {
 };
 
 function LogModal({ client, templates, onClose, onSave, preset }) {
+  // ALL hooks at the top — no exceptions
   const gmail = useGmail(getGmailClientId());
   const initChannel  = preset?.channel  || "Text/SMS";
   const initCategory = preset?.category && (CHANNEL_CATEGORIES[preset.channel] || []).includes(preset.category)
     ? preset.category
     : CHANNEL_CATEGORIES[initChannel]?.[0] || "General";
-
-  const [channel,  setChannel]  = useState(initChannel);
-  const [category, setCategory] = useState(initCategory);
-  const [outcome,  setOutcome]  = useState(OUTCOMES[initChannel]?.[0] || "Done");
-  const [staff,    setStaff]    = useState("Don Snyder");
-  const [activeTpl, setActiveTpl] = useState(preset?.templateKey || null);
-
-  // Auto-load template if preset specifies one
   const initTpl = preset?.templateKey ? templates[preset.templateKey] : null;
   const initNotes = initTpl
     ? (initChannel === "Email"
         ? "Subject: " + fillTemplate(initTpl.email?.subject || "", client) + "\n\n" + fillTemplate(initTpl.email?.body || "", client)
         : fillTemplate(initTpl.sms || "", client))
     : "";
-  const [notes, setNotes] = useState(initNotes);
+
+  const [channel,      setChannel]      = useState(initChannel);
+  const [category,     setCategory]     = useState(initCategory);
+  const [outcome,      setOutcome]      = useState(OUTCOMES[initChannel]?.[0] || "Done");
+  const [staff,        setStaff]        = useState("Don Snyder");
+  const [activeTpl,    setActiveTpl]    = useState(preset?.templateKey || null);
+  const [notes,        setNotes]        = useState(initNotes);
+  const [gmailSending, setGmailSending] = useState(false);
+  const [gmailError,   setGmailError]   = useState(null);
+  const [gmailSent,    setGmailSent]    = useState(false);
+  const noteMode = !!preset?.noteMode;
 
   useEffect(() => {
     // Only reset category if current one isn't valid for the new channel
@@ -1154,12 +1157,6 @@ function LogModal({ client, templates, onClose, onSave, preset }) {
     setNotes(text);
     setActiveTpl(key);
   };
-
-  const noteMode = !!preset?.noteMode;
-
-  const [gmailSending, setGmailSending] = useState(false);
-  const [gmailError, setGmailError] = useState(null);
-  const [gmailSent, setGmailSent] = useState(false);
 
   const handleSave = () => {
     if (!notes.trim()) return;
@@ -2585,14 +2582,14 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
 
 // ─── OUTREACH COMPOSER ────────────────────────────────────────────────────────
 function OutreachComposer({ client, triggerId, templates, onLog, onClose }) {
-  const [channel, setChannel] = useState("sms");
   const tpl = templates[triggerId] || templates["rebooking"];
-  const [editedSms, setEditedSms] = useState(fillTemplate(tpl?.sms || "", client));
-  const [editedSubject, setEditedSubject] = useState(fillTemplate(tpl?.email?.subject || "", client));
-  const [editedBody, setEditedBody] = useState(fillTemplate(tpl?.email?.body || "", client));
+  const [channel,      setChannel]      = useState("sms");
+  const [editedSms,    setEditedSms]    = useState(fillTemplate(tpl?.sms || "", client));
+  const [editedSubject,setEditedSubject] = useState(fillTemplate(tpl?.email?.subject || "", client));
+  const [editedBody,   setEditedBody]   = useState(fillTemplate(tpl?.email?.body || "", client));
   const [gmailSending, setGmailSending] = useState(false);
-  const [gmailSent, setGmailSent] = useState(false);
-  const [gmailError, setGmailError] = useState(null);
+  const [gmailSent,    setGmailSent]    = useState(false);
+  const [gmailError,   setGmailError]   = useState(null);
   const gmail = useGmail(getGmailClientId());
 
   const doLog = () => {
