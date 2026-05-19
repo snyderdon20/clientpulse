@@ -3601,23 +3601,20 @@ function useSupabaseDB(supabaseUrl, supabaseAnonKey) {
 
   useEffect(() => {
     if (!supabaseUrl || !supabaseAnonKey) { setDbReady(false); return; }
-    // Inject Supabase CDN script if not already loaded
     if (window.__supabase) {
       initSupabase(supabaseUrl, supabaseAnonKey);
       setDbReady(true); return;
     }
+    const existing = document.getElementById("supabase-sdk");
+    if (existing) { existing.addEventListener("load", () => { window.__supabase = window.supabase; initSupabase(supabaseUrl, supabaseAnonKey); setDbReady(true); }); return; }
     const script = document.createElement("script");
+    script.id = "supabase-sdk";
     script.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js";
-    script.onload = () => {
-      window.__supabase = window.supabase;
-      initSupabase(supabaseUrl, supabaseAnonKey);
-      setDbReady(true);
-    };
+    script.onload = () => { window.__supabase = window.supabase; initSupabase(supabaseUrl, supabaseAnonKey); setDbReady(true); };
     script.onerror = () => setDbError("Failed to load Supabase client");
     document.head.appendChild(script);
   }, [supabaseUrl, supabaseAnonKey]);
 
-  // Load all clients with their appointments and history
   const loadAll = async () => {
     const sb = getSupabase();
     if (!sb) throw new Error("Supabase not initialized");
@@ -3632,12 +3629,7 @@ function useSupabaseDB(supabaseUrl, supabaseAnonKey) {
         sb.from("history").select("*").order("ts", { ascending: false }),
         sb.from("tasks").select("*").order("created_at", { ascending: false }),
       ]);
-      if (cErr) throw cErr;
-      if (aErr) throw aErr;
-      if (hErr) throw hErr;
-      if (tErr) throw tErr;
-
-      // Assemble clients with nested appointments and history
+      if (cErr) throw cErr; if (aErr) throw aErr; if (hErr) throw hErr; if (tErr) throw tErr;
       const clients = (clientRows || []).map((row) => {
         const client = rowToClient(row);
         client.appointments = (apptRows || []).filter((a) => a.client_id === row.id).map(rowToAppt);
@@ -3646,25 +3638,17 @@ function useSupabaseDB(supabaseUrl, supabaseAnonKey) {
       });
       const tasks = (taskRows || []).map(rowToTask);
       return { clients, tasks };
-    } finally {
-      setSyncing(false);
-    }
+    } finally { setSyncing(false); }
   };
 
-  // Save a new client
   const saveClient = async (client) => {
-    const sb = getSupabase();
-    if (!sb) throw new Error("Supabase not initialized");
-    const row = { id: client.id, ...clientToRow(client) };
-    const { error } = await sb.from("clients").upsert(row);
+    const sb = getSupabase(); if (!sb) throw new Error("Supabase not initialized");
+    const { error } = await sb.from("clients").upsert({ id: client.id, ...clientToRow(client) });
     if (error) throw error;
   };
 
-  // Update client fields
   const updateClient = async (id, updates) => {
-    const sb = getSupabase();
-    if (!sb) throw new Error("Supabase not initialized");
-    // Map camelCase updates to snake_case
+    const sb = getSupabase(); if (!sb) throw new Error("Supabase not initialized");
     const rowUpdates = {};
     if (updates.firstName          !== undefined) rowUpdates.first_name = updates.firstName;
     if (updates.lastName           !== undefined) rowUpdates.last_name = updates.lastName;
@@ -3685,47 +3669,24 @@ function useSupabaseDB(supabaseUrl, supabaseAnonKey) {
     if (updates.goldenNuggets      !== undefined) rowUpdates.golden_nuggets = updates.goldenNuggets;
     if (updates.vagaroId           !== undefined) rowUpdates.vagaro_id = updates.vagaroId;
     if (updates.vagaroSynced       !== undefined) rowUpdates.vagaro_synced = updates.vagaroSynced;
-
-    if (Object.keys(rowUpdates).length === 0) return;
-    const { error } = await sb.from("clients").update(rowUpdates).eq("id", id);
-    if (error) throw error;
-
-    // History events — append to history table
+    if (Object.keys(rowUpdates).length > 0) {
+      const { error } = await sb.from("clients").update(rowUpdates).eq("id", id);
+      if (error) throw error;
+    }
     if (updates.history && updates.history.length > 0) {
-      const latestEvent = updates.history[updates.history.length - 1];
-      const { error: hErr } = await sb.from("history").insert({
-        id:        latestEvent.id || uid(),
-        client_id: id,
-        type:      latestEvent.type,
-        detail:    latestEvent.detail,
-        by:        latestEvent.by || "System",
-        ts:        latestEvent.ts || Date.now(),
-        source:    "manual",
-        direction: latestEvent.type.startsWith("comm.") ? "outbound" : "internal",
-      });
-      if (hErr) console.warn("History insert error:", hErr);
+      const e = updates.history[updates.history.length - 1];
+      await sb.from("history").insert({ id: e.id || uid(), client_id: id, type: e.type, detail: e.detail, by: e.by || "System", ts: e.ts || Date.now(), source: "manual", direction: e.type.startsWith("comm.") ? "outbound" : "internal" }).catch(console.warn);
     }
   };
 
-  // Save a task
   const saveTask = async (task) => {
-    const sb = getSupabase();
-    if (!sb) throw new Error("Supabase not initialized");
-    const { error } = await sb.from("tasks").upsert({
-      id:         task.id,
-      title:      task.title,
-      due_date:   task.dueDate,
-      client_id:  task.clientId || null,
-      created_by: task.createdBy,
-      done:       task.done,
-    });
+    const sb = getSupabase(); if (!sb) throw new Error("Supabase not initialized");
+    const { error } = await sb.from("tasks").upsert({ id: task.id, title: task.title, due_date: task.dueDate, client_id: task.clientId || null, created_by: task.createdBy, done: task.done });
     if (error) throw error;
   };
 
-  // Delete a task
   const deleteTask = async (id) => {
-    const sb = getSupabase();
-    if (!sb) throw new Error("Supabase not initialized");
+    const sb = getSupabase(); if (!sb) throw new Error("Supabase not initialized");
     const { error } = await sb.from("tasks").delete().eq("id", id);
     if (error) throw error;
   };
@@ -3733,37 +3694,38 @@ function useSupabaseDB(supabaseUrl, supabaseAnonKey) {
   return { dbReady, dbError, syncing, loadAll, saveClient, updateClient, saveTask, deleteTask };
 }
 
-// ─── SUPABASE AUTH ────────────────────────────────────────────────────────────
 function useSupabaseAuth(supabaseUrl, supabaseAnonKey) {
   const [user,    setUser]    = useState(null);
   const [staff,   setStaff]   = useState(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(null);
 
-  const getClient = () => {
-    if (!supabaseUrl || !supabaseAnonKey) return null;
-    return window.__supabase?.createClient(supabaseUrl, supabaseAnonKey) || null;
-  };
-
   useEffect(() => {
     if (!supabaseUrl || !supabaseAnonKey) { setLoading(false); return; }
-    const loadSupabase = () => {
-      const sb = getClient();
-      if (!sb) return;
-      // Check existing session
+
+    const setup = () => {
+      const sb = window.__supabase?.createClient(supabaseUrl, supabaseAnonKey);
+      if (!sb) { setLoading(false); return; }
+
       sb.auth.getSession().then(({ data: { session } }) => {
         if (session?.user) {
           setUser(session.user);
-          loadStaff(sb, session.user.id);
+          sb.from("staff").select("*").eq("id", session.user.id).single()
+            .then(({ data }) => setStaff(data || { role: "staff", full_name: "Staff" }))
+            .catch(() => setStaff({ role: "staff", full_name: "Staff" }))
+            .finally(() => setLoading(false));
         } else {
           setLoading(false);
         }
       });
-      // Listen for auth changes
+
       const { data: { subscription } } = sb.auth.onAuthStateChange((_event, session) => {
         if (session?.user) {
           setUser(session.user);
-          loadStaff(sb, session.user.id);
+          sb.from("staff").select("*").eq("id", session.user.id).single()
+            .then(({ data }) => setStaff(data || { role: "staff", full_name: "Staff" }))
+            .catch(() => setStaff({ role: "staff", full_name: "Staff" }))
+            .finally(() => setLoading(false));
         } else {
           setUser(null); setStaff(null); setLoading(false);
         }
@@ -3771,45 +3733,32 @@ function useSupabaseAuth(supabaseUrl, supabaseAnonKey) {
       return () => subscription.unsubscribe();
     };
 
-    if (window.__supabase) { loadSupabase(); return; }
-    const script = document.createElement("script");
-    script.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js";
-    script.onload = () => { window.__supabase = window.supabase; loadSupabase(); };
-    document.head.appendChild(script);
+    // Wait for Supabase SDK to be available
+    if (window.__supabase) { setup(); return; }
+    const check = setInterval(() => { if (window.__supabase) { clearInterval(check); setup(); } }, 100);
+    const timeout = setTimeout(() => { clearInterval(check); setLoading(false); }, 8000);
+    return () => { clearInterval(check); clearTimeout(timeout); };
   }, [supabaseUrl, supabaseAnonKey]);
-
-  const loadStaff = async (sb, userId) => {
-    try {
-      const { data } = await sb.from("staff").select("*").eq("id", userId).single();
-      setStaff(data);
-    } catch (e) {
-      setStaff({ role: "staff", full_name: "Staff" });
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const signIn = async (email, password) => {
     setError(null);
-    const sb = getClient();
-    if (!sb) { setError("Database not configured — add Supabase credentials first"); return false; }
+    const sb = window.__supabase?.createClient(supabaseUrl, supabaseAnonKey);
+    if (!sb) { setError("Database not configured"); return false; }
     const { error: err } = await sb.auth.signInWithPassword({ email, password });
     if (err) { setError(err.message); return false; }
     return true;
   };
 
   const signOut = async () => {
-    const sb = getClient();
+    const sb = window.__supabase?.createClient(supabaseUrl, supabaseAnonKey);
     if (sb) await sb.auth.signOut();
     setUser(null); setStaff(null);
   };
 
   const resetPassword = async (email) => {
-    const sb = getClient();
+    const sb = window.__supabase?.createClient(supabaseUrl, supabaseAnonKey);
     if (!sb) return false;
-    const { error: err } = await sb.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin,
-    });
+    const { error: err } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
     if (err) { setError(err.message); return false; }
     return true;
   };
