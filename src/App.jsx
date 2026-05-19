@@ -3850,34 +3850,6 @@ function App() {
       });
   }, [supabaseUrl, supabaseAnonKey, auth.user]);
 
-  // Auth gate — only active when Supabase is configured
-  if (!noSupabase) {
-    if (auth.loading) {
-      return (
-        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg,#fdf6ef,#f5e8d8)", fontFamily: "'DM Sans',sans-serif" }}>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ width: 56, height: 56, borderRadius: 16, background: "linear-gradient(135deg,#a0785a,#7a5640)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", boxShadow: "0 4px 20px rgba(160,120,90,0.3)" }}>
-              <span style={{ fontSize: 24, color: "#fff", fontWeight: "800" }}>CP</span>
-            </div>
-            <div style={{ fontSize: "14px", color: "#8a7a6a" }}>Loading…</div>
-          </div>
-        </div>
-      );
-    }
-    if (!auth.user) {
-      return (
-        <LoginScreen
-          onLogin={auth.signIn}
-          onForgotPassword={auth.resetPassword}
-          error={auth.error}
-          loading={auth.loading}
-          noSupabase={false}
-        />
-      );
-    }
-  }
-
-
   const searchResults = useMemo(() => {
     if (!globalSearch.trim()) return [];
     const q = globalSearch.toLowerCase();
@@ -3947,6 +3919,33 @@ function App() {
     [usingDB, supabaseUrl, supabaseAnonKey]
   );
 
+
+    // Auth gate — only active when Supabase is configured
+  if (!noSupabase) {
+    if (auth.loading) {
+      return (
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg,#fdf6ef,#f5e8d8)", fontFamily: "'DM Sans',sans-serif" }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ width: 56, height: 56, borderRadius: 16, background: "linear-gradient(135deg,#a0785a,#7a5640)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", boxShadow: "0 4px 20px rgba(160,120,90,0.3)" }}>
+              <span style={{ fontSize: 24, color: "#fff", fontWeight: "800" }}>CP</span>
+            </div>
+            <div style={{ fontSize: "14px", color: "#8a7a6a" }}>Loading…</div>
+          </div>
+        </div>
+      );
+    }
+    if (!auth.user) {
+      return (
+        <LoginScreen
+          onLogin={auth.signIn}
+          onForgotPassword={auth.resetPassword}
+          error={auth.error}
+          loading={auth.loading}
+          noSupabase={false}
+        />
+      );
+    }
+  }
   const CSS = `
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
     * { box-sizing: border-box; }
