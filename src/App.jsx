@@ -386,213 +386,7 @@ const apptStatusStyle = (s) =>
                        { bg: "#fee2e2", c: "#991b1b" };
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
-const INITIAL_CLIENTS = [
-  {
-    id: "c1", firstName: "Sarah", lastName: "Mitchell",
-    email: "sarah@email.com", phone: "(402) 555-0142",
-    birthday: "1988-03-15", customerSince: "2022-01-10",
-    avgVisitIntervalDays: 21, referredBy: "Google",
-    tags: ["Deep Tissue", "Regular", "VIP"],
-    careCategory: "stress",
-    redLightStatus: "interested",
-    waitlisted: false,
-    goldenNuggets: [
-      { id: "gn1", text: "Daughter's wedding in August — wants to look and feel her best", date: "2026-04-20", by: "Don Snyder" },
-      { id: "gn2", text: "Loves lavender — always use it", date: "2026-03-30", by: "Jane Smith" },
-      { id: "gn3", text: "Works at a desk all day — right shoulder is her trouble spot", date: "2026-02-10", by: "Jane Smith" },
-    ],
-    notes: "Prefers firm pressure on shoulders. Loves lavender. Great tipper — always goes 20%.",
-    touchpoints: { reminder: true, postVisit: true, rebooking: false, birthday: false, promo: false },
-    vagaroId: "vg-1001",
-    appointments: [
-      { id: "a1", date: TODAY,        time: "10:00", service: "Deep Tissue",     duration: 90, therapist: "Jane Smith", status: "scheduled"  },
-      { id: "a2", date: "2026-04-20", time: "11:00", service: "Swedish Massage", duration: 60, therapist: "Jane Smith", status: "completed"  },
-      { id: "a3", date: "2026-03-30", time: "11:00", service: "Deep Tissue",     duration: 90, therapist: "Jane Smith", status: "completed"  },
-    ],
-    history: [
-      mkEvent("appt.scheduled",    "Deep Tissue 90 min with Jane Smith scheduled for today at 10:00 AM",                          { by: "System",     ts: pastTS(2, 9, 5)   }),
-      mkEvent("comm.text",         "Appointment Reminder · Outcome: Sent · Automated reminder",                                   { by: "System",     ts: pastTS(1, 8, 0)   }),
-      mkEvent("touchpoint.logged", "Touchpoint marked complete: Appointment Reminder",                                            { by: "Don Snyder", ts: pastTS(1, 8, 1)   }),
-      mkEvent("comm.text",         "Rebooking Outreach · Outcome: Rebooked · Note: Texted re: next appt — she rebooked right away!", { by: "Don Snyder", ts: pastTS(24, 14, 30)}),
-      mkEvent("touchpoint.logged", "Touchpoint marked complete: Post-Visit Follow-Up",                                            { by: "Don Snyder", ts: pastTS(25, 10, 0)  }),
-      mkEvent("comm.phone",        "Post-Visit Follow-Up · Outcome: Spoke with Client · Note: Called after deep tissue. She loved it, asked about memberships.", { by: "Don Snyder", ts: pastTS(25, 10, 15)}),
-      mkEvent("appt.completed",    "Swedish Massage 60 min with Jane Smith completed",                                            { by: "System",     ts: pastTS(26, 12, 5)  }),
-      mkEvent("payment.charged",   "$96.00 charged (incl. $16.00 tip) — Swedish Massage · Method: Card on file",                 { by: "System",     ts: pastTS(26, 12, 7)  }),
-      mkEvent("appt.checkin",      "Checked in for Swedish Massage at 10:58 AM",                                                  { by: "System",     ts: pastTS(26, 10, 58) }),
-      mkEvent("appt.scheduled",    "Swedish Massage 60 min with Jane Smith scheduled for Apr 20 at 11:00 AM",                    { by: "System",     ts: pastTS(40, 9, 0)   }),
-      mkEvent("appt.completed",    "Deep Tissue 90 min with Jane Smith completed",                                                { by: "System",     ts: pastTS(47, 13, 0)  }),
-      mkEvent("payment.charged",   "$150.00 charged (incl. $25.00 tip) — Deep Tissue · Method: Card on file",                   { by: "System",     ts: pastTS(47, 13, 2)  }),
-      mkEvent("client.created",    "Client record created via Vagaro",                                                            { by: "System",     ts: pastTS(500, 9, 0)  }),
-    ],
-  },
-  {
-    id: "c2", firstName: "Marcus", lastName: "Johnson",
-    email: "marcus@email.com", phone: "(402) 555-0198",
-    customerSince: "2023-06-01", avgVisitIntervalDays: 28, referredBy: "Lisa Drummond",
-    tags: ["Sports", "Deep Tissue"],
-    careCategory: "syndrome",
-    redLightStatus: "offered",
-    waitlisted: false,
-    goldenNuggets: [
-      { id: "gn4", text: "Training for a marathon — runs 40+ miles/week", date: "2026-02-10", by: "Jane Smith" },
-      { id: "gn5", text: "No scents ever — allergic to most essential oils", date: "2023-06-01", by: "Don Snyder" },
-    ],
-    notes: "Tight hip flexors from running. Prefers no scent. Works out daily.",
-    touchpoints: { reminder: true, postVisit: true, rebooking: true, birthday: false, promo: false },
-    vagaroId: "vg-1002",
-    appointments: [
-      { id: "a4", date: "2026-02-10", time: "14:00", service: "Hot Stone",       duration: 75, therapist: "Jane Smith", status: "completed" },
-      { id: "a5", date: "2025-12-15", time: "14:00", service: "Swedish Massage", duration: 60, therapist: "Jane Smith", status: "completed" },
-    ],
-    history: [
-      mkEvent("comm.phone",        "Rebooking Outreach · Outcome: Left Voicemail · Note: Called, left voicemail. Try again next week.", { by: "Don Snyder", ts: pastTS(71, 15, 0)  }),
-      mkEvent("touchpoint.logged", "Touchpoint marked complete: Rebooking Outreach",                                              { by: "Don Snyder", ts: pastTS(71, 15, 1)  }),
-      mkEvent("appt.completed",    "Hot Stone 75 min with Jane Smith completed",                                                   { by: "System",     ts: pastTS(95, 15, 30) }),
-      mkEvent("payment.charged",   "$125.00 charged (incl. $20.00 tip) — Hot Stone · Method: Card on file",                      { by: "System",     ts: pastTS(95, 15, 32) }),
-      mkEvent("appt.checkin",      "Checked in for Hot Stone at 1:55 PM",                                                         { by: "System",     ts: pastTS(95, 13, 55) }),
-      mkEvent("appt.scheduled",    "Hot Stone 75 min with Jane Smith scheduled for Feb 10 at 2:00 PM",                           { by: "System",     ts: pastTS(100, 9, 0)  }),
-      mkEvent("client.created",    "Client record created via Vagaro — referred by Lisa Drummond",                                { by: "System",     ts: pastTS(700, 9, 0)  }),
-    ],
-  },
-  {
-    id: "c3", firstName: "Emily", lastName: "Chen",
-    email: "emily.chen@email.com", phone: "(402) 555-0077",
-    birthday: TODAY.slice(0, 5) + TODAY.slice(5),
-    customerSince: "2024-02-14", avgVisitIntervalDays: 30, referredBy: "Sarah Mitchell",
-    tags: ["Prenatal", "Relaxation"],
-    careCategory: "prenatal",
-    redLightStatus: null,
-    waitlisted: false,
-    goldenNuggets: [
-      { id: "gn6", text: "Due in September — first baby, very nervous", date: "2026-04-01", by: "Jane Smith" },
-      { id: "gn7", text: "Having trouble sleeping — hip pain at night", date: "2026-04-01", by: "Jane Smith" },
-    ],
-    notes: "Referred by Sarah Mitchell. Prenatal client — side-lying only, no essential oils.",
-    touchpoints: { reminder: true, postVisit: false, rebooking: false, birthday: false, promo: false },
-    vagaroId: "vg-1003",
-    appointments: [
-      { id: "a6", date: TODAY,        time: "10:00", service: "Swedish Massage", duration: 60, therapist: "Jane Smith", status: "checked-in" },
-      { id: "a7", date: "2026-04-01", time: "10:00", service: "Swedish Massage", duration: 60, therapist: "Jane Smith", status: "completed"  },
-    ],
-    history: [
-      mkEvent("appt.checkin",      "Checked in for Swedish Massage at 9:57 AM",                                                   { by: "System",     ts: nowMs() - 3600000  }),
-      mkEvent("comm.email",        "Appointment Reminder · Outcome: Replied · Note: Sent reminder, she confirmed.",               { by: "Don Snyder", ts: nowMs() - 5400000  }),
-      mkEvent("touchpoint.logged", "Touchpoint marked complete: Appointment Reminder",                                            { by: "Don Snyder", ts: nowMs() - 5399000  }),
-      mkEvent("appt.scheduled",    "Swedish Massage 60 min with Jane Smith scheduled for today at 10:00 AM",                     { by: "System",     ts: pastTS(3, 9, 0)    }),
-      mkEvent("appt.completed",    "Swedish Massage 60 min with Jane Smith completed",                                            { by: "System",     ts: pastTS(45, 11, 0)  }),
-      mkEvent("payment.charged",   "$92.00 charged (incl. $12.00 tip) — Swedish Massage · Method: Card on file",                 { by: "System",     ts: pastTS(45, 11, 2)  }),
-      mkEvent("client.created",    "Client record created via Vagaro — referred by Sarah Mitchell",                               { by: "System",     ts: pastTS(460, 10, 0) }),
-    ],
-  },
-  {
-    id: "c4", firstName: "Robert", lastName: "Tanner",
-    email: "btanner@email.com", phone: "(402) 555-0334",
-    customerSince: "2021-08-20", avgVisitIntervalDays: 35, referredBy: "",
-    tags: ["Deep Tissue", "Corporate"],
-    careCategory: "syndrome",
-    redLightStatus: "declined",
-    waitlisted: false,
-    goldenNuggets: [
-      { id: "gn8", text: "Chronic lower back — L4/L5 herniation diagnosed 2019", date: "2021-08-20", by: "Jane Smith" },
-      { id: "gn9", text: "Retired — has flexibility on schedule, prefers mornings", date: "2022-01-01", by: "Don Snyder" },
-    ],
-    notes: "Long-time client. Chronic lower back pain. Very particular about pressure — always check in first.",
-    touchpoints: { reminder: false, postVisit: true, rebooking: true, birthday: false, promo: true },
-    vagaroId: "vg-1004",
-    appointments: [
-      { id: "a8", date: "2025-10-05", time: "09:00", service: "Deep Tissue", duration: 90, therapist: "Jane Smith", status: "completed" },
-      { id: "a9", date: "2025-08-12", time: "09:00", service: "Deep Tissue", duration: 90, therapist: "Jane Smith", status: "completed" },
-    ],
-    history: [
-      mkEvent("appt.completed",   "Deep Tissue 90 min with Jane Smith completed",                                                 { by: "System",     ts: pastTS(223, 10, 30) }),
-      mkEvent("payment.charged",  "$150.00 charged (incl. $25.00 tip) — Deep Tissue · Method: Card on file",                    { by: "System",     ts: pastTS(223, 10, 32) }),
-      mkEvent("appt.checkin",     "Checked in for Deep Tissue at 8:58 AM",                                                       { by: "System",     ts: pastTS(223, 8, 58)  }),
-      mkEvent("appt.scheduled",   "Deep Tissue 90 min with Jane Smith scheduled for Oct 5 at 9:00 AM",                          { by: "System",     ts: pastTS(235, 14, 0)  }),
-      mkEvent("appt.completed",   "Deep Tissue 90 min with Jane Smith completed",                                                 { by: "System",     ts: pastTS(277, 10, 30) }),
-      mkEvent("payment.charged",  "$145.00 charged (incl. $20.00 tip) — Deep Tissue · Method: Card on file",                    { by: "System",     ts: pastTS(277, 10, 32) }),
-      mkEvent("client.created",   "Client record created via Vagaro",                                                             { by: "System",     ts: pastTS(1200, 9, 0)  }),
-    ],
-  },
-  {
-    id: "c5", firstName: "Priya", lastName: "Patel",
-    email: "priya@email.com", phone: "(402) 555-0251",
-    customerSince: "2026-05-01", avgVisitIntervalDays: null, referredBy: "Instagram",
-    tags: ["Prenatal", "Needs Follow-up"],
-    careCategory: "prenatal",
-    redLightStatus: null,
-    waitlisted: true,
-    goldenNuggets: [
-      { id: "gn10", text: "Found us on Instagram — saw our prenatal post", date: "2026-05-01", by: "Don Snyder" },
-    ],
-    notes: "Inquired via Instagram. Interested in prenatal massage. Send info packet.",
-    touchpoints: { reminder: false, postVisit: false, rebooking: false, birthday: false, promo: false },
-    vagaroId: "vg-1005",
-    appointments: [],
-    history: [
-      mkEvent("comm.text",     "General · Outcome: Replied · Note: Inquired about prenatal pricing. Sent info and package options.", { by: "Don Snyder", ts: pastTS(14, 11, 30) }),
-      mkEvent("client.created","Client record created via Vagaro — source: Instagram inquiry",                                     { by: "System",     ts: pastTS(15, 10, 0)  }),
-    ],
-  },
-  {
-    id: "c6", firstName: "Lisa", lastName: "Drummond",
-    email: "ldrummond@email.com", phone: "(402) 555-0189",
-    customerSince: "2022-11-30", avgVisitIntervalDays: 28, referredBy: "",
-    tags: ["Hot Stone", "Regular", "Monthly"],
-    careCategory: "stress",
-    redLightStatus: "active",
-    waitlisted: false,
-    goldenNuggets: [
-      { id: "gn11", text: "Nurse — on her feet all day, carries everything in her shoulders", date: "2022-11-30", by: "Don Snyder" },
-      { id: "gn12", text: "Has referred Marcus Johnson and Tom Bergstrom", date: "2023-06-01", by: "Don Snyder" },
-      { id: "gn13", text: "Loves hot stone — says it's the only thing that gets her shoulders to release", date: "2024-01-15", by: "Amy Reed" },
-    ],
-    notes: "Hot stone regular. Usually books Amy. Has a bad right shoulder — don't overwork it.",
-    touchpoints: { reminder: true, postVisit: true, rebooking: true, birthday: true, promo: false },
-    vagaroId: "vg-1006",
-    appointments: [
-      { id: "a10", date: "2026-03-28", time: "13:00", service: "Hot Stone", duration: 75, therapist: "Amy Reed", status: "completed" },
-    ],
-    history: [
-      mkEvent("comm.phone",    "Rebooking Outreach · Outcome: No Answer · Note: Tried to call, no answer. Will try again next week.", { by: "Don Snyder", ts: pastTS(31, 14, 0)  }),
-      mkEvent("appt.completed","Hot Stone 75 min with Amy Reed completed",                                                           { by: "System",     ts: pastTS(49, 14, 30) }),
-      mkEvent("payment.charged","$120.00 charged (incl. $15.00 tip) — Hot Stone · Method: Card on file",                            { by: "System",     ts: pastTS(49, 14, 32) }),
-      mkEvent("appt.checkin",  "Checked in for Hot Stone at 12:57 PM",                                                              { by: "System",     ts: pastTS(49, 12, 57) }),
-      mkEvent("appt.scheduled","Hot Stone 75 min with Amy Reed scheduled for Mar 28 at 1:00 PM",                                    { by: "System",     ts: pastTS(55, 9, 0)   }),
-      mkEvent("client.created","Client record created via Vagaro",                                                                  { by: "System",     ts: pastTS(850, 9, 0)  }),
-    ],
-  },
-  {
-    id: "c7", firstName: "Tom", lastName: "Bergstrom",
-    email: "tomberg@email.com", phone: "(402) 555-0422",
-    customerSince: "2023-03-15", avgVisitIntervalDays: 30, referredBy: "Lisa Drummond",
-    tags: ["Deep Tissue", "Monthly"],
-    careCategory: "stress",
-    redLightStatus: "interested",
-    waitlisted: false,
-    goldenNuggets: [
-      { id: "gn14", text: "Construction manager — physical and mental stress both high", date: "2023-03-15", by: "Don Snyder" },
-      { id: "gn15", text: "Wants to go monthly — lock in recurring appointment", date: "2026-04-25", by: "Amy Reed" },
-    ],
-    notes: "Deep tissue only. Very communicative about pressure. Wants to go monthly.",
-    touchpoints: { reminder: true, postVisit: true, rebooking: false, birthday: false, promo: false },
-    vagaroId: "vg-1007",
-    appointments: [
-      { id: "a11", date: "2026-05-20", time: "09:00", service: "Deep Tissue", duration: 60, therapist: "Amy Reed", status: "scheduled"  },
-      { id: "a12", date: "2026-04-25", time: "09:00", service: "Deep Tissue", duration: 60, therapist: "Amy Reed", status: "completed" },
-    ],
-    history: [
-      mkEvent("appt.scheduled",    "Deep Tissue 60 min with Amy Reed scheduled for May 20 at 9:00 AM",                          { by: "System",     ts: pastTS(5, 11, 0)   }),
-      mkEvent("comm.text",         "Post-Visit Follow-Up · Outcome: Replied · Note: He loved it and wants to go monthly.",      { by: "Don Snyder", ts: pastTS(18, 10, 0)  }),
-      mkEvent("touchpoint.logged", "Touchpoint marked complete: Post-Visit Follow-Up",                                          { by: "Don Snyder", ts: pastTS(18, 10, 1)  }),
-      mkEvent("appt.completed",    "Deep Tissue 60 min with Amy Reed completed",                                                  { by: "System",     ts: pastTS(21, 10, 0)  }),
-      mkEvent("payment.charged",   "$108.00 charged (incl. $18.00 tip) — Deep Tissue · Method: Card on file",                   { by: "System",     ts: pastTS(21, 10, 2)  }),
-      mkEvent("appt.checkin",      "Checked in for Deep Tissue at 8:55 AM",                                                      { by: "System",     ts: pastTS(21, 8, 55)  }),
-      mkEvent("appt.scheduled",    "Deep Tissue 60 min with Amy Reed scheduled for Apr 25 at 9:00 AM",                          { by: "System",     ts: pastTS(26, 14, 0)  }),
-      mkEvent("client.created",    "Client record created via Vagaro — referred by Lisa Drummond",                               { by: "System",     ts: pastTS(780, 9, 0)  }),
-    ],
-  },
-];
-
+const INITIAL_CLIENTS = [];
 const WEBHOOK_LOG = [
   { id: "wh1", event: "appointment.booked",     time: new Date(Date.now() - 3 * 60000).toISOString(),    client: "Sarah Mitchell", detail: "Appointment booked for today at 10:00 AM" },
   { id: "wh2", event: "appointment.checked_in", time: new Date(Date.now() - 90 * 60000).toISOString(),   client: "Emily Chen",     detail: "Checked in for Swedish Massage" },
@@ -601,15 +395,251 @@ const WEBHOOK_LOG = [
   { id: "wh5", event: "appointment.completed",  time: new Date(Date.now() - 24 * 3600000).toISOString(), client: "Lisa Drummond",  detail: "Hot Stone 75 min completed" },
 ];
 
-const INITIAL_TASKS = [
-  { id: "t1", title: "Order more massage oil — running low on lavender", dueDate: TODAY, clientId: null, createdBy: "Don Snyder", done: false, createdAt: pastTS(1, 9, 0) },
-  { id: "t2", title: "Call insurance rep about coverage question", dueDate: TODAY, clientId: null, createdBy: "Don Snyder", done: false, createdAt: pastTS(1, 14, 0) },
-  { id: "t3", title: "Update cancellation policy sign in lobby", dueDate: TODAY, clientId: null, createdBy: "Don Snyder", done: true,  createdAt: pastTS(2, 10, 0) },
-];
-
+const INITIAL_TASKS = [];
 
 // ─── TASK MODAL ───────────────────────────────────────────────────────────────
 // ─── NEW CLIENT MODAL ─────────────────────────────────────────────────────────
+// ─── CSV IMPORT MODAL ────────────────────────────────────────────────────────
+function CSVImportModal({ onImport, onClose }) {
+  const [step, setStep] = useState("upload"); // upload → preview → done
+  const [rows, setRows] = useState([]);
+  const [mapping, setMapping] = useState({});
+  const [headers, setHeaders] = useState([]);
+  const [importing, setImporting] = useState(false);
+  const [imported, setImported] = useState(0);
+  const [errors, setErrors] = useState([]);
+
+  // Vagaro field names → our field names
+  const FIELD_MAP = {
+    firstName:   ["first name", "firstname", "first_name", "fname"],
+    lastName:    ["last name", "lastname", "last_name", "lname", "surname"],
+    email:       ["email", "email address", "e-mail"],
+    phone:       ["phone", "phone number", "mobile", "cell", "telephone"],
+    birthday:    ["birthday", "birth date", "date of birth", "dob"],
+    address:     ["address", "street", "street address", "address 1"],
+    city:        ["city"],
+    state:       ["state", "province"],
+    zip:         ["zip", "zip code", "postal", "postal code"],
+    referredBy:  ["referred by", "referral", "referral source", "ref by", "ref. by"],
+    customerSince: ["customer since", "member since", "join date", "created"],
+  };
+
+  const autoMap = (hdrs) => {
+    const m = {};
+    hdrs.forEach((h) => {
+      const hl = h.toLowerCase().trim();
+      Object.entries(FIELD_MAP).forEach(([field, aliases]) => {
+        if (aliases.some((a) => hl.includes(a))) m[field] = h;
+      });
+    });
+    return m;
+  };
+
+  const parseCSV = (text) => {
+    const lines = text.split(/\r?\n/).filter((l) => l.trim());
+    if (lines.length < 2) return { headers: [], rows: [] };
+    // Handle quoted fields
+    const parseLine = (line) => {
+      const result = []; let cur = ""; let inQuote = false;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (c === '"') { inQuote = !inQuote; }
+        else if (c === "," && !inQuote) { result.push(cur.trim()); cur = ""; }
+        else { cur += c; }
+      }
+      result.push(cur.trim());
+      return result;
+    };
+    const hdrs = parseLine(lines[0]);
+    const data = lines.slice(1).map((l) => {
+      const vals = parseLine(l);
+      const row = {};
+      hdrs.forEach((h, i) => { row[h] = vals[i] || ""; });
+      return row;
+    }).filter((r) => Object.values(r).some((v) => v));
+    return { headers: hdrs, rows: data };
+  };
+
+  const handleFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const { headers: hdrs, rows: data } = parseCSV(e.target.result);
+      setHeaders(hdrs);
+      setRows(data);
+      setMapping(autoMap(hdrs));
+      setStep("preview");
+    };
+    reader.readAsText(file);
+  };
+
+  const buildClient = (row) => ({
+    id:            uid(),
+    vagaroId:      null,
+    vagaroSynced:  false,
+    firstName:     (row[mapping.firstName] || "").trim(),
+    lastName:      (row[mapping.lastName]  || "").trim(),
+    email:         (row[mapping.email]     || "").trim(),
+    phone:         (row[mapping.phone]     || "").trim(),
+    birthday:      (row[mapping.birthday]  || "").trim() || null,
+    customerSince: (row[mapping.customerSince] || "").trim() || TODAY,
+    referredBy:    (row[mapping.referredBy]    || "").trim(),
+    address:       (row[mapping.address]       || "").trim(),
+    city:          (row[mapping.city]          || "").trim(),
+    state:         (row[mapping.state]         || "").trim(),
+    zip:           (row[mapping.zip]           || "").trim(),
+    avgVisitIntervalDays: 30,
+    careCategory:  null,
+    redLightStatus: null,
+    waitlisted:    false,
+    goldenNuggets: [],
+    tags:          [],
+    appointments:  [],
+    history:       [mkEvent("client.created", "Imported from Vagaro CSV", { by: "System" })],
+  });
+
+  const handleImport = async () => {
+    setImporting(true);
+    const errs = [];
+    let count = 0;
+    for (const row of rows) {
+      const client = buildClient(row);
+      if (!client.firstName && !client.lastName) continue;
+      try {
+        await onImport(client);
+        count++;
+        setImported(count);
+      } catch (e) {
+        errs.push(`${client.firstName} ${client.lastName}: ${e.message}`);
+      }
+    }
+    setErrors(errs);
+    setImporting(false);
+    setStep("done");
+  };
+
+  const FIELDS = Object.keys(FIELD_MAP);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(46,36,24,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 600, padding: 16 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ ...S.card, width: 580, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", animation: "fadeUp 0.15s ease" }}>
+
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: "15px", fontWeight: "800", color: "#1a120b" }}>Import clients from Vagaro CSV</div>
+            <div style={{ fontSize: "11px", color: "#8a7a6a", marginTop: 2 }}>
+              Export from Vagaro: Reports → Customers → Action → Export Excel
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: "22px", cursor: "pointer", color: "#8a7a6a", lineHeight: 1 }}>×</button>
+        </div>
+
+        {step === "upload" && (
+          <div>
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); }}
+              style={{ border: "2px dashed #e8d5c0", borderRadius: 14, padding: "40px 20px", textAlign: "center", cursor: "pointer", background: "#fdf9f5" }}
+              onClick={() => document.getElementById("csv-file-input").click()}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
+              <div style={{ fontSize: "14px", fontWeight: "700", color: "#4a3828", marginBottom: 4 }}>Drop your CSV file here</div>
+              <div style={{ fontSize: "12px", color: "#8a7a6a" }}>or click to browse</div>
+              <input id="csv-file-input" type="file" accept=".csv,.xlsx,.xls" style={{ display: "none" }}
+                onChange={(e) => handleFile(e.target.files[0])} />
+            </div>
+            <div style={{ marginTop: 16, padding: "12px 14px", background: "#fef3c7", border: "1px solid #f0d090", borderRadius: 10, fontSize: "12px", color: "#92400e" }}>
+              <strong>How to export from Vagaro:</strong><br />
+              Reports → Customers → Customers → Run Report → Action → Export Excel
+            </div>
+          </div>
+        )}
+
+        {step === "preview" && (
+          <div>
+            <div style={{ fontSize: "13px", color: "#0f7a4a", background: "#dcf5ec", padding: "8px 12px", borderRadius: 8, marginBottom: 14, fontWeight: "600" }}>
+              ✓ {rows.length} clients found — verify field mapping below
+            </div>
+
+            {/* Field mapping */}
+            <div style={{ marginBottom: 14 }}>
+              <label style={S.lbl}>Map CSV columns to Client Pulse fields</label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {FIELDS.map((field) => (
+                  <div key={field}>
+                    <label style={{ fontSize: "10px", fontWeight: "700", color: "#b0a090", textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 3 }}>
+                      {field.replace(/([A-Z])/g, " $1").trim()}
+                    </label>
+                    <select value={mapping[field] || ""} onChange={(e) => setMapping((m) => ({ ...m, [field]: e.target.value }))} style={{ ...S.inp, fontSize: "12px" }}>
+                      <option value="">— Skip —</option>
+                      {headers.map((h) => <option key={h} value={h}>{h}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Preview table */}
+            <div style={{ marginBottom: 14 }}>
+              <label style={S.lbl}>Preview (first 5 rows)</label>
+              <div style={{ overflowX: "auto", borderRadius: 8, border: "1px solid #e8e0d6" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
+                  <thead>
+                    <tr style={{ background: "#f5ede4" }}>
+                      {["firstName","lastName","email","phone","birthday"].map((f) => (
+                        <th key={f} style={{ padding: "6px 8px", textAlign: "left", color: "#7a5640", fontWeight: "700", whiteSpace: "nowrap" }}>
+                          {f.replace(/([A-Z])/g, " $1").trim()}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.slice(0, 5).map((row, i) => {
+                      const c = buildClient(row);
+                      return (
+                        <tr key={i} style={{ borderTop: "1px solid #f0e8de" }}>
+                          <td style={{ padding: "5px 8px" }}>{c.firstName}</td>
+                          <td style={{ padding: "5px 8px" }}>{c.lastName}</td>
+                          <td style={{ padding: "5px 8px" }}>{c.email}</td>
+                          <td style={{ padding: "5px 8px" }}>{c.phone}</td>
+                          <td style={{ padding: "5px 8px" }}>{c.birthday}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button style={S.btn("ghost")} onClick={() => setStep("upload")}>← Back</button>
+              <button style={S.btn("primary")} onClick={handleImport} disabled={importing}>
+                {importing ? `Importing… (${imported}/${rows.length})` : `Import ${rows.length} clients`}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === "done" && (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>✅</div>
+            <div style={{ fontSize: "16px", fontWeight: "800", color: "#065f46", marginBottom: 8 }}>
+              {imported} client{imported !== 1 ? "s" : ""} imported
+            </div>
+            {errors.length > 0 && (
+              <div style={{ fontSize: "12px", color: "#dc2626", background: "#fee2e2", padding: "10px", borderRadius: 8, marginBottom: 12, textAlign: "left" }}>
+                {errors.length} errors:<br />{errors.join("\n")}
+              </div>
+            )}
+            <button style={S.btn("primary")} onClick={onClose}>Done</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function NewClientModal({ onSave, onClose }) {
   const [form, setForm] = useState({
     firstName: "", lastName: "", phone: "", email: "",
@@ -2055,6 +2085,7 @@ const SIDEBAR_FILTERS = [
 
 function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search, setSearch, tagFilter, setTagFilter, fullWidth, onAddClient }) {
   const [showNewClient, setShowNewClient] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const allTags = useMemo(
     () => [...new Set(clients.flatMap((c) => c.tags || []))].sort(),
     [clients]
@@ -2097,8 +2128,14 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
           onClose={() => setShowNewClient(false)}
         />
       )}
+      {showImport && (
+        <CSVImportModal
+          onImport={async (client) => { onAddClient(client); }}
+          onClose={() => setShowImport(false)}
+        />
+      )}
       <div style={{ padding: "14px 14px 8px" }}>
-        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
           <div style={{
             flex: 1, display: "flex", alignItems: "center", gap: "8px",
             background: "#ffffff", border: "1px solid #e8e0d6",
@@ -2126,6 +2163,10 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
             + New
           </button>
         </div>
+        <button onClick={() => setShowImport(true)}
+          style={{ width: "100%", padding: "6px 10px", borderRadius: 8, background: "#f5ede4", border: "1px solid #e8d5c0", fontSize: "11px", fontWeight: "700", color: "#7a5640", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", marginBottom: 2, textAlign: "left" }}>
+          📂 Import from Vagaro CSV
+        </button>
       </div>
 
       <div style={{ padding: "0 12px 6px", display: "flex", flexWrap: "wrap", gap: 4 }}>
@@ -3022,6 +3063,208 @@ function TemplatesPage({ templates, onSave, embedded = false }) {
 }
 
 // ─── SETTINGS PAGE ────────────────────────────────────────────────────────────
+// ─── STAFF MANAGER ────────────────────────────────────────────────────────────
+function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
+  const [staffList, setStaffList]   = useState([]);
+  const [loading,   setLoading]     = useState(false);
+  const [showInvite,setShowInvite]  = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteName,  setInviteName]  = useState("");
+  const [inviteRole,  setInviteRole]  = useState("staff");
+  const [inviting,  setInviting]    = useState(false);
+  const [inviteMsg, setInviteMsg]   = useState(null);
+  const [error,     setError]       = useState(null);
+
+  const sb = () => getSB(supabaseUrl, supabaseAnonKey);
+
+  const loadStaff = async () => {
+    if (!usingDB) return;
+    setLoading(true);
+    try {
+      // Get staff profiles
+      const { data: staffRows, error: sErr } = await sb().from("staff").select("*").order("created_at");
+      if (sErr) throw sErr;
+
+      // Get auth users via admin — note: anon key can't list users
+      // So we just show the staff table which has what we need
+      setStaffList(staffRows || []);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { loadStaff(); }, [usingDB]);
+
+  const handleInvite = async () => {
+    if (!inviteEmail.trim() || !inviteName.trim()) return;
+    setInviting(true); setInviteMsg(null); setError(null);
+    try {
+      // Create auth user with a temp password — they'll reset via email
+      const res = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": supabaseAnonKey,
+          "Authorization": `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({
+          email: inviteEmail.trim(),
+          password: Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2) + "Aa1!",
+          email_confirm: true,
+          user_metadata: { full_name: inviteName.trim() },
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        // Anon key can't create admin users — use invite link approach instead
+        // Send magic link / password reset so they can set their own password
+        const { error: linkErr } = await sb().auth.resetPasswordForEmail(inviteEmail.trim(), {
+          redirectTo: window.location.origin,
+        });
+        if (linkErr) throw new Error("Could not send invite. Make sure the email is correct.");
+        setInviteMsg(`Invite sent to ${inviteEmail.trim()} — they'll receive a link to set their password and can then log in.`);
+        // Note: staff row will be created when they first log in
+      } else {
+        // User created — add staff row
+        const { error: staffErr } = await sb().from("staff").upsert({
+          id: data.id,
+          full_name: inviteName.trim(),
+          role: inviteRole,
+          active: true,
+        });
+        if (staffErr) throw staffErr;
+        setInviteMsg(`✓ ${inviteName.trim()} added. A password reset email has been sent to ${inviteEmail.trim()}.`);
+        loadStaff();
+      }
+      setInviteEmail(""); setInviteName(""); setInviteRole("staff");
+    } catch (e) {
+      setError(e.message || "Failed to invite staff member");
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const updateRole = async (id, role) => {
+    try {
+      await sb().from("staff").update({ role }).eq("id", id);
+      setStaffList((s) => s.map((m) => m.id === id ? { ...m, role } : m));
+    } catch (e) { setError(e.message); }
+  };
+
+  const toggleActive = async (id, active) => {
+    try {
+      await sb().from("staff").update({ active: !active }).eq("id", id);
+      setStaffList((s) => s.map((m) => m.id === id ? { ...m, active: !active } : m));
+    } catch (e) { setError(e.message); }
+  };
+
+  const ROLES = ["admin", "manager", "staff"];
+  const ROLE_COLORS = { admin: { bg: "#fee2e2", color: "#991b1b" }, manager: { bg: "#fef3c7", color: "#92400e" }, staff: { bg: "#dbeafe", color: "#1d5fa8" } };
+
+  return (
+    <div>
+      {!usingDB && (
+        <div style={{ ...S.card, background: "#fef3c7", border: "1px solid #f0d090", marginBottom: 14 }}>
+          <div style={{ fontSize: "13px", fontWeight: "700", color: "#92400e" }}>⚠️ Database required</div>
+          <div style={{ fontSize: "12px", color: "#92400e", marginTop: 4 }}>Connect Supabase in the Database tab first to manage staff.</div>
+        </div>
+      )}
+
+      {error && (
+        <div style={{ fontSize: "12px", color: "#dc2626", background: "#fee2e2", padding: "8px 12px", borderRadius: 8, marginBottom: 12 }}>
+          {error}
+        </div>
+      )}
+
+      {/* Current staff */}
+      <div style={{ ...S.card, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          <label style={{ ...S.lbl, marginBottom: 0 }}>Staff members</label>
+          <button style={S.sm("primary")} onClick={() => setShowInvite((s) => !s)}>
+            {showInvite ? "Cancel" : "+ Invite staff"}
+          </button>
+        </div>
+
+        {loading ? (
+          <div style={{ fontSize: "13px", color: "#b0a090" }}>Loading…</div>
+        ) : staffList.length === 0 ? (
+          <div style={{ fontSize: "13px", color: "#b0a090" }}>No staff found. Invite your first team member below.</div>
+        ) : (
+          staffList.map((member) => (
+            <div key={member.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid #f0e8de" }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: member.active ? "linear-gradient(135deg,#a0785a,#7a5640)" : "#e5e7eb", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", fontWeight: "800", color: member.active ? "#fff" : "#9ca3af", flexShrink: 0 }}>
+                {(member.full_name || "?").slice(0, 1).toUpperCase()}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: "13px", fontWeight: "700", color: member.active ? "#1a120b" : "#9ca3af" }}>
+                  {member.full_name || "Unnamed"}
+                </div>
+                <div style={{ fontSize: "11px", color: "#8a7a6a", marginTop: 1 }}>
+                  {member.active ? "Active" : "Deactivated"}
+                </div>
+              </div>
+              <select
+                value={member.role || "staff"}
+                onChange={(e) => updateRole(member.id, e.target.value)}
+                disabled={!member.active}
+                style={{ fontSize: "11px", fontWeight: "700", color: ROLE_COLORS[member.role]?.color || "#1d5fa8", background: ROLE_COLORS[member.role]?.bg || "#dbeafe", border: "none", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                {ROLES.map((r) => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
+              </select>
+              <button
+                onClick={() => toggleActive(member.id, member.active)}
+                style={{ fontSize: "11px", fontWeight: "700", color: member.active ? "#dc2626" : "#065f46", background: member.active ? "#fee2e2" : "#d1fae5", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                {member.active ? "Deactivate" : "Reactivate"}
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Invite form */}
+      {showInvite && (
+        <div style={{ ...S.card, marginBottom: 14, border: "1px solid #e8d5c0", background: "#fdf9f5" }}>
+          <label style={S.lbl}>Invite a staff member</label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+            <div>
+              <label style={S.lbl}>Full name</label>
+              <input value={inviteName} onChange={(e) => setInviteName(e.target.value)}
+                placeholder="Jane Smith" style={S.inp} />
+            </div>
+            <div>
+              <label style={S.lbl}>Email</label>
+              <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="jane@rctmassage.com" style={S.inp} />
+            </div>
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={S.lbl}>Role</label>
+            <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} style={S.inp}>
+              <option value="staff">Staff — can log communications, view clients</option>
+              <option value="manager">Manager — can edit clients, manage outreach</option>
+              <option value="admin">Admin — full access including settings</option>
+            </select>
+          </div>
+          {inviteMsg && (
+            <div style={{ fontSize: "12px", color: "#065f46", background: "#d1fae5", padding: "8px 12px", borderRadius: 8, marginBottom: 10 }}>
+              {inviteMsg}
+            </div>
+          )}
+          <div style={{ fontSize: "11px", color: "#8a7a6a", marginBottom: 12, background: "#f5f0e8", padding: "8px 12px", borderRadius: 8 }}>
+            They'll receive an email with a link to set their password. Once they log in, their account will be active.
+          </div>
+          <button style={{ ...S.btn("primary"), opacity: (inviteEmail.trim() && inviteName.trim()) ? 1 : 0.5 }}
+            onClick={handleInvite} disabled={inviting || !inviteEmail.trim() || !inviteName.trim()}>
+            {inviting ? "Sending invite…" : "Send invite"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SettingsPage({ mockMode, setMockMode, apiKey, setApiKey, businessId, setBusinessId, webhookLog, templates, onSaveTemplate, gmailClientId, setGmailClientId, supabaseUrl, setSupabaseUrl, supabaseAnonKey, setSupabaseAnonKey, usingDB, dbError }) {
   const [activeTab, setActiveTab] = useState("database");
   const [showKey, setShowKey] = useState(false);
@@ -3071,7 +3314,7 @@ function SettingsPage({ mockMode, setMockMode, apiKey, setApiKey, businessId, se
 
       {/* Tab strip */}
       <div style={{ display: "flex", gap: 2, marginBottom: 20, borderBottom: "1px solid #e8e0d6" }}>
-        {[{ key: "database", label: "Database" }, { key: "connection", label: "Vagaro" }, { key: "gmail", label: "Gmail" }, { key: "templates", label: "Templates" }].map((t) => (
+        {[{ key: "database", label: "Database" }, { key: "connection", label: "Vagaro" }, { key: "gmail", label: "Gmail" }, { key: "staff", label: "Staff" }, { key: "templates", label: "Templates" }].map((t) => (
           <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
             padding: "8px 16px", fontSize: "13px", fontWeight: "700",
             cursor: "pointer", background: "none", border: "none",
@@ -3407,6 +3650,10 @@ create policy "Allow all" on tasks for all using (true);`}
             )}
           </div>
         </div>
+      )}
+
+      {activeTab === "staff" && (
+        <StaffManager supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} />
       )}
 
       {activeTab === "templates" && (
