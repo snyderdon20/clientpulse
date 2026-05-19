@@ -3762,18 +3762,28 @@ class ErrorBoundary extends React.Component {
     this.state = { error: null };
   }
   static getDerivedStateFromError(error) {
-    return { error: error.message || "Unknown error" };
+    return { error: error.message || "Unknown error", stack: error.stack || "" };
+  }
+  componentDidCatch(error, info) {
+    console.error("=== CLIENT PULSE ERROR ===");
+    console.error("Error:", error.message);
+    console.error("Stack:", error.stack);
+    console.error("Component stack:", info.componentStack);
   }
   render() {
     if (this.state.error) {
       return (
         <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fdf6ef", fontFamily: "'DM Sans',sans-serif", padding: 24 }}>
-          <div style={{ maxWidth: 480, textAlign: "center" }}>
+          <div style={{ maxWidth: 540, textAlign: "center" }}>
             <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
             <div style={{ fontSize: "18px", fontWeight: "800", color: "#1a120b", marginBottom: 8 }}>Something went wrong</div>
-            <div style={{ fontSize: "13px", color: "#8a7a6a", background: "#fee2e2", padding: "10px 16px", borderRadius: 10, marginBottom: 20, textAlign: "left", fontFamily: "monospace" }}>
+            <div style={{ fontSize: "12px", color: "#8a7a6a", background: "#fee2e2", padding: "10px 16px", borderRadius: 10, marginBottom: 12, textAlign: "left", fontFamily: "monospace", wordBreak: "break-all" }}>
               {this.state.error}
             </div>
+            <div style={{ fontSize: "11px", color: "#8a7a6a", background: "#f5f5f5", padding: "8px 12px", borderRadius: 8, marginBottom: 20, textAlign: "left", fontFamily: "monospace", whiteSpace: "pre-wrap", maxHeight: 200, overflowY: "auto" }}>
+              {this.state.stack}
+            </div>
+            <div style={{ fontSize: "11px", color: "#8a7a6a", marginBottom: 16 }}>📋 Open browser console (F12) for full details</div>
             <button onClick={() => window.location.reload()}
               style={{ padding: "10px 24px", borderRadius: 10, background: "linear-gradient(135deg,#a0785a,#7a5640)", color: "#fff", border: "none", fontSize: "14px", fontWeight: "700", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
               Reload app
