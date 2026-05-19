@@ -4060,8 +4060,8 @@ function App() {
   const [apiKey, setApiKey]             = useState("");
   const [businessId, setBusinessId]     = useState("");
   const [gmailClientId, setGmailClientId] = useState(() => localStorage.getItem("cp_gmail_client_id") || "");
-  const [supabaseUrl,     setSupabaseUrl]     = useState(() => localStorage.getItem("cp_sb_url")  || "");
-  const [supabaseAnonKey, setSupabaseAnonKey] = useState(() => localStorage.getItem("cp_sb_anon") || "");
+  const [supabaseUrl,     setSupabaseUrl]     = useState(() => "https://dewsznqxagzahtkpriuk.supabase.co");
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState(() => "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRld3N6bnF4YWd6YWh0a3ByaXVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMDQ5MTcsImV4cCI6MjA5NDc4MDkxN30.PdVejzd-Mi3utM9xF7s2i3AU7UeBgNBE71eDFhjmteo");
   const [dbLoading, setDbLoading] = useState(false);
   const [dbLoadError, setDbLoadError] = useState(null);
   const [usingDB, setUsingDB] = useState(false);
