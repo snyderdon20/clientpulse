@@ -427,7 +427,9 @@ function CSVImportModal({ onImport, onClose, usingDB }) {
     referredBy:         ["refered by", "referred by", "referral", "referral source"],
     membership:         ["membership"],
     tags:               ["tags"],
-    appointmentsBooked: ["appointments booked", "appointments booked"],
+    appointmentsBooked: ["appointments booked"],
+    noShows:            ["no shows/cancellations", "no shows", "cancellations"],
+    totalSpent:         ["amount paid", "total spent", "total paid"],
   };
 
   const autoMap = (hdrs) => {
@@ -511,6 +513,8 @@ function CSVImportModal({ onImport, onClose, usingDB }) {
       state:         get("state"),
       zip:           get("zip"),
       avgVisitIntervalDays,
+      noShows:       parseInt(get("noShows")) || 0,
+      totalSpent:    parseFloat(get("totalSpent").replace(/[$,]/g, "")) || 0,
       careCategory:  null,
       redLightStatus: null,
       waitlisted:    false,
@@ -1901,6 +1905,8 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack }) {
             <span>{client.email}</span>
             <span>{client.phone}</span>
             {client.birthday && <span>Birthday: {fmtDate(client.birthday)}</span>}
+            {client.totalSpent > 0 && <span style={{ color: "#065f46", fontWeight: "600" }}>Lifetime: ${Number(client.totalSpent).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>}
+            {client.noShows > 0 && <span style={{ color: "#dc2626", fontWeight: "600" }}>No-shows: {client.noShows}</span>}
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
             <CareCategoryBadge category={client.careCategory} onChange={updateCareCategory} />
@@ -3366,7 +3372,7 @@ create table if not exists clients (
   care_category text, red_light_status text, waitlisted boolean default false,
   address text, city text, state text, zip text,
   tags text[] default '{}', golden_nuggets jsonb default '[]',
-  last_visit date,
+  last_visit date, no_shows integer default 0, total_spent numeric(10,2) default 0,
   created_at timestamptz default now(), updated_at timestamptz default now()
 );
 
@@ -3754,7 +3760,9 @@ const rowToClient = (row) => ({
   avgVisitIntervalDays: row.avg_visit_interval_days, referredBy: row.referred_by,
   careCategory: row.care_category, redLightStatus: row.red_light_status,
   waitlisted: row.waitlisted, address: row.address, city: row.city, state: row.state, zip: row.zip,
-  tags: row.tags || [], goldenNuggets: row.golden_nuggets || [], appointments: [], history: [],
+  tags: row.tags || [], goldenNuggets: row.golden_nuggets || [],
+  noShows: row.no_shows || 0, totalSpent: row.total_spent || 0,
+  appointments: [], history: [],
 });
 
 const clientToRow = (c) => ({
@@ -3765,6 +3773,7 @@ const clientToRow = (c) => ({
   care_category: c.careCategory || null, red_light_status: c.redLightStatus || null,
   waitlisted: c.waitlisted || false, address: c.address || null, city: c.city || null,
   state: c.state || null, zip: c.zip || null, tags: c.tags || [], golden_nuggets: c.goldenNuggets || [],
+  no_shows: c.noShows || 0, total_spent: c.totalSpent || 0,
 });
 
 const rowToAppt = (r) => ({ id: r.id, date: r.date, time: r.time, service: r.service, duration: r.duration, therapist: r.therapist, status: r.status });
@@ -3794,7 +3803,7 @@ async function dbSaveClient(url, key, client) {
 async function dbUpdateClient(url, key, id, updates) {
   const sb = getSB(url, key); if (!sb) return;
   const m = {};
-  const map = { firstName:'first_name', lastName:'last_name', email:'email', phone:'phone', birthday:'birthday', customerSince:'customer_since', lastVisit:'last_visit', avgVisitIntervalDays:'avg_visit_interval_days', referredBy:'referred_by', careCategory:'care_category', redLightStatus:'red_light_status', waitlisted:'waitlisted', address:'address', city:'city', state:'state', zip:'zip', tags:'tags', goldenNuggets:'golden_nuggets', vagaroId:'vagaro_id', vagaroSynced:'vagaro_synced' };
+  const map = { firstName:'first_name', lastName:'last_name', email:'email', phone:'phone', birthday:'birthday', customerSince:'customer_since', lastVisit:'last_visit', avgVisitIntervalDays:'avg_visit_interval_days', referredBy:'referred_by', careCategory:'care_category', redLightStatus:'red_light_status', waitlisted:'waitlisted', address:'address', city:'city', state:'state', zip:'zip', tags:'tags', goldenNuggets:'golden_nuggets', noShows:'no_shows', totalSpent:'total_spent', vagaroId:'vagaro_id', vagaroSynced:'vagaro_synced' };
   Object.entries(map).forEach(([k,v]) => { if (updates[k] !== undefined) m[v] = updates[k]; });
   if (Object.keys(m).length > 0) { const { error } = await sb.from('clients').update(m).eq('id', id); if (error) throw error; }
   if (updates.history?.length > 0) {
