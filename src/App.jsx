@@ -411,17 +411,21 @@ function CSVImportModal({ onImport, onClose, usingDB }) {
 
   // Vagaro field names → our field names
   const FIELD_MAP = {
-    firstName:   ["first name", "firstname", "first_name", "fname"],
-    lastName:    ["last name", "lastname", "last_name", "lname", "surname"],
-    email:       ["email", "email address", "e-mail"],
-    phone:       ["phone", "phone number", "mobile", "cell", "telephone"],
-    birthday:    ["birthday", "birth date", "date of birth", "dob"],
-    address:     ["address", "street", "street address", "address 1"],
-    city:        ["city"],
-    state:       ["state", "province"],
-    zip:         ["zip", "zip code", "postal", "postal code"],
-    referredBy:  ["referred by", "referral", "referral source", "ref by", "ref. by"],
-    customerSince: ["customer since", "member since", "join date", "created"],
+    firstName:    ["first name", "firstname", "first_name", "fname"],
+    lastName:     ["last name", "lastname", "last_name", "lname", "surname"],
+    email:        ["email", "email address", "e-mail"],
+    phone:        ["mobile", "phone", "phone number", "cell", "telephone"],
+    birthday:     ["birthdate", "birthday", "birth date", "date of birth", "dob"],
+    customerSince:["customer since", "member since", "join date", "created"],
+    lastVisit:    ["last visited", "last visit", "last visit date"],
+    address:      ["address", "street", "street address", "address 1"],
+    aptSuite:     ["apt/suite", "apt suite", "apartment", "suite", "unit"],
+    city:         ["city"],
+    state:        ["state", "province"],
+    zip:          ["zip", "zip code", "postal", "postal code"],
+    referredBy:   ["refered by", "referred by", "referral", "referral source"],
+    membership:   ["membership"],
+    tags:         ["banktags", "bank tags", "tags"],
   };
 
   const autoMap = (hdrs) => {
@@ -473,30 +477,38 @@ function CSVImportModal({ onImport, onClose, usingDB }) {
     reader.readAsText(file);
   };
 
-  const buildClient = (row) => ({
-    id:            uid(),
-    vagaroId:      null,
-    vagaroSynced:  false,
-    firstName:     (row[mapping.firstName] || "").trim(),
-    lastName:      (row[mapping.lastName]  || "").trim(),
-    email:         (row[mapping.email]     || "").trim(),
-    phone:         (row[mapping.phone]     || "").trim(),
-    birthday:      (row[mapping.birthday]  || "").trim() || null,
-    customerSince: (row[mapping.customerSince] || "").trim() || TODAY,
-    referredBy:    (row[mapping.referredBy]    || "").trim(),
-    address:       (row[mapping.address]       || "").trim(),
-    city:          (row[mapping.city]          || "").trim(),
-    state:         (row[mapping.state]         || "").trim(),
-    zip:           (row[mapping.zip]           || "").trim(),
-    avgVisitIntervalDays: 30,
-    careCategory:  null,
-    redLightStatus: null,
-    waitlisted:    false,
-    goldenNuggets: [],
-    tags:          [],
-    appointments:  [],
-    history:       [mkEvent("client.created", "Imported from Vagaro CSV", { by: "System" })],
-  });
+  const buildClient = (row) => {
+    const get = (field) => (row[mapping[field]] || "").trim();
+    const addrParts = [get("address"), get("aptSuite")].filter(Boolean);
+    const rawTags = get("tags").split(/[,;|]/).map((t) => t.trim()).filter(Boolean);
+    const membership = get("membership");
+    if (membership && !rawTags.includes(membership)) rawTags.unshift(membership);
+    return {
+      id:            uid(),
+      vagaroId:      null,
+      vagaroSynced:  false,
+      firstName:     get("firstName"),
+      lastName:      get("lastName"),
+      email:         get("email"),
+      phone:         get("phone"),
+      birthday:      get("birthday") || null,
+      customerSince: get("customerSince") || TODAY,
+      lastVisit:     get("lastVisit") || null,
+      referredBy:    get("referredBy"),
+      address:       addrParts.join(", "),
+      city:          get("city"),
+      state:         get("state"),
+      zip:           get("zip"),
+      avgVisitIntervalDays: 30,
+      careCategory:  null,
+      redLightStatus: null,
+      waitlisted:    false,
+      goldenNuggets: [],
+      tags:          rawTags,
+      appointments:  [],
+      history:       [mkEvent("client.created", "Imported from Vagaro CSV", { by: "System" })],
+    };
+  };
 
   const handleImport = async () => {
     setImporting(true);
@@ -3343,6 +3355,7 @@ create table if not exists clients (
   care_category text, red_light_status text, waitlisted boolean default false,
   address text, city text, state text, zip text,
   tags text[] default '{}', golden_nuggets jsonb default '[]',
+  last_visit date,
   created_at timestamptz default now(), updated_at timestamptz default now()
 );
 
@@ -3726,7 +3739,7 @@ function getSB(url, key) {
 const rowToClient = (row) => ({
   id: row.id, vagaroId: row.vagaro_id, vagaroSynced: row.vagaro_synced,
   firstName: row.first_name, lastName: row.last_name, email: row.email, phone: row.phone,
-  birthday: row.birthday, customerSince: row.customer_since,
+  birthday: row.birthday, customerSince: row.customer_since, lastVisit: row.last_visit || null,
   avgVisitIntervalDays: row.avg_visit_interval_days, referredBy: row.referred_by,
   careCategory: row.care_category, redLightStatus: row.red_light_status,
   waitlisted: row.waitlisted, address: row.address, city: row.city, state: row.state, zip: row.zip,
@@ -3736,7 +3749,7 @@ const rowToClient = (row) => ({
 const clientToRow = (c) => ({
   vagaro_id: c.vagaroId || null, vagaro_synced: c.vagaroSynced || false,
   first_name: c.firstName, last_name: c.lastName, email: c.email || null, phone: c.phone || null,
-  birthday: c.birthday || null, customer_since: c.customerSince || null,
+  birthday: c.birthday || null, customer_since: c.customerSince || null, last_visit: c.lastVisit || null,
   avg_visit_interval_days: c.avgVisitIntervalDays || 30, referred_by: c.referredBy || null,
   care_category: c.careCategory || null, red_light_status: c.redLightStatus || null,
   waitlisted: c.waitlisted || false, address: c.address || null, city: c.city || null,
@@ -3770,7 +3783,7 @@ async function dbSaveClient(url, key, client) {
 async function dbUpdateClient(url, key, id, updates) {
   const sb = getSB(url, key); if (!sb) return;
   const m = {};
-  const map = { firstName:'first_name', lastName:'last_name', email:'email', phone:'phone', birthday:'birthday', customerSince:'customer_since', avgVisitIntervalDays:'avg_visit_interval_days', referredBy:'referred_by', careCategory:'care_category', redLightStatus:'red_light_status', waitlisted:'waitlisted', address:'address', city:'city', state:'state', zip:'zip', tags:'tags', goldenNuggets:'golden_nuggets', vagaroId:'vagaro_id', vagaroSynced:'vagaro_synced' };
+  const map = { firstName:'first_name', lastName:'last_name', email:'email', phone:'phone', birthday:'birthday', customerSince:'customer_since', lastVisit:'last_visit', avgVisitIntervalDays:'avg_visit_interval_days', referredBy:'referred_by', careCategory:'care_category', redLightStatus:'red_light_status', waitlisted:'waitlisted', address:'address', city:'city', state:'state', zip:'zip', tags:'tags', goldenNuggets:'golden_nuggets', vagaroId:'vagaro_id', vagaroSynced:'vagaro_synced' };
   Object.entries(map).forEach(([k,v]) => { if (updates[k] !== undefined) m[v] = updates[k]; });
   if (Object.keys(m).length > 0) { const { error } = await sb.from('clients').update(m).eq('id', id); if (error) throw error; }
   if (updates.history?.length > 0) {
