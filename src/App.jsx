@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { testVagaroConnection, syncVagaroClients } from "./api/vagaroService";
 
 // ─── RESPONSIVE HOOK ─────────────────────────────────────────────────────────
 function useIsMobile(bp = 640) {
@@ -3347,14 +3348,8 @@ function VagaroSyncCard({ supabaseUrl }) {
     if (!supabaseUrl) { setResult({ error: "Connect to Supabase first (Database tab)." }); return; }
     setSyncing(true);
     setResult(null);
-    try {
-      const url = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/vagaro-sync`;
-      const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
-      const data = await res.json();
-      setResult(data);
-    } catch (e) {
-      setResult({ error: String(e) });
-    }
+    const data = await syncVagaroClients(supabaseUrl);
+    setResult(data);
     setSyncing(false);
   };
 
@@ -3420,32 +3415,8 @@ function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, we
   const testConnection = async () => {
     setTesting(true);
     setTestResult(null);
-    if (!clientId || !clientSecret) {
-      setTestResult({ ok: false, msg: "Enter your Client ID and Client Secret first." });
-      setTesting(false);
-      return;
-    }
-    if (!supabaseUrl) {
-      setTestResult({ ok: false, msg: "Supabase URL is not configured — go to the Database tab in Settings." });
-      setTesting(false);
-      return;
-    }
-    try {
-      const url = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/vagaro-sync`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ test: true, clientId, clientSecret }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (data.ok) {
-        setTestResult({ ok: true, msg: data.msg || "Credentials verified — Vagaro API connection successful." });
-      } else {
-        setTestResult({ ok: false, msg: data.msg || data.error || `HTTP ${res.status}` });
-      }
-    } catch (e) {
-      setTestResult({ ok: false, msg: `Could not reach the edge function: ${e.message}` });
-    }
+    const result = await testVagaroConnection(supabaseUrl, clientId, clientSecret);
+    setTestResult(result);
     setTesting(false);
   };
 
