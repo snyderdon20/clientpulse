@@ -3339,6 +3339,56 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
   );
 }
 
+function VagaroSyncCard({ supabaseUrl }) {
+  const [syncing, setSyncing]   = useState(false);
+  const [result,  setResult]    = useState(null);
+
+  const runSync = async () => {
+    if (!supabaseUrl) { setResult({ error: "Connect to Supabase first (Database tab)." }); return; }
+    setSyncing(true);
+    setResult(null);
+    try {
+      const url = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/vagaro-sync`;
+      const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const data = await res.json();
+      setResult(data);
+    } catch (e) {
+      setResult({ error: String(e) });
+    }
+    setSyncing(false);
+  };
+
+  return (
+    <div style={{ ...S.card, marginBottom: "14px" }}>
+      <div style={{ fontSize: "14px", fontWeight: "700", color: "#2e2418", marginBottom: 3 }}>Sync Vagaro IDs</div>
+      <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 14 }}>
+        Fetches all customers from Vagaro, matches them to your existing clients by name, and links their Vagaro IDs.
+        Run this once to connect your imported clients to live webhook data.
+      </div>
+      <button style={S.btn("primary")} onClick={runSync} disabled={syncing}>
+        {syncing ? "Syncing…" : "Sync all clients from Vagaro"}
+      </button>
+      {result && (
+        <div style={{ marginTop: 14, fontSize: "12px", borderRadius: 10, padding: "12px 14px",
+          background: result.error ? "#fee2e2" : "#dcf5ec",
+          border: `1px solid ${result.error ? "#fca5a5" : "#86efac"}`,
+          color: result.error ? "#991b1b" : "#065f46", lineHeight: 1.7 }}>
+          {result.error ? (
+            <>⚠️ {result.error}</>
+          ) : (<>
+            <strong>✓ Sync complete</strong><br />
+            {result.matched} of {result.total} Vagaro customers linked to ClientPulse profiles.<br />
+            {result.unmatched > 0 && <>
+              {result.unmatched} unmatched (not in ClientPulse or different name).
+              {result.unmatchedSample?.length > 0 && <> First few: {result.unmatchedSample.join(", ")}.</>}
+            </>}
+          </>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, webhookLog, templates, onSaveTemplate, gmailClientId, setGmailClientId, supabaseUrl, setSupabaseUrl, supabaseAnonKey, setSupabaseAnonKey, usingDB, dbError, onAddClient }) {
   const [activeTab, setActiveTab] = useState("database");
   const [showSecret, setShowSecret] = useState(false);
@@ -3640,6 +3690,9 @@ create policy "Allow all" on tasks for all using (true);`}
           )}
         </div>
       </div>
+
+      {/* Vagaro ID sync */}
+      <VagaroSyncCard supabaseUrl={supabaseUrl} />
 
       {/* Webhook receiver */}
       <div style={{ ...S.card, marginBottom: "14px" }}>
