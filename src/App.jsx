@@ -2307,7 +2307,7 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask, onDeleteTask }) {
+function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask, onDeleteTask, onFilterClients }) {
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [editTask, setEditTask] = useState(null);
   const [selectedDate, setSelectedDate] = useState(TODAY);
@@ -2348,10 +2348,10 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
   }, [clients]);
 
   const statCards = [
-    { label: "Active",    value: counts.active,       bg: "#dcf5ec", color: "#0f7a4a" },
-    { label: "Overdue",   value: counts.overdue,       bg: "#fef3c7", color: "#92400e" },
-    { label: "Lapsed",    value: counts.lapsed,        bg: "#fee2e2", color: "#991b1b" },
-    { label: "New Leads", value: counts["new-lead"],   bg: "#dbeafe", color: "#1d5fa8" },
+    { label: "Active",    value: counts.active,       bg: "#dcf5ec", color: "#0f7a4a", filter: "active"   },
+    { label: "Overdue",   value: counts.overdue,       bg: "#fef3c7", color: "#92400e", filter: "overdue"  },
+    { label: "Lapsed",    value: counts.lapsed,        bg: "#fee2e2", color: "#991b1b", filter: "lapsed"   },
+    { label: "New Leads", value: counts["new-lead"],   bg: "#dbeafe", color: "#1d5fa8", filter: "new-lead" },
   ];
 
   // Build daily action items
@@ -2555,9 +2555,20 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
       {/* Stat cards */}
       <div className="grid-4col" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "12px", marginBottom: "28px" }}>
         {statCards.map((s) => (
-          <div key={s.label} style={{ background: s.bg, borderRadius: "14px", padding: "16px 18px" }}>
+          <div
+            key={s.label}
+            onClick={() => onFilterClients && onFilterClients(s.filter)}
+            style={{
+              background: s.bg, borderRadius: "14px", padding: "16px 18px",
+              cursor: onFilterClients ? "pointer" : "default",
+              transition: "opacity 0.15s",
+            }}
+            onMouseEnter={(e) => { if (onFilterClients) e.currentTarget.style.opacity = "0.8"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+          >
             <div style={{ fontSize: "10px", fontWeight: "700", color: s.color, textTransform: "uppercase", letterSpacing: "1.2px", marginBottom: "6px" }}>{s.label}</div>
             <div style={{ fontSize: "30px", fontWeight: "800", color: s.color, lineHeight: 1 }}>{s.value}</div>
+            {onFilterClients && <div style={{ fontSize: "10px", color: s.color, opacity: 0.6, marginTop: 4 }}>View all →</div>}
           </div>
         ))}
       </div>
@@ -4413,6 +4424,7 @@ function App() {
             onSaveTask={handleSaveTask}
             onToggleTask={handleToggleTask}
             onDeleteTask={handleDeleteTask}
+            onFilterClients={(f) => { setFilter(f); setTab("clients"); }}
           />}
         {tab === "pulse"     && <PulsePage clients={clients} templates={templates} onGoToClient={goToClient} onUpdateClient={updateClient} />}
         {tab === "settings"  && (
