@@ -254,6 +254,7 @@ function lastCompletedDate(client) {
 }
 
 function deriveStatus(client) {
+  if (client.statusOverride) return client.statusOverride;
   const lastDate = lastCompletedDate(client);
   if (!lastDate) return "new-lead";
   const ds = daysSince(lastDate);
@@ -975,6 +976,74 @@ function StatusPill({ status }) {
       <span style={{ width: "5px", height: "5px", borderRadius: "50%", background: cfg.color, flexShrink: 0 }} />
       {cfg.label}
     </span>
+  );
+}
+
+function StatusSelector({ client, status, onUpdate }) {
+  const [open, setOpen] = useState(false);
+  const cfg = STATUS_CFG[status] || { label: status, bg: "#e8e0d6", color: "#8a7a6a" };
+  const isOverridden = !!client.statusOverride;
+  return (
+    <div style={{ position: "relative", display: "inline-flex" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title={isOverridden ? "Status manually set — click to change" : "Click to override status"}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: "5px",
+          padding: "3px 10px", borderRadius: "20px",
+          fontSize: "11px", fontWeight: "700",
+          background: cfg.bg, color: cfg.color, flexShrink: 0,
+          border: isOverridden ? `1.5px solid ${cfg.color}` : "1.5px solid transparent",
+          cursor: "pointer",
+        }}
+      >
+        <span style={{ width: "5px", height: "5px", borderRadius: "50%", background: cfg.color, flexShrink: 0 }} />
+        {cfg.label}
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ opacity: 0.6 }}>
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 200,
+          background: "#fff", border: "1px solid #e8e0d6", borderRadius: "10px",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.12)", padding: "6px", minWidth: "160px",
+        }}>
+          {Object.entries(STATUS_CFG).map(([key, c]) => (
+            <button
+              key={key}
+              onClick={() => { onUpdate(client.id, { statusOverride: key }); setOpen(false); }}
+              style={{
+                display: "flex", alignItems: "center", gap: "8px", width: "100%",
+                padding: "7px 10px", border: "none", borderRadius: "7px",
+                background: status === key ? c.bg : "transparent",
+                color: c.color, fontSize: "12px", fontWeight: "700",
+                cursor: "pointer", textAlign: "left",
+              }}
+            >
+              <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: c.color, flexShrink: 0 }} />
+              {c.label}
+              {status === key && <span style={{ marginLeft: "auto", fontSize: "10px", opacity: 0.6 }}>✓</span>}
+            </button>
+          ))}
+          {isOverridden && (
+            <button
+              onClick={() => { onUpdate(client.id, { statusOverride: null }); setOpen(false); }}
+              style={{
+                display: "flex", alignItems: "center", gap: "8px", width: "100%",
+                padding: "7px 10px", border: "none", borderRadius: "7px",
+                background: "transparent", color: "#8a7a6a",
+                fontSize: "11px", fontWeight: "600", cursor: "pointer", marginTop: "2px",
+                borderTop: "1px solid #e8e0d6",
+              }}
+            >
+              Reset to auto-detect
+            </button>
+          )}
+        </div>
+      )}
+      {open && <div style={{ position: "fixed", inset: 0, zIndex: 199 }} onClick={() => setOpen(false)} />}
+    </div>
   );
 }
 
@@ -1891,7 +1960,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "5px" }}>
             <h2 style={{ margin: 0, fontSize: "19px", fontWeight: "800", color: "#1a120b" }}>{fullName(client)}</h2>
-            <StatusPill status={status} />
+            <StatusSelector client={client} status={status} onUpdate={onUpdate} />
             {isBirthday && <span>🎂</span>}
             {client.waitlisted && <span style={{ fontSize: "10px", fontWeight: "700", color: "#1d5fa8", background: "#dbeafe", padding: "2px 8px", borderRadius: "100px" }}>Waitlisted</span>}
             {client.vagaroSynced === false && (
@@ -3392,6 +3461,7 @@ create table if not exists clients (
   address text, city text, state text, zip text,
   tags text[] default '{}', golden_nuggets jsonb default '[]',
   last_visit date, no_shows integer default 0, total_spent numeric(10,2) default 0,
+  status_override text,
   created_at timestamptz default now(), updated_at timestamptz default now()
 );
 
@@ -3779,6 +3849,7 @@ const rowToClient = (row) => ({
   waitlisted: row.waitlisted, address: row.address, city: row.city, state: row.state, zip: row.zip,
   tags: row.tags || [], goldenNuggets: row.golden_nuggets || [],
   noShows: row.no_shows || 0, totalSpent: row.total_spent || 0,
+  statusOverride: row.status_override || null,
   appointments: [], history: [],
 });
 
@@ -3791,6 +3862,7 @@ const clientToRow = (c) => ({
   waitlisted: c.waitlisted || false, address: c.address || null, city: c.city || null,
   state: c.state || null, zip: c.zip || null, tags: c.tags || [], golden_nuggets: c.goldenNuggets || [],
   no_shows: c.noShows || 0, total_spent: c.totalSpent || 0,
+  status_override: c.statusOverride || null,
 });
 
 const rowToAppt = (r) => ({ id: r.id, date: r.date, time: r.time, service: r.service, duration: r.duration, therapist: r.therapist, status: r.status });
@@ -3820,7 +3892,7 @@ async function dbSaveClient(url, key, client) {
 async function dbUpdateClient(url, key, id, updates) {
   const sb = getSB(url, key); if (!sb) return;
   const m = {};
-  const map = { firstName:'first_name', lastName:'last_name', email:'email', phone:'phone', birthday:'birthday', customerSince:'customer_since', lastVisit:'last_visit', avgVisitIntervalDays:'avg_visit_interval_days', referredBy:'referred_by', careCategory:'care_category', redLightStatus:'red_light_status', waitlisted:'waitlisted', address:'address', city:'city', state:'state', zip:'zip', tags:'tags', goldenNuggets:'golden_nuggets', noShows:'no_shows', totalSpent:'total_spent', vagaroId:'vagaro_id', vagaroSynced:'vagaro_synced' };
+  const map = { firstName:'first_name', lastName:'last_name', email:'email', phone:'phone', birthday:'birthday', customerSince:'customer_since', lastVisit:'last_visit', avgVisitIntervalDays:'avg_visit_interval_days', referredBy:'referred_by', careCategory:'care_category', redLightStatus:'red_light_status', waitlisted:'waitlisted', address:'address', city:'city', state:'state', zip:'zip', tags:'tags', goldenNuggets:'golden_nuggets', noShows:'no_shows', totalSpent:'total_spent', vagaroId:'vagaro_id', vagaroSynced:'vagaro_synced', statusOverride:'status_override' };
   Object.entries(map).forEach(([k,v]) => { if (updates[k] !== undefined) m[v] = updates[k]; });
   if (Object.keys(m).length > 0) { const { error } = await sb.from('clients').update(m).eq('id', id); if (error) throw error; }
   if (updates.history?.length > 0) {
