@@ -185,10 +185,10 @@ serve(async (req: Request) => {
     .is("vagaro_id", null);
   if (cpErr) return json({ error: `Supabase error: ${cpErr.message}` }, 500);
 
-  // Build name → client lookup (lowercase for case-insensitive matching)
+  // Build name → client lookup (trim each part to handle CSV import whitespace)
   const nameMap = new Map<string, { id: string }>();
   for (const c of cpClients ?? []) {
-    const key = `${str(c.first_name).toLowerCase()} ${str(c.last_name).toLowerCase()}`.trim();
+    const key = `${str(c.first_name).trim().toLowerCase()} ${str(c.last_name).trim().toLowerCase()}`.trim();
     nameMap.set(key, c);
   }
 
@@ -201,10 +201,22 @@ serve(async (req: Request) => {
     const vc = await fetchCustomer(region, accessToken, businessId, customerId);
     if (!vc) continue;
 
-    const firstName = str(vc.customerFirstName);
-    const lastName  = str(vc.customerLastName);
+    const firstName = str(vc.customerFirstName).trim();
+    const lastName  = str(vc.customerLastName).trim();
     const key = `${firstName.toLowerCase()} ${lastName.toLowerCase()}`.trim();
-    const cp  = nameMap.get(key);
+
+    // Try in-memory map first, then fall back to a database ilike query
+    let cp = nameMap.get(key) ?? null;
+    if (!cp && (firstName || lastName)) {
+      const { data: dbMatch } = await supabase
+        .from("clients")
+        .select("id")
+        .ilike("first_name", firstName)
+        .ilike("last_name", lastName)
+        .is("vagaro_id", null)
+        .maybeSingle();
+      if (dbMatch) cp = dbMatch as { id: string };
+    }
 
     if (cp) {
       await supabase.from("clients").update({

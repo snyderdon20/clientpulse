@@ -184,8 +184,8 @@ async function nameFromLog(
       if (!p) continue;
       if (str(p.customerId ?? p.id) === vagaroCustomerId) {
         return {
-          firstName: str(p.firstName ?? p.FirstName ?? ""),
-          lastName:  str(p.lastName  ?? p.LastName  ?? ""),
+          firstName: str(p.firstName ?? p.FirstName ?? "").trim(),
+          lastName:  str(p.lastName  ?? p.LastName  ?? "").trim(),
         };
       }
     }
