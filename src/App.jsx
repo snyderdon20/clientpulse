@@ -1019,47 +1019,6 @@ function TagChip({ label, onRemove }) {
 }
 
 // ─── SYNC BAR ────────────────────────────────────────────────────────────────
-function SyncBar({ mockMode, dbLoading, usingDB, dbError }) {
-  if (dbLoading) return (
-    <div className="sync-bar" style={{ background: "#ede9fe", borderBottom: "1px solid #c4b5fd", padding: "7px 24px", fontSize: "12px", fontWeight: "600", color: "#5b21b6", display: "flex", alignItems: "center", gap: "8px" }}>
-      <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⏳</span>
-      Loading client data from database…
-    </div>
-  );
-  if (dbError) return (
-    <div className="sync-bar" style={{ background: "#fee2e2", borderBottom: "1px solid #fca5a5", padding: "7px 24px", fontSize: "12px", fontWeight: "600", color: "#991b1b", display: "flex", alignItems: "center", gap: "8px" }}>
-      ⚠️ Database error: {dbError} — showing local data
-    </div>
-  );
-  if (usingDB) return (
-    <div className="sync-bar" style={{ background: "#dcf5ec", borderBottom: "1px solid #86efac", padding: "7px 24px", fontSize: "12px", fontWeight: "600", color: "#0f7a4a", display: "flex", alignItems: "center", gap: "8px" }}>
-      <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#0f7a4a" }} />
-      Connected to Supabase — data is live and persistent
-    </div>
-  );
-  if (mockMode) {
-    return (
-      <div className="sync-bar" style={{
-        background: "#fef3c7", borderBottom: "1px solid #fde68a",
-        padding: "7px 24px", fontSize: "12px", fontWeight: "600",
-        color: "#92400e", display: "flex", alignItems: "center", gap: "8px",
-      }}>
-        Demo mode — displaying mock data. Add Supabase credentials in <strong style={{ marginLeft: 3 }}>Settings → Database</strong> to go live.
-      </div>
-    );
-  }
-  return (
-    <div className="sync-bar" style={{
-      background: "#dcf5ec", borderBottom: "1px solid #86efac",
-      padding: "7px 24px", fontSize: "12px", fontWeight: "600",
-      color: "#0f7a4a", display: "flex", alignItems: "center", gap: "8px",
-    }}>
-      <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#0f7a4a" }} />
-      Connected to Vagaro · Last sync: just now
-    </div>
-  );
-}
-
 // ─── TEMPLATE PICKER ─────────────────────────────────────────────────────────
 function TemplatePicker({ client, templates, onClose }) {
   const [picked, setPicked] = useState(null);
@@ -4076,11 +4035,10 @@ function App() {
     [clients]
   );
 
-  // Load from Supabase when authenticated
+  // Load from Supabase on mount / when credentials change
   useEffect(() => {
     if (usingDB) return;
     if (!supabaseUrl || !supabaseAnonKey) return;
-    if (!auth.user && !noSupabase) return;
     setDbLoading(true); setDbLoadError(null);
     dbLoadAll(supabaseUrl, supabaseAnonKey)
       .then(({ clients: dbClients, tasks: dbTasks }) => {
@@ -4095,7 +4053,7 @@ function App() {
         setDbLoadError(e.message || "Failed to load from database");
         setDbLoading(false);
       });
-  }, [supabaseUrl, supabaseAnonKey, auth.user]);
+  }, [supabaseUrl, supabaseAnonKey]);
 
   const searchResults = useMemo(() => {
     if (!globalSearch.trim()) return [];
@@ -4228,8 +4186,6 @@ function App() {
   return (
     <div style={{ minHeight: "100vh", background: "#faf8f5", fontFamily: "'DM Sans',sans-serif", color: "#2e2418", display: "flex", flexDirection: "column" }}>
       <style>{CSS}</style>
-      <SyncBar mockMode={mockMode} dbLoading={dbLoading} usingDB={usingDB} dbError={dbLoadError} />
-
       <header style={{ background: "#ffffff", borderBottom: "1px solid #e8e0d6", padding: "0 24px", height: "58px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 500, gap: "12px" }}>
         <div onClick={() => setTab("dashboard")} style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0, cursor: "pointer" }}>
           <div style={{ width: "34px", height: "34px", background: "linear-gradient(135deg,#a0785a,#7a5640)", borderRadius: "9px", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 10px rgba(160,120,90,0.22)", flexShrink: 0 }}>
