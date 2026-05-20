@@ -1,5 +1,5 @@
 /**
- * vagaro-sync — Supabase Edge Function
+ * vagaro-sync — Supabase Edge Function (v2)
  *
  * Syncs Vagaro customer IDs into the ClientPulse `clients` table by:
  *   1. Collecting all unique customerIds from webhook_log
