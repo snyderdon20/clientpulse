@@ -205,8 +205,10 @@ serve(async (req: Request) => {
     const lastName  = str(vc.customerLastName).trim();
     const key = `${firstName.toLowerCase()} ${lastName.toLowerCase()}`.trim();
 
-    // Try in-memory map first, then fall back to a database ilike query
+    // 1. In-memory name map (fast path)
     let cp = nameMap.get(key) ?? null;
+
+    // 2. Database name match (handles whitespace differences in stored names)
     if (!cp && (firstName || lastName)) {
       const { data: dbMatch } = await supabase
         .from("clients")
@@ -216,6 +218,28 @@ serve(async (req: Request) => {
         .is("vagaro_id", null)
         .maybeSingle();
       if (dbMatch) cp = dbMatch as { id: string };
+    }
+
+    // 3. Email match
+    if (!cp && vc.email?.trim()) {
+      const { data: emailMatch } = await supabase
+        .from("clients")
+        .select("id")
+        .ilike("email", vc.email.trim())
+        .is("vagaro_id", null)
+        .maybeSingle();
+      if (emailMatch) cp = emailMatch as { id: string };
+    }
+
+    // 4. Phone match
+    if (!cp && vc.mobilePhone?.trim()) {
+      const { data: phoneMatch } = await supabase
+        .from("clients")
+        .select("id")
+        .ilike("phone", vc.mobilePhone.trim())
+        .is("vagaro_id", null)
+        .maybeSingle();
+      if (phoneMatch) cp = phoneMatch as { id: string };
     }
 
     if (cp) {

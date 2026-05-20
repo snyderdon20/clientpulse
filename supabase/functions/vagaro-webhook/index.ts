@@ -124,29 +124,56 @@ async function resolveClient(
   vagaroCustomerId: string,
   businessId = "",
 ): Promise<ClientRow | null> {
+  // 1. Direct vagaro_id lookup
   let client = await findByVagaroId(sb, vagaroCustomerId);
   if (client) return client;
 
-  let { firstName, lastName } = await nameFromLog(sb, vagaroCustomerId);
-
-  if (!firstName && !lastName && businessId) {
-    const apiName = await nameFromVagaroAPI(businessId, vagaroCustomerId);
-    if (apiName) { firstName = apiName.firstName; lastName = apiName.lastName; }
+  // 2. Name from prior customer events in webhook_log → name match
+  const { firstName: logFirst, lastName: logLast } = await nameFromLog(sb, vagaroCustomerId);
+  if (logFirst || logLast) {
+    client = await findByName(sb, logFirst, logLast);
+    if (client) return await linkClient(sb, client, vagaroCustomerId, logFirst, logLast);
   }
+
+  // 3. Vagaro API — full profile for name + email + phone matching
+  if (!businessId) return null;
+  const profile = await profileFromVagaroAPI(businessId, vagaroCustomerId);
+  if (!profile) return null;
+
+  const { firstName, lastName, email, phone } = profile;
 
   if (firstName || lastName) {
     client = await findByName(sb, firstName, lastName);
-    if (client && vagaroCustomerId) {
-      await sb.from("clients").update({
-        vagaro_id:     vagaroCustomerId,
-        vagaro_synced: true,
-        updated_at:    new Date().toISOString(),
-      }).eq("id", client.id);
-      await linkPendingAppointments(sb, vagaroCustomerId, client.id);
-      console.log(`Linked ${firstName} ${lastName} → Vagaro ID ${vagaroCustomerId}`);
-    }
+    if (client) return await linkClient(sb, client, vagaroCustomerId, firstName, lastName);
   }
 
+  if (email) {
+    client = await findByEmail(sb, email);
+    if (client) return await linkClient(sb, client, vagaroCustomerId, firstName, lastName);
+  }
+
+  if (phone) {
+    client = await findByPhone(sb, phone);
+    if (client) return await linkClient(sb, client, vagaroCustomerId, firstName, lastName);
+  }
+
+  return null;
+}
+
+async function linkClient(
+  sb: SB,
+  client: ClientRow,
+  vagaroCustomerId: string,
+  firstName: string,
+  lastName: string,
+): Promise<ClientRow> {
+  await sb.from("clients").update({
+    vagaro_id:     vagaroCustomerId,
+    vagaro_synced: true,
+    updated_at:    new Date().toISOString(),
+  }).eq("id", client.id);
+  await linkPendingAppointments(sb, vagaroCustomerId, client.id);
+  console.log(`Linked ${firstName} ${lastName} → Vagaro ID ${vagaroCustomerId}`);
   return client;
 }
 
@@ -164,6 +191,24 @@ async function findByName(sb: SB, firstName: string, lastName: string): Promise<
     .select("id, no_shows, total_spent")
     .ilike("first_name", firstName.trim())
     .ilike("last_name",  lastName.trim())
+    .maybeSingle();
+  return (data as ClientRow) ?? null;
+}
+
+async function findByEmail(sb: SB, email: string): Promise<ClientRow | null> {
+  if (!email.trim()) return null;
+  const { data } = await sb.from("clients")
+    .select("id, no_shows, total_spent")
+    .ilike("email", email.trim())
+    .maybeSingle();
+  return (data as ClientRow) ?? null;
+}
+
+async function findByPhone(sb: SB, phone: string): Promise<ClientRow | null> {
+  if (!phone.trim()) return null;
+  const { data } = await sb.from("clients")
+    .select("id, no_shows, total_spent")
+    .ilike("phone", phone.trim())
     .maybeSingle();
   return (data as ClientRow) ?? null;
 }
@@ -194,20 +239,19 @@ async function nameFromLog(
 }
 
 /**
- * Calls the Vagaro V2 Customer API — uses the correct V2 endpoint and
- * `accessToken` custom header (not Authorization: Bearer).
+ * Calls the Vagaro V2 Customer API and returns the full profile
+ * (name + email + phone) for use in multi-field client matching.
  */
-async function nameFromVagaroAPI(
+async function profileFromVagaroAPI(
   businessId: string,
   customerId: string,
-): Promise<{ firstName: string; lastName: string } | null> {
+): Promise<{ firstName: string; lastName: string; email: string; phone: string } | null> {
   const clientId        = Deno.env.get("VAGARO_CLIENT_ID");
   const clientSecretKey = Deno.env.get("VAGARO_CLIENT_SECRET_KEY");
   const region          = Deno.env.get("VAGARO_REGION");
   if (!clientId || !clientSecretKey || !region) return null;
 
   try {
-    // Step 1: get access token from V2 token endpoint
     const tokenRes = await fetch(
       `https://api.vagaro.com/${region}/api/v2/merchants/generate-access-token`,
       {
@@ -220,7 +264,6 @@ async function nameFromVagaroAPI(
     const accessToken = (await tokenRes.json())?.data?.access_token;
     if (!accessToken) return null;
 
-    // Step 2: retrieve customer — POST with custom accessToken header
     const custRes = await fetch(
       `https://api.vagaro.com/${region}/api/v2/customers`,
       {
@@ -235,13 +278,15 @@ async function nameFromVagaroAPI(
     }
 
     const c = (await custRes.json())?.data;
-    const firstName = str(c?.customerFirstName ?? "");
-    const lastName  = str(c?.customerLastName  ?? "");
-    if (firstName || lastName) {
-      console.log(`Vagaro V2 resolved: ${firstName} ${lastName} for customerId ${customerId}`);
-      return { firstName, lastName };
+    const firstName = str(c?.customerFirstName ?? "").trim();
+    const lastName  = str(c?.customerLastName  ?? "").trim();
+    const email     = str(c?.email             ?? "").trim();
+    const phone     = str(c?.mobilePhone ?? c?.dayPhone ?? "").trim();
+    if (firstName || lastName || email || phone) {
+      console.log(`Vagaro V2 resolved: ${firstName} ${lastName} (${email}) for customerId ${customerId}`);
+      return { firstName, lastName, email, phone };
     }
-  } catch (e) { console.error("nameFromVagaroAPI:", e); }
+  } catch (e) { console.error("profileFromVagaroAPI:", e); }
   return null;
 }
 
