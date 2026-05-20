@@ -14,6 +14,37 @@ serve(async (req: Request) => {
     return json({ error: "Method not allowed" }, 405);
   }
 
+
+  const reqBody = await req.json().catch(() => ({})) as Record<string, unknown>;
+
+  // ── Test mode: validate credentials without running a full sync ───────────
+  if (reqBody.test === true) {
+    const testClientId     = str(reqBody.clientId);
+    const testClientSecret = str(reqBody.clientSecret);
+    if (!testClientId || !testClientSecret) {
+      return json({ ok: false, msg: "clientId and clientSecret are required." });
+    }
+    try {
+      const tokenRes = await fetch("https://api.vagaro.com/v1/oauth2/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ grant_type: "client_credentials", client_id: testClientId, client_secret: testClientSecret }),
+      });
+      if (tokenRes.ok) {
+        const data = await tokenRes.json();
+        if (data.access_token) return json({ ok: true, msg: "Credentials verified — Vagaro API connection successful." });
+        return json({ ok: false, msg: "Vagaro returned OK but no access_token. Check your credentials." });
+      }
+      const errText = await tokenRes.text().catch(() => "");
+      let errMsg = `HTTP ${tokenRes.status}`;
+      try { const errJson = JSON.parse(errText); errMsg = errJson.error_description || errJson.message || errMsg; } catch { /* ignore */ }
+      return json({ ok: false, msg: errMsg });
+    } catch (e) {
+      return json({ ok: false, msg: `Network error: ${String(e)}` });
+    }
+  }
+
+
   const clientId     = Deno.env.get("VAGARO_CLIENT_ID");
   const clientSecret = Deno.env.get("VAGARO_CLIENT_SECRET");
   if (!clientId || !clientSecret) {
@@ -39,7 +70,7 @@ serve(async (req: Request) => {
   if (!access_token) return json({ error: "No access_token in Vagaro response" }, 502);
 
   // ── Get businessId from webhook_log if not provided ────────────────────────
-  let { businessId } = await req.json().catch(() => ({ businessId: "" }));
+  let { businessId } = reqBody as { businessId?: string };
   if (!businessId) {
     const { data: logRow } = await supabase
       .from("webhook_log")

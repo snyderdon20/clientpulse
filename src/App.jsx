@@ -3425,25 +3425,26 @@ function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, we
       setTesting(false);
       return;
     }
+    if (!supabaseUrl) {
+      setTestResult({ ok: false, msg: "Supabase URL is not configured — go to the Database tab in Settings." });
+      setTesting(false);
+      return;
+    }
     try {
-      const body = new URLSearchParams({ grant_type: "client_credentials", client_id: clientId, client_secret: clientSecret });
-      const res = await fetch("https://api.vagaro.com/v1/oauth2/token", {
+      const url = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/vagaro-sync`;
+      const res = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: body.toString(),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ test: true, clientId, clientSecret }),
       });
-      if (res.ok) {
-        setTestResult({ ok: true, msg: "Token received — credentials are valid." });
+      const data = await res.json().catch(() => ({}));
+      if (data.ok) {
+        setTestResult({ ok: true, msg: data.msg || "Credentials verified — Vagaro API connection successful." });
       } else {
-        const data = await res.json().catch(() => ({}));
-        setTestResult({ ok: false, msg: data.error_description || data.message || `HTTP ${res.status}` });
+        setTestResult({ ok: false, msg: data.msg || data.error || `HTTP ${res.status}` });
       }
     } catch (e) {
-      if (e.message?.includes("fetch") || e.name === "TypeError") {
-        setTestResult({ ok: false, msg: "Could not reach Vagaro API — check that your credentials are correct and that your account has API access." });
-      } else {
-        setTestResult({ ok: false, msg: e.message });
-      }
+      setTestResult({ ok: false, msg: `Could not reach the edge function: ${e.message}` });
     }
     setTesting(false);
   };
