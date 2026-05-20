@@ -82,6 +82,33 @@ const S = {
   }),
 };
 
+// ─── DUPLICATE DETECTION ─────────────────────────────────────────────────────
+function findDuplicates(clients) {
+  const groups = [];
+  const processed = new Set();
+  for (let i = 0; i < clients.length; i++) {
+    const a = clients[i];
+    if (processed.has(a.id)) continue;
+    const matches = [];
+    const reasons = {};
+    for (let j = i + 1; j < clients.length; j++) {
+      const b = clients[j];
+      if (processed.has(b.id)) continue;
+      const r = [];
+      if (a.email && b.email && a.email.toLowerCase().trim() === b.email.toLowerCase().trim()) r.push("email");
+      const pa = (a.phone || "").replace(/\D/g, "");
+      const pb = (b.phone || "").replace(/\D/g, "");
+      if (pa.length >= 7 && pa === pb) r.push("phone");
+      const na = `${a.firstName} ${a.lastName}`.toLowerCase().trim();
+      const nb = `${b.firstName} ${b.lastName}`.toLowerCase().trim();
+      if (na.length > 3 && na === nb) r.push("name");
+      if (r.length > 0) { matches.push(b); reasons[b.id] = r; processed.add(b.id); }
+    }
+    if (matches.length > 0) { processed.add(a.id); groups.push({ clients: [a, ...matches], reasons }); }
+  }
+  return groups;
+}
+
 // ─── STATUS CONFIG ────────────────────────────────────────────────────────────
 const STATUS_CFG = {
   "active":    { label: "Active",    bg: "#dcf5ec", color: "#0f7a4a" },
@@ -3384,7 +3411,108 @@ function VagaroSyncCard({ supabaseUrl }) {
   );
 }
 
-function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, vagaroRegion, setVagaroRegion, webhookLog, templates, onSaveTemplate, gmailClientId, setGmailClientId, supabaseUrl, setSupabaseUrl, supabaseAnonKey, setSupabaseAnonKey, usingDB, dbError, onAddClient }) {
+// ─── DUPLICATE MERGE MODAL ───────────────────────────────────────────────────
+function DuplicateMergeModal({ clients, supabaseUrl, onMerged, onClose }) {
+  const groups = useMemo(() => findDuplicates(clients), [clients]);
+  const bestPrimary = (g) => g.clients.find((c) => c.vagaroId)?.id ?? g.clients[0].id;
+  const [primaryMap, setPrimaryMap] = useState(() => Object.fromEntries(groups.map((g, i) => [i, bestPrimary(g)])));
+  const [merging, setMerging] = useState(null);
+  const [resolved, setResolved] = useState(new Set());
+  const [error, setError] = useState(null);
+
+  const handleMerge = async (idx) => {
+    const group = groups[idx];
+    const primaryId = primaryMap[idx];
+    const dupIds = group.clients.filter((c) => c.id !== primaryId).map((c) => c.id);
+    setMerging(idx); setError(null);
+    try {
+      for (const dupId of dupIds) {
+        const res = await fetch(`${supabaseUrl.replace(/\/$/, "")}/functions/v1/merge-clients`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ primaryId, duplicateId: dupId }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || "Merge failed");
+        onMerged(primaryId, dupId, data.merged);
+      }
+      setResolved((r) => new Set([...r, idx]));
+    } catch (e) { setError(e.message); }
+    setMerging(null);
+  };
+
+  const pending = groups.filter((_, i) => !resolved.has(i));
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(46,36,24,0.45)", display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 600, padding: "24px 16px", overflowY: "auto" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ ...S.card, width: 660, maxWidth: "100%", animation: "fadeUp 0.15s ease" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: "17px", fontWeight: "800", color: "#1a120b" }}>Duplicate Clients</div>
+            <div style={{ fontSize: "12px", color: "#8a7a6a", marginTop: 2 }}>
+              {pending.length > 0 ? `${pending.length} group${pending.length !== 1 ? "s" : ""} found — click a card to choose which record to keep` : "All duplicates resolved"}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ ...S.sm("ghost"), fontSize: "17px", padding: "4px 10px" }}>✕</button>
+        </div>
+
+        {error && <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 10, padding: "10px 14px", marginBottom: 12, fontSize: "12px", color: "#991b1b" }}>{error}</div>}
+
+        {pending.length === 0 && (
+          <div style={{ textAlign: "center", padding: "32px 0", color: "#0f7a4a", fontWeight: "700", fontSize: "14px" }}>✓ No duplicates found</div>
+        )}
+
+        {groups.map((group, i) => {
+          if (resolved.has(i)) return null;
+          const primaryId = primaryMap[i];
+          const firstReasons = Object.values(group.reasons)[0] ?? [];
+          const reasonLabel = firstReasons.map((r) => `Same ${r}`).join(" · ");
+          return (
+            <div key={i} style={{ border: "1px solid #e8e0d6", borderRadius: 12, padding: 16, marginBottom: 12 }}>
+              <div style={{ fontSize: "10px", fontWeight: "700", color: "#a0785a", textTransform: "uppercase", letterSpacing: "1.5px", marginBottom: 12 }}>{reasonLabel || "Possible duplicate"}</div>
+              <div style={{ display: "grid", gridTemplateColumns: `repeat(${group.clients.length}, 1fr)`, gap: 10, marginBottom: 12 }}>
+                {group.clients.map((c) => {
+                  const isPrimary = c.id === primaryId;
+                  return (
+                    <div key={c.id} onClick={() => setPrimaryMap((m) => ({ ...m, [i]: c.id }))} style={{
+                      border: `2px solid ${isPrimary ? "#a0785a" : "#e8e0d6"}`,
+                      borderRadius: 10, padding: 12, cursor: "pointer",
+                      background: isPrimary ? "#fdf6ef" : "#faf8f5", transition: "all 0.15s",
+                    }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                        <div style={{ fontSize: "14px", fontWeight: "800", color: "#1a120b" }}>{c.firstName} {c.lastName}</div>
+                        {isPrimary && <span style={{ fontSize: "9px", fontWeight: "800", color: "#7a5640", background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: 4, padding: "2px 6px", textTransform: "uppercase", letterSpacing: "1px", whiteSpace: "nowrap" }}>Keep</span>}
+                      </div>
+                      <div style={{ fontSize: "11px", color: "#6b5244", lineHeight: 1.8 }}>
+                        {c.email    && <div>{c.email}</div>}
+                        {c.phone    && <div>{c.phone}</div>}
+                        {c.lastVisit && <div style={{ color: "#8a7a6a" }}>Last visit: {c.lastVisit}</div>}
+                        {c.vagaroId  ? <div style={{ color: "#a0785a" }}>Vagaro linked</div> : <div style={{ color: "#b0a090" }}>No Vagaro ID</div>}
+                        {c.totalSpent > 0 && <div style={{ color: "#0f7a4a" }}>${c.totalSpent.toFixed(2)} spent</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button onClick={() => handleMerge(i)} disabled={merging === i} style={{ ...S.btn("primary"), fontSize: "12px" }}>
+                  {merging === i ? "Merging…" : "Merge — keep selected"}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+          <button onClick={onClose} style={S.btn("ghost")}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, vagaroRegion, setVagaroRegion, webhookLog, templates, onSaveTemplate, gmailClientId, setGmailClientId, supabaseUrl, setSupabaseUrl, supabaseAnonKey, setSupabaseAnonKey, usingDB, dbError, onAddClient, onFindDuplicates }) {
   const [activeTab, setActiveTab] = useState("database");
   const [showSecret, setShowSecret] = useState(false);
   const [testResult, setTestResult] = useState(null);
@@ -3591,10 +3719,24 @@ create policy "Allow all" on tasks for all using (true);`}
 
           {/* Seed data option */}
           {usingDB && (
-            <div style={{ ...S.card, background: "#f0fdf4", border: "1px solid #86efac" }}>
+            <div style={{ ...S.card, background: "#f0fdf4", border: "1px solid #86efac", marginBottom: 14 }}>
               <div style={{ fontSize: "13px", fontWeight: "700", color: "#065f46", marginBottom: 6 }}>✓ Database connected</div>
               <div style={{ fontSize: "12px", color: "#166534" }}>
                 Client Pulse is loading and saving all data to Supabase. Changes persist across devices and browser refreshes.
+              </div>
+            </div>
+          )}
+
+          {usingDB && (
+            <div style={{ ...S.card }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: "14px", fontWeight: "700", color: "#2e2418", marginBottom: 3 }}>Duplicate clients</div>
+                  <div style={{ fontSize: "12px", color: "#8a7a6a" }}>Find and merge clients that appear more than once</div>
+                </div>
+                <button onClick={onFindDuplicates} style={{ ...S.btn("ghost"), fontSize: "12px", whiteSpace: "nowrap", flexShrink: 0 }}>
+                  Find duplicates
+                </button>
               </div>
             </div>
           )}
@@ -4523,6 +4665,17 @@ async function dbDeleteTask(url, key, id) {
   const { error } = await sb.from('tasks').delete().eq('id', id); if (error) throw error;
 }
 
+async function dbMergeClients(url, _key, primaryId, duplicateId) {
+  const res = await fetch(`${url.replace(/\/$/, "")}/functions/v1/merge-clients`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ primaryId, duplicateId }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || "Merge failed");
+  return data.merged;
+}
+
 // ─── SUPABASE AUTH HOOK ───────────────────────────────────────────────────────
 function useSupabaseAuth(url, key) {
   const [user,    setUser]    = useState(null);
@@ -4766,6 +4919,7 @@ function App() {
   const [dbLoading, setDbLoading] = useState(false);
   const [dbLoadError, setDbLoadError] = useState(null);
   const [usingDB, setUsingDB] = useState(false);
+  const [showDuplicates, setShowDuplicates] = useState(false);
 
   setGlobalGmailClientId(gmailClientId);
 
@@ -5042,6 +5196,21 @@ function App() {
             supabaseAnonKey={supabaseAnonKey} setSupabaseAnonKey={setSupabaseAnonKey}
             usingDB={usingDB} dbError={dbLoadError}
             onAddClient={addClient}
+            onFindDuplicates={() => setShowDuplicates(true)}
+          />
+        )}
+
+        {showDuplicates && (
+          <DuplicateMergeModal
+            clients={clients}
+            supabaseUrl={supabaseUrl}
+            onMerged={(primaryId, duplicateId, merged) => {
+              setClients((cs) => {
+                const updated = cs.map((c) => c.id === primaryId ? { ...c, ...rowToClient({ id: primaryId, ...merged }) } : c);
+                return updated.filter((c) => c.id !== duplicateId);
+              });
+            }}
+            onClose={() => setShowDuplicates(false)}
           />
         )}
         {tab === "clients" && (

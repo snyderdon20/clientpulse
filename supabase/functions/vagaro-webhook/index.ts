@@ -172,7 +172,13 @@ async function resolveClient(
       if (client) return await linkClient(sb, client, vagaroCustomerId, firstName, lastName);
     }
 
-    // 7. No match — create a new client from Vagaro profile
+    // 7. Fuzzy match: same first name + email or phone (catches last-name typos)
+    if (firstName && (email || phone)) {
+      client = await findByFirstNameAndContact(sb, firstName, email, phone);
+      if (client) return await linkClient(sb, client, vagaroCustomerId, firstName, lastName);
+    }
+
+    // 8. No match — create a new client from Vagaro profile
     if (firstName || email || phone) {
       return await createClient(sb, vagaroCustomerId, profile);
     }
@@ -256,6 +262,31 @@ async function findByPhone(sb: SB, phone: string): Promise<ClientRow | null> {
     .ilike("phone", phone.trim())
     .maybeSingle();
   return (data as ClientRow) ?? null;
+}
+
+async function findByFirstNameAndContact(
+  sb: SB,
+  firstName: string,
+  email: string | null,
+  phone: string | null,
+): Promise<ClientRow | null> {
+  if (email) {
+    const { data } = await sb.from("clients")
+      .select("id, no_shows, total_spent")
+      .ilike("first_name", firstName.trim())
+      .ilike("email", email.trim())
+      .maybeSingle();
+    if (data) return data as ClientRow;
+  }
+  if (phone) {
+    const { data } = await sb.from("clients")
+      .select("id, no_shows, total_spent")
+      .ilike("first_name", firstName.trim())
+      .ilike("phone", phone.trim())
+      .maybeSingle();
+    if (data) return data as ClientRow;
+  }
+  return null;
 }
 
 async function nameFromLog(
