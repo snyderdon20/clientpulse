@@ -400,7 +400,7 @@ const INITIAL_TASKS = [];
 // ─── TASK MODAL ───────────────────────────────────────────────────────────────
 // ─── NEW CLIENT MODAL ─────────────────────────────────────────────────────────
 // ─── CSV IMPORT MODAL ────────────────────────────────────────────────────────
-function CSVImportModal({ onImport, onClose }) {
+function CSVImportModal({ onImport, onClose, usingDB }) {
   const [step, setStep] = useState("upload"); // upload → preview → done
   const [rows, setRows] = useState([]);
   const [mapping, setMapping] = useState({});
@@ -623,13 +623,18 @@ function CSVImportModal({ onImport, onClose }) {
 
         {step === "done" && (
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>✅</div>
-            <div style={{ fontSize: "16px", fontWeight: "800", color: "#065f46", marginBottom: 8 }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>{errors.length > 0 ? "⚠️" : "✅"}</div>
+            <div style={{ fontSize: "16px", fontWeight: "800", color: errors.length > 0 ? "#92400e" : "#065f46", marginBottom: 8 }}>
               {imported} client{imported !== 1 ? "s" : ""} imported
             </div>
+            {!usingDB && (
+              <div style={{ fontSize: "12px", color: "#92400e", background: "#fef3c7", border: "1px solid #fde68a", padding: "10px", borderRadius: 8, marginBottom: 12, textAlign: "left" }}>
+                <strong>Database not connected.</strong> Clients are loaded in memory only and will be lost on refresh. Check Settings → Database to connect Supabase.
+              </div>
+            )}
             {errors.length > 0 && (
               <div style={{ fontSize: "12px", color: "#dc2626", background: "#fee2e2", padding: "10px", borderRadius: 8, marginBottom: 12, textAlign: "left" }}>
-                {errors.length} errors:<br />{errors.join("\n")}
+                {errors.length} save error{errors.length !== 1 ? "s" : ""}:<br />{errors.join("\n")}
               </div>
             )}
             <button style={S.btn("primary")} onClick={onClose}>Done</button>
@@ -2042,7 +2047,7 @@ const SIDEBAR_FILTERS = [
   { key: "new-lead", label: "New Lead" },
 ];
 
-function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search, setSearch, tagFilter, setTagFilter, fullWidth, onAddClient }) {
+function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search, setSearch, tagFilter, setTagFilter, fullWidth, onAddClient, usingDB }) {
   const [showNewClient, setShowNewClient] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const allTags = useMemo(
@@ -2094,8 +2099,9 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
       )}
       {showImport && (
         <CSVImportModal
-          onImport={async (client) => { onAddClient(client); }}
-          onClose={() => setShowImport(false)}
+          onImport={async (client) => { await onAddClient(client); }}
+          onClose={() => { setShowImport(false); }}
+          usingDB={usingDB}
         />
       )}
       <div style={{ padding: "14px 14px 8px" }}>
@@ -3635,7 +3641,7 @@ create policy "Allow all" on tasks for all using (true);`}
 }
 
 // ─── MOBILE CLIENT SHELL ──────────────────────────────────────────────────────
-function MobileClientShell({ clients, selected, setSelected, filter, setFilter, search, setSearch, tagFilter, setTagFilter, updateClient, templates, onAddClient }) {
+function MobileClientShell({ clients, selected, setSelected, filter, setFilter, search, setSearch, tagFilter, setTagFilter, updateClient, templates, onAddClient, usingDB }) {
   const isMobile = useIsMobile();
   const showDetail = isMobile && selected;
   const showList = !isMobile || !selected;
@@ -3655,6 +3661,7 @@ function MobileClientShell({ clients, selected, setSelected, filter, setFilter, 
           setTagFilter={setTagFilter}
           fullWidth={isMobile}
           onAddClient={onAddClient}
+          usingDB={usingDB}
         />
       )}
       {(!isMobile || showDetail) && (
@@ -4088,9 +4095,9 @@ function App() {
   );
 
   const addClient = useCallback(
-    (newClient) => {
+    async (newClient) => {
       setClients((cs) => [newClient, ...cs]);
-      if (usingDB) dbSaveClient(supabaseUrl, supabaseAnonKey, newClient).catch((e) => console.warn("DB saveClient:", e));
+      if (usingDB) await dbSaveClient(supabaseUrl, supabaseAnonKey, newClient);
     },
     [usingDB, supabaseUrl, supabaseAnonKey]
   );
@@ -4325,6 +4332,7 @@ function App() {
             updateClient={updateClient}
             templates={templates}
             onAddClient={addClient}
+            usingDB={usingDB}
           />
         )}
       </main>
