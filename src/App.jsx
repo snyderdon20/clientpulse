@@ -2047,9 +2047,8 @@ const SIDEBAR_FILTERS = [
   { key: "new-lead", label: "New Lead" },
 ];
 
-function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search, setSearch, tagFilter, setTagFilter, fullWidth, onAddClient, usingDB }) {
+function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search, setSearch, tagFilter, setTagFilter, fullWidth, onAddClient }) {
   const [showNewClient, setShowNewClient] = useState(false);
-  const [showImport, setShowImport] = useState(false);
   const allTags = useMemo(
     () => [...new Set(clients.flatMap((c) => c.tags || []))].sort(),
     [clients]
@@ -2097,13 +2096,6 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
           onClose={() => setShowNewClient(false)}
         />
       )}
-      {showImport && (
-        <CSVImportModal
-          onImport={async (client) => { await onAddClient(client); }}
-          onClose={() => { setShowImport(false); }}
-          usingDB={usingDB}
-        />
-      )}
       <div style={{ padding: "14px 14px 8px" }}>
         <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
           <div style={{
@@ -2140,10 +2132,6 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
             + New
           </button>
         </div>
-        <button onClick={() => setShowImport(true)}
-          style={{ width: "100%", padding: "6px 10px", borderRadius: 8, background: "#f5ede4", border: "1px solid #e8d5c0", fontSize: "11px", fontWeight: "700", color: "#7a5640", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", marginBottom: 2, textAlign: "left" }}>
-          📂 Import from Vagaro CSV
-        </button>
       </div>
 
       <div style={{ padding: "0 12px 6px", display: "flex", flexWrap: "wrap", gap: 4 }}>
@@ -3242,20 +3230,19 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
   );
 }
 
-function SettingsPage({ mockMode, setMockMode, apiKey, setApiKey, businessId, setBusinessId, webhookLog, templates, onSaveTemplate, gmailClientId, setGmailClientId, supabaseUrl, setSupabaseUrl, supabaseAnonKey, setSupabaseAnonKey, usingDB, dbError }) {
+function SettingsPage({ apiKey, setApiKey, businessId, setBusinessId, webhookLog, templates, onSaveTemplate, gmailClientId, setGmailClientId, supabaseUrl, setSupabaseUrl, supabaseAnonKey, setSupabaseAnonKey, usingDB, dbError, onAddClient }) {
   const [activeTab, setActiveTab] = useState("database");
   const [showKey, setShowKey] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [testing, setTesting] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const gmail = useGmail(getGmailClientId());
 
   const testConnection = async () => {
     setTesting(true);
     setTestResult(null);
     await new Promise((r) => setTimeout(r, 1400));
-    if (mockMode) {
-      setTestResult({ ok: true, msg: "Mock mode — connection simulated." });
-    } else if (!apiKey || !businessId) {
+    if (!apiKey || !businessId) {
       setTestResult({ ok: false, msg: "Missing API key or Business ID." });
     } else {
       setTestResult({ ok: false, msg: "Could not reach Vagaro API. Requires Vagaro Enterprise API access." });
@@ -3433,22 +3420,27 @@ create policy "Allow all" on tasks for all using (true);`}
 
       {activeTab === "connection" && (<>
 
+      {showImport && (
+        <CSVImportModal
+          onImport={async (client) => { await onAddClient(client); }}
+          onClose={() => setShowImport(false)}
+          usingDB={usingDB}
+        />
+      )}
+
       <div style={{ ...S.card, marginBottom: "14px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <div>
-            <div style={{ fontSize: "14px", fontWeight: "700", color: "#2e2418", marginBottom: 3 }}>Demo / mock mode</div>
-            <div style={{ fontSize: "12px", color: "#8a7a6a" }}>Use realistic sample data instead of live Vagaro data</div>
+            <div style={{ fontSize: "14px", fontWeight: "700", color: "#2e2418", marginBottom: 3 }}>Import clients from Vagaro</div>
+            <div style={{ fontSize: "12px", color: "#8a7a6a" }}>Export from Vagaro: Reports → Customers → Action → Export Excel</div>
           </div>
-          <button
-            onClick={() => setMockMode((m) => !m)}
-            style={{ width: "46px", height: "26px", borderRadius: "100px", border: "none", cursor: "pointer", transition: "background 0.2s", background: mockMode ? "#a0785a" : "#ddd6cc", position: "relative", flexShrink: 0 }}
-          >
-            <span style={{ position: "absolute", top: "3px", width: "20px", height: "20px", borderRadius: "50%", background: "#fff", transition: "left 0.2s", left: mockMode ? "23px" : "3px" }} />
+          <button onClick={() => setShowImport(true)} style={{ ...S.btn("primary"), fontSize: "12px", whiteSpace: "nowrap", flexShrink: 0 }}>
+            Import CSV
           </button>
         </div>
       </div>
 
-      <div style={{ ...S.card, marginBottom: "14px", opacity: mockMode ? 0.55 : 1 }}>
+      <div style={{ ...S.card, marginBottom: "14px" }}>
         <div style={{ fontSize: "14px", fontWeight: "700", color: "#2e2418", marginBottom: 3 }}>Vagaro API credentials</div>
         <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 16 }}>
           Requires Vagaro Enterprise API access —{" "}
@@ -3463,10 +3455,9 @@ create policy "Allow all" on tasks for all using (true);`}
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             placeholder="Your Vagaro Enterprise API key"
-            disabled={mockMode}
             style={{ ...S.inp, fontFamily: "monospace", flex: 1 }}
           />
-          <button style={S.sm("ghost")} onClick={() => setShowKey((s) => !s)} disabled={mockMode}>
+          <button style={S.sm("ghost")} onClick={() => setShowKey((s) => !s)}>
             {showKey ? "Hide" : "Show"}
           </button>
         </div>
@@ -3475,11 +3466,10 @@ create policy "Allow all" on tasks for all using (true);`}
           value={businessId}
           onChange={(e) => setBusinessId(e.target.value)}
           placeholder="Your Vagaro Business ID"
-          disabled={mockMode}
           style={{ ...S.inp, marginBottom: 16 }}
         />
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <button style={S.btn("ghost")} onClick={testConnection} disabled={testing || mockMode}>
+          <button style={S.btn("ghost")} onClick={testConnection} disabled={testing}>
             {testing ? "Testing..." : "Test connection"}
           </button>
           {testResult && (
@@ -3641,7 +3631,7 @@ create policy "Allow all" on tasks for all using (true);`}
 }
 
 // ─── MOBILE CLIENT SHELL ──────────────────────────────────────────────────────
-function MobileClientShell({ clients, selected, setSelected, filter, setFilter, search, setSearch, tagFilter, setTagFilter, updateClient, templates, onAddClient, usingDB }) {
+function MobileClientShell({ clients, selected, setSelected, filter, setFilter, search, setSearch, tagFilter, setTagFilter, updateClient, templates, onAddClient }) {
   const isMobile = useIsMobile();
   const showDetail = isMobile && selected;
   const showList = !isMobile || !selected;
@@ -3661,7 +3651,6 @@ function MobileClientShell({ clients, selected, setSelected, filter, setFilter, 
           setTagFilter={setTagFilter}
           fullWidth={isMobile}
           onAddClient={onAddClient}
-          usingDB={usingDB}
         />
       )}
       {(!isMobile || showDetail) && (
@@ -4034,7 +4023,6 @@ function App() {
   const [search, setSearch]             = useState("");
   const [globalSearch, setGlobalSearch] = useState("");
   const [showGS, setShowGS]             = useState(false);
-  const [mockMode, setMockMode]         = useState(true);
   const [apiKey, setApiKey]             = useState("");
   const [businessId, setBusinessId]     = useState("");
   const [gmailClientId, setGmailClientId] = useState(() => localStorage.getItem("cp_gmail_client_id") || "");
@@ -4307,7 +4295,6 @@ function App() {
         {tab === "pulse"     && <PulsePage clients={clients} templates={templates} onGoToClient={goToClient} onUpdateClient={updateClient} />}
         {tab === "settings"  && (
           <SettingsPage
-            mockMode={mockMode} setMockMode={setMockMode}
             apiKey={apiKey} setApiKey={setApiKey}
             businessId={businessId} setBusinessId={setBusinessId}
             webhookLog={WEBHOOK_LOG}
@@ -4316,6 +4303,7 @@ function App() {
             supabaseUrl={supabaseUrl} setSupabaseUrl={setSupabaseUrl}
             supabaseAnonKey={supabaseAnonKey} setSupabaseAnonKey={setSupabaseAnonKey}
             usingDB={usingDB} dbError={dbLoadError}
+            onAddClient={addClient}
           />
         )}
         {tab === "clients" && (
@@ -4332,7 +4320,6 @@ function App() {
             updateClient={updateClient}
             templates={templates}
             onAddClient={addClient}
-            usingDB={usingDB}
           />
         )}
       </main>
