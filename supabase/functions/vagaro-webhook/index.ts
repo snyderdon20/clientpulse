@@ -6,11 +6,11 @@
  * Vagaro webhook payload format:
  *   { type: "appointment"|"customer"|"sale", action: "created"|..., payload: {...} }
  *
- * Client resolution chain (for linking appointments to clients):
+ * Client resolution chain (creates a new client if no match found):
  *   1. Direct vagaro_id lookup
- *   2. Name from prior customer events in webhook_log
- *   3. Vagaro V2 Customer API (requires VAGARO_* secrets)
- *   4. Case-insensitive name match against clients table
+ *   2. Name from prior customer events in webhook_log → name match
+ *   3. Vagaro V2 Customer API → name match → email match → phone match
+ *   4. No match → auto-create client from Vagaro profile
  *
  * Supabase secrets required:
  *   VAGARO_CLIENT_ID         — your Vagaro clientId
@@ -119,10 +119,19 @@ serve(async (req: Request) => {
 type ClientRow = { id: string; no_shows: number; total_spent: number };
 type SB = ReturnType<typeof createClient>;
 
+interface VagaroProfile {
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string | null;
+  birthday: string | null;
+}
+
 async function resolveClient(
   sb: SB,
   vagaroCustomerId: string,
   businessId = "",
+  profileHint?: VagaroProfile,
 ): Promise<ClientRow | null> {
   // 1. Direct vagaro_id lookup
   let client = await findByVagaroId(sb, vagaroCustomerId);
@@ -135,26 +144,38 @@ async function resolveClient(
     if (client) return await linkClient(sb, client, vagaroCustomerId, logFirst, logLast);
   }
 
-  // 3. Vagaro API — full profile for name + email + phone matching
-  if (!businessId) return null;
-  const profile = await profileFromVagaroAPI(businessId, vagaroCustomerId);
-  if (!profile) return null;
-
-  const { firstName, lastName, email, phone } = profile;
-
-  if (firstName || lastName) {
-    client = await findByName(sb, firstName, lastName);
-    if (client) return await linkClient(sb, client, vagaroCustomerId, firstName, lastName);
+  // 3. Build profile from API or caller-provided hint
+  let profile: VagaroProfile | null = profileHint ?? null;
+  if (!profile && businessId) {
+    const api = await profileFromVagaroAPI(businessId, vagaroCustomerId);
+    if (api) profile = { ...api, birthday: null };
   }
 
-  if (email) {
-    client = await findByEmail(sb, email);
-    if (client) return await linkClient(sb, client, vagaroCustomerId, firstName, lastName);
-  }
+  if (profile) {
+    const { firstName, lastName, email, phone } = profile;
 
-  if (phone) {
-    client = await findByPhone(sb, phone);
-    if (client) return await linkClient(sb, client, vagaroCustomerId, firstName, lastName);
+    // 4. Name match
+    if (firstName || lastName) {
+      client = await findByName(sb, firstName, lastName);
+      if (client) return await linkClient(sb, client, vagaroCustomerId, firstName, lastName);
+    }
+
+    // 5. Email match
+    if (email) {
+      client = await findByEmail(sb, email);
+      if (client) return await linkClient(sb, client, vagaroCustomerId, firstName, lastName);
+    }
+
+    // 6. Phone match
+    if (phone) {
+      client = await findByPhone(sb, phone);
+      if (client) return await linkClient(sb, client, vagaroCustomerId, firstName, lastName);
+    }
+
+    // 7. No match — create a new client from Vagaro profile
+    if (firstName || email || phone) {
+      return await createClient(sb, vagaroCustomerId, profile);
+    }
   }
 
   return null;
@@ -175,6 +196,30 @@ async function linkClient(
   await linkPendingAppointments(sb, vagaroCustomerId, client.id);
   console.log(`Linked ${firstName} ${lastName} → Vagaro ID ${vagaroCustomerId}`);
   return client;
+}
+
+async function createClient(
+  sb: SB,
+  vagaroCustomerId: string,
+  profile: VagaroProfile,
+): Promise<ClientRow | null> {
+  const newId = crypto.randomUUID();
+  const { error } = await sb.from("clients").insert({
+    id:            newId,
+    vagaro_id:     vagaroCustomerId,
+    vagaro_synced: true,
+    first_name:    profile.firstName,
+    last_name:     profile.lastName,
+    email:         profile.email    || null,
+    phone:         profile.phone    || null,
+    birthday:      profile.birthday || null,
+    tags:          [],
+    golden_nuggets: [],
+  });
+  if (error) { console.error("createClient error:", error.message); return null; }
+  console.log(`Created new client ${profile.firstName} ${profile.lastName} from Vagaro ID ${vagaroCustomerId}`);
+  await linkPendingAppointments(sb, vagaroCustomerId, newId);
+  return { id: newId, no_shows: 0, total_spent: 0 };
 }
 
 async function findByVagaroId(sb: SB, vagaroId: string): Promise<ClientRow | null> {
@@ -339,10 +384,7 @@ async function handleAppointment(sb: SB, eventType: string, data: Record<string,
 
   if (!vagaroClientId) return;
   const client = await resolveClient(sb, vagaroClientId, businessId);
-  if (!client) {
-    console.log(`No client found for Vagaro ID ${vagaroClientId} — appointment stored unlinked`);
-    return;
-  }
+  if (!client) return;
 
   await sb.from("appointments").update({ client_id: client.id }).eq("vagaro_appt_id", vagaroApptId);
 
@@ -364,29 +406,19 @@ async function handleAppointment(sb: SB, eventType: string, data: Record<string,
 
 async function handleCustomer(sb: SB, eventType: string, data: Record<string, unknown>) {
   const vagaroId  = str(data.customerId ?? data.id);
-  const firstName = str(data.firstName  ?? data.FirstName  ?? data.customerFirstName  ?? "");
-  const lastName  = str(data.lastName   ?? data.LastName   ?? data.customerLastName   ?? "");
-  const email     = str(data.email      ?? data.Email      ?? "") || null;
-  const phone     = str(data.mobilePhone ?? data.phone     ?? "") || null;
+  const firstName = str(data.firstName  ?? data.FirstName  ?? data.customerFirstName  ?? "").trim();
+  const lastName  = str(data.lastName   ?? data.LastName   ?? data.customerLastName   ?? "").trim();
+  const email     = str(data.email      ?? data.Email      ?? "").trim() || null;
+  const phone     = str(data.mobilePhone ?? data.phone     ?? "").trim() || null;
   const birthday  = str(data.birthDate  ?? data.birthday   ?? "").split("T")[0] || null;
   if (!vagaroId) return;
 
-  if (eventType === "customer.created") {
-    const existing = await resolveClient(sb, vagaroId, "");
-    if (!existing && firstName) {
-      await sb.from("clients").insert({
-        id: crypto.randomUUID(),
-        vagaro_id: vagaroId, vagaro_synced: true,
-        first_name: firstName, last_name: lastName,
-        email, phone, birthday,
-        tags: [], golden_nuggets: [],
-      });
-    }
-    return;
-  }
-
-  const client = await resolveClient(sb, vagaroId, "");
+  const profile: VagaroProfile = { firstName, lastName, email, phone, birthday };
+  const client = await resolveClient(sb, vagaroId, "", profile);
   if (!client) return;
+
+  if (eventType === "customer.created") return;
+
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString(), vagaro_synced: true };
   if (firstName) updates.first_name = firstName;
   if (lastName)  updates.last_name  = lastName;
