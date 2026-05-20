@@ -3345,7 +3345,27 @@ function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, we
   const [testResult, setTestResult] = useState(null);
   const [testing, setTesting] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [webhookSecret, setWebhookSecret] = useState(() => localStorage.getItem("cp_webhook_secret") || "");
+  const [showWebhookSecret, setShowWebhookSecret] = useState(false);
+  const [liveWebhookLog, setLiveWebhookLog] = useState(null);
+  const [webhookLogLoading, setWebhookLogLoading] = useState(false);
+  const [copiedWebhook, setCopiedWebhook] = useState(false);
   const gmail = useGmail(getGmailClientId());
+
+  const webhookUrl = supabaseUrl ? `${supabaseUrl.replace(/\/$/, "")}/functions/v1/vagaro-webhook` : null;
+
+  const refreshWebhookLog = useCallback(async () => {
+    if (!usingDB || !supabaseUrl || !supabaseAnonKey) return;
+    setWebhookLogLoading(true);
+    try {
+      const sb = getSB(supabaseUrl, supabaseAnonKey);
+      const { data } = await sb.from("webhook_log").select("*").order("received_at", { ascending: false }).limit(25);
+      if (data) setLiveWebhookLog(data);
+    } catch {}
+    setWebhookLogLoading(false);
+  }, [usingDB, supabaseUrl, supabaseAnonKey]);
+
+  useEffect(() => { if (activeTab === "connection") refreshWebhookLog(); }, [activeTab, refreshWebhookLog]);
 
   const testConnection = async () => {
     setTesting(true);
@@ -3500,10 +3520,21 @@ create table if not exists tasks (
   created_at timestamptz default now()
 );
 
+create table if not exists webhook_log (
+  id uuid primary key default uuid_generate_v4(),
+  source text default 'vagaro',
+  event_type text not null,
+  payload jsonb,
+  processed boolean default true,
+  error text,
+  received_at timestamptz default now()
+);
+
 alter table clients enable row level security;
 alter table appointments enable row level security;
 alter table history enable row level security;
 alter table tasks enable row level security;
+alter table webhook_log enable row level security;
 
 create policy "Allow all" on clients for all using (true);
 create policy "Allow all" on appointments for all using (true);
@@ -3558,6 +3589,7 @@ create policy "Allow all" on tasks for all using (true);`}
         />
       )}
 
+      {/* CSV Import */}
       <div style={{ ...S.card, marginBottom: "14px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <div>
@@ -3570,6 +3602,7 @@ create policy "Allow all" on tasks for all using (true);`}
         </div>
       </div>
 
+      {/* API credentials */}
       <div style={{ ...S.card, marginBottom: "14px" }}>
         <div style={{ fontSize: "14px", fontWeight: "700", color: "#2e2418", marginBottom: 3 }}>Vagaro API credentials</div>
         <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 16 }}>
@@ -3608,42 +3641,133 @@ create policy "Allow all" on tasks for all using (true);`}
         </div>
       </div>
 
+      {/* Webhook receiver */}
       <div style={{ ...S.card, marginBottom: "14px" }}>
-        <div style={{ fontSize: "14px", fontWeight: "700", color: "#2e2418", marginBottom: 3 }}>Webhook setup guide</div>
-        <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 14 }}>
-          In Vagaro: <strong>Settings &rarr; Developers &rarr; APIs &amp; Webhooks &rarr; Create Webhook</strong>
+        <div style={{ fontSize: "14px", fontWeight: "700", color: "#2e2418", marginBottom: 3 }}>Webhook receiver</div>
+        <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 16 }}>
+          This is the URL you paste into Vagaro when creating a webhook.
+          In Vagaro: <strong>Settings → Developers → APIs &amp; Webhooks → Create Webhook</strong>
         </div>
-        {webhookEvents.map((w, i) => (
-          <div key={w.e} style={{ display: "flex", gap: "10px", padding: "9px 0", borderTop: i === 0 ? "none" : "1px solid #f0e8de" }}>
-            <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#a0785a", marginTop: 5, flexShrink: 0 }} />
-            <div>
-              <div style={{ fontSize: "13px", fontWeight: "700", color: "#2e2418" }}>{w.e}</div>
-              <div style={{ fontSize: "12px", color: "#8a7a6a" }}>{w.d}</div>
-            </div>
+
+        {/* Webhook URL */}
+        <label style={S.lbl}>Your webhook URL</label>
+        {webhookUrl ? (
+          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            <input
+              readOnly
+              value={webhookUrl}
+              style={{ ...S.inp, fontFamily: "monospace", fontSize: "12px", flex: 1, color: "#1d5fa8", background: "#dbeafe", border: "1px solid #93c5fd" }}
+            />
+            <button
+              style={S.sm(copiedWebhook ? "primary" : "ghost")}
+              onClick={() => { navigator.clipboard.writeText(webhookUrl).catch(() => {}); setCopiedWebhook(true); setTimeout(() => setCopiedWebhook(false), 2000); }}
+            >
+              {copiedWebhook ? "Copied ✓" : "Copy"}
+            </button>
           </div>
-        ))}
-        <div style={{ background: "#fff8f0", border: "1px solid #f0e0c8", borderRadius: "10px", padding: "11px 14px", marginTop: 14, fontSize: "12px", color: "#92400e", lineHeight: "1.5" }}>
-          Webhooks require the <strong>APIs &amp; Webhooks add-on</strong> ($10/mo). Contact Vagaro Enterprise to enable.
+        ) : (
+          <div style={{ fontSize: "12px", color: "#92400e", background: "#fef3c7", border: "1px solid #f0d090", borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
+            ⚠️ Connect to Supabase first (Database tab) — the webhook URL is derived from your Supabase project URL.
+          </div>
+        )}
+
+        {/* Webhook secret */}
+        <label style={S.lbl}>Webhook secret <span style={{ fontWeight: 400, color: "#b0a090", textTransform: "none", letterSpacing: 0 }}>(optional but recommended)</span></label>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <input
+            type={showWebhookSecret ? "text" : "password"}
+            value={webhookSecret}
+            onChange={(e) => { setWebhookSecret(e.target.value); localStorage.setItem("cp_webhook_secret", e.target.value); }}
+            placeholder="Any strong random string"
+            style={{ ...S.inp, fontFamily: "monospace", flex: 1 }}
+          />
+          <button style={S.sm("ghost")} onClick={() => setShowWebhookSecret((s) => !s)}>
+            {showWebhookSecret ? "Hide" : "Show"}
+          </button>
+          <button style={S.sm("ghost")} onClick={() => {
+            const s = crypto.randomUUID().replace(/-/g, "");
+            setWebhookSecret(s);
+            localStorage.setItem("cp_webhook_secret", s);
+            setShowWebhookSecret(true);
+          }}>Generate</button>
+        </div>
+        {webhookSecret && (
+          <div style={{ fontSize: "12px", color: "#8a7a6a", background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: 10, padding: "10px 14px", marginBottom: 16, lineHeight: 1.6 }}>
+            After setting this secret, add it as a Supabase Edge Function secret:<br />
+            <code style={{ fontFamily: "monospace", fontSize: "11px", color: "#7a5640", display: "block", marginTop: 6 }}>
+              supabase secrets set VAGARO_WEBHOOK_SECRET="{webhookSecret}"
+            </code>
+            Then enter the same value in Vagaro when creating the webhook (Header: <code style={{ fontFamily: "monospace" }}>x-webhook-secret</code>).
+          </div>
+        )}
+
+        {/* Deploy instructions */}
+        <div style={{ background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: 10, padding: "14px 16px", fontSize: "12px", lineHeight: 1.7, color: "#2e2418" }}>
+          <div style={{ fontWeight: "700", marginBottom: 6, color: "#7a5640" }}>One-time deploy (run in your terminal)</div>
+          <code style={{ fontFamily: "monospace", fontSize: "11px", display: "block", whiteSpace: "pre", color: "#1a120b", lineHeight: 2 }}>{`npm install -g supabase
+supabase login
+# Edit supabase/config.toml — set your project_id
+supabase functions deploy vagaro-webhook`}</code>
+          <div style={{ marginTop: 8, color: "#8a7a6a" }}>
+            Your project ID is in Supabase → Project Settings → General → Reference ID.
+          </div>
+        </div>
+
+        {/* Events handled */}
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontSize: "12px", fontWeight: "700", color: "#2e2418", marginBottom: 8 }}>Events handled automatically</div>
+          {webhookEvents.map((w, i) => (
+            <div key={w.e} style={{ display: "flex", gap: "10px", padding: "8px 0", borderTop: i === 0 ? "none" : "1px solid #f0e8de" }}>
+              <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#a0785a", marginTop: 5, flexShrink: 0 }} />
+              <div>
+                <div style={{ fontSize: "12px", fontWeight: "700", color: "#2e2418" }}>{w.e}</div>
+                <div style={{ fontSize: "11px", color: "#8a7a6a" }}>{w.d}</div>
+              </div>
+            </div>
+          ))}
+          <div style={{ background: "#fff8f0", border: "1px solid #f0e0c8", borderRadius: "10px", padding: "10px 14px", marginTop: 12, fontSize: "12px", color: "#92400e", lineHeight: "1.5" }}>
+            Webhooks require the <strong>APIs &amp; Webhooks add-on</strong> ($10/mo). Contact Vagaro Enterprise to enable.
+          </div>
         </div>
       </div>
 
+      {/* Live webhook log */}
       <div style={{ ...S.card, marginBottom: "14px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <div style={{ fontSize: "14px", fontWeight: "700", color: "#2e2418" }}>Recent webhook events</div>
-          <span style={{ fontSize: "11px", color: "#b0a090" }}>Mock data</span>
-        </div>
-        {webhookLog.map((ev, i) => (
-          <div key={ev.id} style={{ display: "flex", gap: "10px", padding: "9px 0", borderBottom: i < webhookLog.length - 1 ? "1px solid #f0e8de" : "none" }}>
-            <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#0f7a4a", marginTop: 5, flexShrink: 0 }} />
-            <div style={{ flex: 1 }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontSize: "12px", fontFamily: "monospace", color: "#7a5640", fontWeight: "700" }}>{ev.event}</span>
-                <span style={{ fontSize: "11px", color: "#b0a090" }}>{fmtWebhookTS(ev.time)}</span>
-              </div>
-              <div style={{ fontSize: "12px", color: "#7a6a5a" }}>{ev.client} · {ev.detail}</div>
-            </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {liveWebhookLog && <span style={{ fontSize: "10px", fontWeight: "700", color: "#0f7a4a", background: "#dcf5ec", padding: "2px 8px", borderRadius: 100 }}>Live</span>}
+            {!liveWebhookLog && !usingDB && <span style={{ fontSize: "11px", color: "#b0a090" }}>Connect DB to see live events</span>}
+            {usingDB && (
+              <button style={S.sm("ghost")} onClick={refreshWebhookLog} disabled={webhookLogLoading}>
+                {webhookLogLoading ? "Loading…" : "Refresh"}
+              </button>
+            )}
           </div>
-        ))}
+        </div>
+        {(liveWebhookLog || webhookLog).length === 0 ? (
+          <div style={{ fontSize: "13px", color: "#b0a090", textAlign: "center", padding: "24px 0" }}>No webhook events received yet.</div>
+        ) : (liveWebhookLog || webhookLog).map((ev, i, arr) => {
+          const isLive = !!liveWebhookLog;
+          const event   = isLive ? ev.event_type : ev.event;
+          const time    = isLive ? ev.received_at : ev.time;
+          const detail  = isLive ? (ev.payload?.data ? JSON.stringify(ev.payload.data).slice(0, 80) : "—") : `${ev.client} · ${ev.detail}`;
+          const hasErr  = isLive && ev.error;
+          return (
+            <div key={ev.id} style={{ display: "flex", gap: "10px", padding: "9px 0", borderBottom: i < arr.length - 1 ? "1px solid #f0e8de" : "none" }}>
+              <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: hasErr ? "#991b1b" : "#0f7a4a", marginTop: 5, flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <span style={{ fontSize: "12px", fontFamily: "monospace", color: "#7a5640", fontWeight: "700" }}>{event}</span>
+                  <span style={{ fontSize: "11px", color: "#b0a090", flexShrink: 0 }}>{fmtWebhookTS(time)}</span>
+                </div>
+                <div style={{ fontSize: "12px", color: hasErr ? "#991b1b" : "#7a6a5a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {hasErr ? `Error: ${ev.error}` : detail}
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <div style={S.card}>
