@@ -3806,6 +3806,529 @@ function MobileClientShell({ clients, selected, setSelected, filter, setFilter, 
   );
 }
 
+// ─── SALES DASHBOARD ─────────────────────────────────────────────────────────
+const SALES_BRAND = {
+  terracotta: "#B85C38", gold: "#C9A84C", teal: "#2A7F7F",
+  sage: "#7A9E7E", cream: "#FDF6ED", dark: "#2C1810",
+};
+
+const SALES_GOALS = {
+  monthly: 30000, servicesPerWeek: 79, sessionsPerDay: 15.8,
+  packageTotal: 10000, ownerPackages: 5000, teamPackages: 5000,
+};
+
+const SALES_THERAPISTS = [
+  { name: "Becky",     color: SALES_BRAND.terracotta, rebookGoal: null, sessionLow: 12, sessionHigh: 15, redLightGoal: null, role: "Owner / LMT" },
+  { name: "Maria",     color: "#9B4E8A",               rebookGoal: 20,   sessionLow: 16, sessionHigh: 16, redLightGoal: null, role: "LMT" },
+  { name: "Angelique", color: SALES_BRAND.gold,         rebookGoal: 20,   sessionLow: 12, sessionHigh: 15, redLightGoal: null, role: "LMT" },
+  { name: "Alleiyah",  color: SALES_BRAND.teal,         rebookGoal: 17,   sessionLow: 10, sessionHigh: 12, redLightGoal: null, role: "LMT" },
+  { name: "Don",       color: SALES_BRAND.sage,         rebookGoal: 17,   sessionLow: 7,  sessionHigh: 9,  redLightGoal: 12,   role: "Studio Coordinator / LMT" },
+];
+
+const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+function fmtDollar(n) { return "$" + Math.round(n).toLocaleString(); }
+function salPct(a, b) { return b === 0 ? 0 : Math.min((a / b) * 100, 100); }
+
+function Ring({ value, size = 110, stroke = 9, color, bg = "#ede8e2", children }) {
+  const r = (size - stroke) / 2;
+  const circ = 2 * Math.PI * r;
+  const dash = Math.min(value / 100, 1) * circ;
+  return (
+    <svg width={size} height={size} style={{ transform: "rotate(-90deg)", flexShrink: 0 }}>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={bg} strokeWidth={stroke} />
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+        strokeDasharray={`${dash} ${circ}`} strokeLinecap="round"
+        style={{ transition: "stroke-dasharray 1.1s cubic-bezier(.4,0,.2,1)" }} />
+      <foreignObject x={stroke/2} y={stroke/2} width={size-stroke} height={size-stroke}>
+        <div xmlns="http://www.w3.org/1999/xhtml"
+          style={{ width:"100%", height:"100%", display:"flex", alignItems:"center",
+            justifyContent:"center", transform:"rotate(90deg)" }}>
+          {children}
+        </div>
+      </foreignObject>
+    </svg>
+  );
+}
+
+function SalesBar({ value, color, bg = "#ede8e2", h = 8 }) {
+  return (
+    <div style={{ background: bg, borderRadius: 99, height: h, overflow: "hidden" }}>
+      <div style={{ width: `${Math.min(value, 100)}%`, height: "100%", background: color,
+        borderRadius: 99, transition: "width 1.1s cubic-bezier(.4,0,.2,1)" }} />
+    </div>
+  );
+}
+
+function SalesCard({ children, style = {} }) {
+  return (
+    <div style={{ background: "#fff", borderRadius: 18, padding: "24px 28px",
+      boxShadow: "0 4px 32px rgba(44,24,16,0.07)", ...style }}>
+      {children}
+    </div>
+  );
+}
+
+function SalesLabel({ children, color = SALES_BRAND.dark }) {
+  return (
+    <div style={{ fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase",
+      color, opacity: color === SALES_BRAND.dark ? 0.5 : 1, marginBottom: 4, fontWeight: 600 }}>
+      {children}
+    </div>
+  );
+}
+
+function SalesNumInput({ value, onChange, color, width = 64 }) {
+  return (
+    <input type="number" min={0} value={value}
+      onChange={e => onChange(Math.max(0, Number(e.target.value)))}
+      style={{ width, padding: "4px 6px", borderRadius: 8, textAlign: "center",
+        border: `1.5px solid ${color}44`, fontSize: 13, fontWeight: 700,
+        color, background: `${color}0D`, outline: "none", fontFamily: "monospace" }} />
+  );
+}
+
+function salesStorageKey(year, month) { return `rctm_sales_${year}_${month}`; }
+
+function loadSalesData(year, month) {
+  try {
+    const raw = localStorage.getItem(salesStorageKey(year, month));
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {
+    ownerSales: 0, teamSales: 0, monthlySales: 0,
+    stats: Object.fromEntries(SALES_THERAPISTS.map(t => [t.name, { sessions: 0, rebooked: 0, redLight: 0 }])),
+  };
+}
+
+function saveSalesData(year, month, data) {
+  try { localStorage.setItem(salesStorageKey(year, month), JSON.stringify(data)); } catch {}
+}
+
+function SalesDashboard() {
+  const now = new Date();
+  const [selYear,  setSelYear]  = useState(now.getFullYear());
+  const [selMonth, setSelMonth] = useState(now.getMonth() + 1); // 1-indexed
+  const [animated, setAnimated] = useState(false);
+  const [showNote, setShowNote] = useState(false);
+  const [data, setData] = useState(() => loadSalesData(now.getFullYear(), now.getMonth() + 1));
+
+  useEffect(() => {
+    setData(loadSalesData(selYear, selMonth));
+    setAnimated(false);
+    setTimeout(() => setAnimated(true), 120);
+  }, [selYear, selMonth]);
+
+  useEffect(() => { setTimeout(() => setAnimated(true), 120); }, []);
+
+  const updateData = (updates) => {
+    setData(prev => {
+      const next = { ...prev, ...updates };
+      saveSalesData(selYear, selMonth, next);
+      return next;
+    });
+  };
+
+  const updStat = (name, field, val) => {
+    const next = { ...data.stats, [name]: { ...data.stats[name], [field]: Math.max(0, val) } };
+    updateData({ stats: next });
+  };
+
+  const monthName   = MONTH_NAMES[selMonth - 1];
+  const monthLabel  = `${monthName} ${selYear}`;
+  const juneTotal   = data.ownerSales + data.teamSales;
+  const junePct     = salPct(juneTotal,        SALES_GOALS.packageTotal);
+  const ownerPct    = salPct(data.ownerSales,  SALES_GOALS.ownerPackages);
+  const teamPct     = salPct(data.teamSales,   SALES_GOALS.teamPackages);
+  const monthlyPct  = salPct(data.monthlySales, SALES_GOALS.monthly);
+  const goalUnlocked = ownerPct >= 100 && teamPct >= 100;
+  const totalSessionsWeek = SALES_THERAPISTS.reduce((s, t) => s + (data.stats[t.name]?.sessions || 0), 0);
+  const studioSessionsPct = salPct(totalSessionsWeek, SALES_GOALS.servicesPerWeek);
+
+  const yearOpts = [];
+  for (let y = 2024; y <= now.getFullYear() + 1; y++) yearOpts.push(y);
+
+  return (
+    <div style={{ overflowY: "auto", flex: 1, background: "linear-gradient(140deg,#fdf6ed 0%,#f3ebe0 50%,#e5f0ee 100%)",
+      fontFamily: "'Cormorant Garamond', Georgia, serif", color: SALES_BRAND.dark, paddingBottom: 64 }}>
+
+      {/* HEADER */}
+      <div style={{ background: SALES_BRAND.terracotta, padding: "28px 40px 24px", position: "relative", overflow: "hidden" }}>
+        {[300,200,130,70].map((s,i) => (
+          <div key={i} style={{ position:"absolute", borderRadius:"50%",
+            border:"1.5px solid rgba(255,255,255,0.13)", width:s, height:s,
+            top:[-100,-50,0,30][i], right:[10,50,90,130][i], pointerEvents:"none" }} />
+        ))}
+        <div style={{ position:"relative", zIndex:1, maxWidth:960, margin:"0 auto" }}>
+          <div style={{ fontSize:11, letterSpacing:"0.2em", color:"rgba(255,255,255,0.65)",
+            textTransform:"uppercase", marginBottom:4 }}>
+            Rapid City Therapeutic Massage
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:16, flexWrap:"wrap" }}>
+            <h1 style={{ margin:0, fontSize:26, fontWeight:700, color:"#fff", lineHeight:1.1 }}>
+              Sales &amp; Performance Dashboard
+            </h1>
+            {/* Month / Year picker */}
+            <div style={{ display:"flex", gap:8, alignItems:"center", marginLeft:"auto" }}>
+              <select value={selMonth} onChange={e => setSelMonth(Number(e.target.value))}
+                style={{ padding:"5px 10px", borderRadius:8, border:"1.5px solid rgba(255,255,255,0.3)",
+                  background:"rgba(255,255,255,0.15)", color:"#fff", fontSize:13, fontWeight:700,
+                  cursor:"pointer", outline:"none", fontFamily:"'Cormorant Garamond',Georgia,serif" }}>
+                {MONTH_NAMES.map((m,i) => <option key={m} value={i+1} style={{ color: SALES_BRAND.dark, background:"#fff" }}>{m}</option>)}
+              </select>
+              <select value={selYear} onChange={e => setSelYear(Number(e.target.value))}
+                style={{ padding:"5px 10px", borderRadius:8, border:"1.5px solid rgba(255,255,255,0.3)",
+                  background:"rgba(255,255,255,0.15)", color:"#fff", fontSize:13, fontWeight:700,
+                  cursor:"pointer", outline:"none", fontFamily:"'Cormorant Garamond',Georgia,serif" }}>
+                {yearOpts.map(y => <option key={y} value={y} style={{ color: SALES_BRAND.dark, background:"#fff" }}>{y}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ marginTop:4, fontSize:13, color:"rgba(255,255,255,0.75)", fontStyle:"italic" }}>
+            {monthLabel} · Precise Care, Real Solutions.
+          </div>
+          {goalUnlocked && (
+            <div style={{ marginTop:14, display:"inline-block", background:SALES_BRAND.gold,
+              color:SALES_BRAND.dark, padding:"8px 22px", borderRadius:99,
+              fontWeight:700, fontSize:14, animation:"salPulse 2s infinite" }}>
+              🌊 HOT SPRINGS TRIP UNLOCKED — LET'S GO!
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ maxWidth:960, margin:"0 auto", padding:"0 24px" }}>
+
+        {/* VAGARO REMINDER */}
+        <div style={{ marginTop:24, borderRadius:14, overflow:"hidden",
+          border:`1.5px solid ${SALES_BRAND.gold}55`,
+          boxShadow:"0 2px 16px rgba(201,168,76,0.10)" }}>
+          <div onClick={() => setShowNote(p => !p)}
+            style={{ background:`linear-gradient(135deg,${SALES_BRAND.gold}22,${SALES_BRAND.gold}08)`,
+              padding:"14px 22px", cursor:"pointer", display:"flex",
+              alignItems:"center", justifyContent:"space-between" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+              <span style={{ fontSize:18 }}>📌</span>
+              <div>
+                <div style={{ fontSize:12, fontWeight:700, color:SALES_BRAND.gold,
+                  letterSpacing:"0.1em", textTransform:"uppercase" }}>
+                  Staff Note — Rebooking in Vagaro
+                </div>
+                <div style={{ fontSize:12, color:SALES_BRAND.dark, opacity:0.6, marginTop:1 }}>
+                  Click to {showNote ? "collapse" : "read"} — important for accurate data
+                </div>
+              </div>
+            </div>
+            <span style={{ fontSize:16, color:SALES_BRAND.gold, display:"inline-block",
+              transform: showNote ? "rotate(180deg)" : "rotate(0deg)", transition:"transform 0.3s" }}>▾</span>
+          </div>
+          {showNote && (
+            <div style={{ background:"#fffdf7", padding:"18px 24px", borderTop:`1px solid ${SALES_BRAND.gold}33` }}>
+              <div style={{ fontSize:14, lineHeight:1.8, color:SALES_BRAND.dark }}>
+                <span style={{ fontWeight:700, color:SALES_BRAND.terracotta }}>
+                  ⚠️ When rebooking a client, you MUST use the Rebooking Feature in Vagaro —
+                </span>{" "}
+                not just schedule a new appointment manually. The rebooking feature is what
+                captures the data that shows up in our rebooking percentage reports. If you
+                schedule without using it, that rebook is invisible to us and your numbers
+                will not reflect your actual performance.
+              </div>
+              <div style={{ marginTop:10, fontSize:13, color:SALES_BRAND.dark,
+                opacity:0.6, fontStyle:"italic", lineHeight:1.7 }}>
+                This matters for your personal goals, for our Monday tracking, and for
+                Becky to see the full picture of how we are growing together. Every rebook
+                counts — make sure Vagaro counts it too.
+              </div>
+              <div style={{ marginTop:14, display:"flex", gap:8, flexWrap:"wrap" }}>
+                {["Use the Rebooking Feature","Not 'New Appointment'",
+                  "Every rebook = better data","Your numbers matter"].map(tag => (
+                  <span key={tag} style={{ background:`${SALES_BRAND.gold}22`, color:SALES_BRAND.gold,
+                    padding:"4px 12px", borderRadius:99, fontSize:11,
+                    fontWeight:700, letterSpacing:"0.05em" }}>{tag}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* PACKAGE CHALLENGE HERO */}
+        <SalesCard style={{ marginTop:20, border:`1.5px solid ${SALES_BRAND.terracotta}18`,
+          position:"relative", overflow:"hidden" }}>
+          <div style={{ position:"absolute", top:0, right:0, width:220, height:220,
+            background:`radial-gradient(circle at top right,${SALES_BRAND.gold}15,transparent 70%)`,
+            pointerEvents:"none" }} />
+          <SalesLabel color={SALES_BRAND.gold}>{monthLabel} Package Challenge</SalesLabel>
+          <div style={{ fontSize:24, fontWeight:700, color:SALES_BRAND.terracotta, margin:"2px 0 4px" }}>
+            $10,000 in Package Sales
+          </div>
+          <div style={{ fontSize:13, color:SALES_BRAND.dark, opacity:0.6, fontStyle:"italic", marginBottom:24 }}>
+            Both goals hit = Becky takes the whole team to the hot springs 🌊
+          </div>
+          <div style={{ display:"flex", gap:32, alignItems:"center", flexWrap:"wrap" }}>
+            <Ring value={animated ? junePct : 0} size={150} stroke={13} color={SALES_BRAND.gold}>
+              <div style={{ textAlign:"center" }}>
+                <div style={{ fontSize:24, fontWeight:700, color:SALES_BRAND.dark }}>{Math.round(junePct)}%</div>
+                <div style={{ fontSize:9, opacity:0.5, letterSpacing:"0.08em" }}>OF GOAL</div>
+              </div>
+            </Ring>
+            <div style={{ flex:1, minWidth:200 }}>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"12px 20px", marginBottom:18 }}>
+                {[
+                  { l:"Total Raised",  v:fmtDollar(juneTotal),                                        c:SALES_BRAND.dark },
+                  { l:"Remaining",     v:fmtDollar(Math.max(0,SALES_GOALS.packageTotal-juneTotal)),   c:SALES_BRAND.terracotta },
+                  { l:"Daily Target",  v:fmtDollar(SALES_GOALS.packageTotal/30),                      c:SALES_BRAND.teal },
+                  { l:"Goal",          v:fmtDollar(SALES_GOALS.packageTotal),                         c:SALES_BRAND.gold },
+                ].map(({l,v,c}) => (
+                  <div key={l}>
+                    <div style={{ fontSize:9, letterSpacing:"0.1em", textTransform:"uppercase", opacity:0.5, marginBottom:2 }}>{l}</div>
+                    <div style={{ fontSize:20, fontWeight:700, color:c }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <SalesBar value={animated ? junePct : 0} color={SALES_BRAND.gold} bg="#f0e8d4" h={12} />
+            </div>
+          </div>
+
+          {/* Owner vs Team */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginTop:22 }}>
+            {[
+              { name:"Becky", goal:SALES_GOALS.ownerPackages, val:data.ownerSales, color:SALES_BRAND.terracotta, key:"ownerSales" },
+              { name:"Team",  goal:SALES_GOALS.teamPackages,  val:data.teamSales,  color:SALES_BRAND.teal,       key:"teamSales"  },
+            ].map(({name,goal,val,color,key}) => {
+              const p = salPct(val, goal);
+              return (
+                <div key={name} style={{ background:`${color}09`, borderRadius:12,
+                  padding:"16px 18px", border:`1.5px solid ${color}22` }}>
+                  <div style={{ display:"flex", justifyContent:"space-between",
+                    alignItems:"center", marginBottom:10 }}>
+                    <div>
+                      <SalesLabel color={color}>{name}'s Goal</SalesLabel>
+                      <div style={{ fontSize:18, fontWeight:700, color }}>{fmtDollar(val)}</div>
+                      <div style={{ fontSize:11, opacity:0.4 }}>of {fmtDollar(goal)}</div>
+                    </div>
+                    <Ring value={animated ? p : 0} size={64} stroke={6} color={color} bg="#ede8e2">
+                      <span style={{ fontSize:11, fontWeight:700, color }}>{Math.round(p)}%</span>
+                    </Ring>
+                  </div>
+                  <SalesBar value={animated ? p : 0} color={color} bg="#ede8e2" h={7} />
+                  <div style={{ marginTop:10 }}>
+                    <div style={{ fontSize:9, opacity:0.45, marginBottom:4, letterSpacing:"0.06em", textTransform:"uppercase" }}>Update</div>
+                    <input type="range" min={0} max={goal*1.2} value={val}
+                      onChange={e => updateData({ [key]: Number(e.target.value) })}
+                      style={{ width:"100%", accentColor:color }} />
+                  </div>
+                  <div style={{ marginTop:6, fontSize:11, opacity:0.55 }}>
+                    {val >= goal ? "🎉 Goal hit!" : `${fmtDollar(Math.max(0,goal-val))} to go`}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </SalesCard>
+
+        {/* THERAPIST CARDS */}
+        <div style={{ marginTop:24 }}>
+          <div style={{ fontSize:11, letterSpacing:"0.16em", textTransform:"uppercase",
+            color:SALES_BRAND.terracotta, fontWeight:700, marginBottom:14 }}>
+            📋 Individual Goals — Weekly Sessions &amp; Rebooking %
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(270px,1fr))", gap:16 }}>
+            {SALES_THERAPISTS.map(t => {
+              const s        = data.stats[t.name] || { sessions:0, rebooked:0, redLight:0 };
+              const midGoal  = (t.sessionLow + t.sessionHigh) / 2;
+              const sessP    = salPct(s.sessions, midGoal);
+              const rebookP  = s.sessions > 0 ? (s.rebooked / s.sessions) * 100 : 0;
+              const rebookGoalP = t.rebookGoal ? salPct(rebookP, t.rebookGoal) : null;
+              const redLightP   = t.redLightGoal ? salPct(s.redLight, t.redLightGoal) : null;
+              const rangeLabel  = t.sessionLow === t.sessionHigh ? `${t.sessionLow}` : `${t.sessionLow}–${t.sessionHigh}`;
+              const atSessGoal  = s.sessions >= t.sessionLow;
+              const atRebook    = t.rebookGoal && rebookP >= t.rebookGoal;
+
+              return (
+                <SalesCard key={t.name} style={{ border:`1.5px solid ${t.color}28`, padding:"20px 22px" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between",
+                    alignItems:"flex-start", marginBottom:16 }}>
+                    <div>
+                      <div style={{ fontSize:20, fontWeight:700, color:t.color }}>{t.name}</div>
+                      <div style={{ fontSize:10, opacity:0.4, letterSpacing:"0.05em", marginTop:1 }}>{t.role}</div>
+                    </div>
+                    <Ring value={animated ? sessP : 0} size={72} stroke={7} color={t.color} bg="#ede8e2">
+                      <div style={{ textAlign:"center" }}>
+                        <div style={{ fontSize:14, fontWeight:700, color:t.color }}>{s.sessions}</div>
+                        <div style={{ fontSize:7, opacity:0.45 }}>sessions</div>
+                      </div>
+                    </Ring>
+                  </div>
+
+                  <div style={{ marginBottom:14 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
+                      <span style={{ fontSize:11, opacity:0.55 }}>Weekly Sessions</span>
+                      <span style={{ fontSize:11, fontWeight:700, color: atSessGoal ? SALES_BRAND.sage : t.color }}>
+                        {s.sessions} / {rangeLabel}{atSessGoal ? " ✓" : ""}
+                      </span>
+                    </div>
+                    <SalesBar value={animated ? sessP : 0} color={t.color} bg="#ede8e2" h={7} />
+                    <div style={{ marginTop:8, display:"flex", alignItems:"center", gap:8 }}>
+                      <SalesNumInput value={s.sessions} onChange={v => updStat(t.name,"sessions",v)} color={t.color} />
+                      <span style={{ fontSize:10, opacity:0.4 }}>sessions this week</span>
+                    </div>
+                  </div>
+
+                  {t.redLightGoal && (
+                    <div style={{ marginBottom:14, padding:"10px 12px",
+                      background:`${SALES_BRAND.teal}0A`, borderRadius:10, border:`1px solid ${SALES_BRAND.teal}22` }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
+                        <span style={{ fontSize:11, color:SALES_BRAND.teal, fontWeight:600 }}>💡 Red Light Sessions</span>
+                        <span style={{ fontSize:11, fontWeight:700, color:SALES_BRAND.teal }}>
+                          {s.redLight} / {t.redLightGoal}{s.redLight >= t.redLightGoal ? " ✓" : ""}
+                        </span>
+                      </div>
+                      <SalesBar value={animated ? (redLightP||0) : 0} color={SALES_BRAND.teal} bg="#dde8e8" h={6} />
+                      <div style={{ marginTop:8, display:"flex", alignItems:"center", gap:8 }}>
+                        <SalesNumInput value={s.redLight} onChange={v => updStat(t.name,"redLight",v)} color={SALES_BRAND.teal} />
+                        <span style={{ fontSize:10, opacity:0.4 }}>red light this week</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {t.rebookGoal && (
+                    <div style={{ borderTop:`1px solid ${t.color}18`, paddingTop:14 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
+                        <span style={{ fontSize:11, opacity:0.55 }}>Rebook %</span>
+                        <span style={{ fontSize:11, fontWeight:700, color: atRebook ? SALES_BRAND.sage : t.color }}>
+                          {s.sessions > 0 ? rebookP.toFixed(1) : "0.0"}% / goal {t.rebookGoal}%{atRebook ? " 🎉" : ""}
+                        </span>
+                      </div>
+                      <SalesBar value={animated ? (rebookGoalP||0) : 0} color={t.color} bg="#ede8e2" h={7} />
+                      <div style={{ marginTop:10 }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+                          <SalesNumInput value={s.rebooked} onChange={v => updStat(t.name,"rebooked",v)} color={t.color} />
+                          <span style={{ fontSize:10, opacity:0.4 }}>clients rebooked</span>
+                        </div>
+                        <div style={{ fontSize:11, opacity:0.5, fontStyle:"italic" }}>
+                          {s.sessions > 0 ? `${s.rebooked} of ${s.sessions} clients rebooked` : "Enter sessions + rebooks above"}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </SalesCard>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* STUDIO WEEKLY TOTAL */}
+        <SalesCard style={{ marginTop:20, border:`1.5px solid ${SALES_BRAND.teal}22` }}>
+          <div style={{ display:"flex", gap:28, alignItems:"center", flexWrap:"wrap" }}>
+            <div style={{ flex:1, minWidth:220 }}>
+              <SalesLabel color={SALES_BRAND.teal}>Studio Total — This Week</SalesLabel>
+              <div style={{ fontSize:26, fontWeight:700, color:SALES_BRAND.dark, margin:"4px 0 12px" }}>
+                {totalSessionsWeek}
+                <span style={{ fontSize:14, opacity:0.4, fontWeight:400 }}> / {SALES_GOALS.servicesPerWeek} sessions</span>
+              </div>
+              <SalesBar value={animated ? studioSessionsPct : 0} color={SALES_BRAND.teal} bg="#dde8e8" h={10} />
+              <div style={{ marginTop:8, fontSize:12, opacity:0.55 }}>
+                {totalSessionsWeek >= SALES_GOALS.servicesPerWeek
+                  ? "🎉 Weekly goal hit!"
+                  : `${SALES_GOALS.servicesPerWeek - totalSessionsWeek} sessions to goal`}
+              </div>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, minWidth:260 }}>
+              {[
+                { l:"Sessions/Day Goal", v:SALES_GOALS.sessionsPerDay,     color:SALES_BRAND.gold },
+                { l:"Weekly Goal",       v:SALES_GOALS.servicesPerWeek,    color:SALES_BRAND.teal },
+                { l:"Monthly Goal",      v:fmtDollar(SALES_GOALS.monthly), color:SALES_BRAND.terracotta },
+              ].map(({l,v,color}) => (
+                <div key={l} style={{ background:`${color}0D`, borderRadius:12,
+                  padding:"12px 14px", textAlign:"center", border:`1px solid ${color}22` }}>
+                  <div style={{ fontSize:20, fontWeight:700, color }}>{v}</div>
+                  <div style={{ fontSize:9, opacity:0.5, marginTop:3, letterSpacing:"0.06em", textTransform:"uppercase" }}>{l}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </SalesCard>
+
+        {/* MONTHLY REVENUE */}
+        <SalesCard style={{ marginTop:20, border:`1.5px solid ${SALES_BRAND.sage}33` }}>
+          <div style={{ display:"flex", gap:28, alignItems:"center", flexWrap:"wrap" }}>
+            <Ring value={animated ? monthlyPct : 0} size={110} stroke={10} color={SALES_BRAND.sage} bg="#dde8e2">
+              <div style={{ textAlign:"center" }}>
+                <div style={{ fontSize:18, fontWeight:700, color:SALES_BRAND.sage }}>{Math.round(monthlyPct)}%</div>
+                <div style={{ fontSize:8, opacity:0.5, letterSpacing:"0.06em" }}>MONTHLY</div>
+              </div>
+            </Ring>
+            <div style={{ flex:1, minWidth:200 }}>
+              <SalesLabel color={SALES_BRAND.sage}>Monthly Revenue — {monthLabel}</SalesLabel>
+              <div style={{ fontSize:26, fontWeight:700, color:SALES_BRAND.dark, margin:"4px 0 4px" }}>
+                {fmtDollar(data.monthlySales)}
+                <span style={{ fontSize:14, opacity:0.4, fontWeight:400 }}> / {fmtDollar(SALES_GOALS.monthly)}</span>
+              </div>
+              <SalesBar value={animated ? monthlyPct : 0} color={SALES_BRAND.sage} bg="#dde8e2" h={10} />
+              <div style={{ marginTop:8, fontSize:12, opacity:0.55 }}>
+                {monthlyPct >= 100 ? "🎉 Monthly goal achieved!" : `${fmtDollar(SALES_GOALS.monthly - data.monthlySales)} remaining`}
+              </div>
+              <div style={{ marginTop:14 }}>
+                <input type="range" min={0} max={SALES_GOALS.monthly*1.2} value={data.monthlySales}
+                  onChange={e => updateData({ monthlySales: Number(e.target.value) })}
+                  style={{ width:"100%", accentColor:SALES_BRAND.sage }} />
+              </div>
+            </div>
+          </div>
+        </SalesCard>
+
+        {/* HOT SPRINGS TRACKER */}
+        <div style={{ marginTop:20, borderRadius:18, padding:"26px 32px", textAlign:"center",
+          background: goalUnlocked
+            ? `linear-gradient(135deg,${SALES_BRAND.teal},${SALES_BRAND.sage})`
+            : `linear-gradient(135deg,#f5ede0,#ede5d8)`,
+          border: goalUnlocked ? "none" : `1.5px dashed ${SALES_BRAND.gold}55`,
+          transition:"background 0.8s ease" }}>
+          <div style={{ fontSize:38, marginBottom:8 }}>{goalUnlocked ? "🌊" : "💧"}</div>
+          <div style={{ fontSize:22, fontWeight:700,
+            color: goalUnlocked ? "#fff" : SALES_BRAND.dark, marginBottom:6 }}>
+            {goalUnlocked ? "HOT SPRINGS TRIP UNLOCKED!" : "Hot Springs Awaits…"}
+          </div>
+          <div style={{ fontSize:14, fontStyle:"italic",
+            color: goalUnlocked ? "rgba(255,255,255,0.85)" : SALES_BRAND.dark,
+            opacity: goalUnlocked ? 1 : 0.65 }}>
+            {goalUnlocked
+              ? "Becky + the whole team hit their package goals. Pack your bags! 🎉"
+              : `Becky needs ${fmtDollar(Math.max(0,SALES_GOALS.ownerPackages-data.ownerSales))} more · Team needs ${fmtDollar(Math.max(0,SALES_GOALS.teamPackages-data.teamSales))} more`}
+          </div>
+          {!goalUnlocked && (
+            <div style={{ marginTop:18, display:"flex", justifyContent:"center", gap:24, flexWrap:"wrap" }}>
+              {[
+                { label:"Becky", p:ownerPct, color:SALES_BRAND.terracotta },
+                { label:"Team",  p:teamPct,  color:SALES_BRAND.teal },
+              ].map(({label,p,color}) => (
+                <div key={label} style={{ textAlign:"center" }}>
+                  <div style={{ fontSize:11, opacity:0.6, marginBottom:6, letterSpacing:"0.08em" }}>{label}</div>
+                  <div style={{ width:130, height:8, background:"#e0d8ce", borderRadius:99, overflow:"hidden" }}>
+                    <div style={{ width:`${Math.min(p,100)}%`, height:"100%",
+                      background:color, borderRadius:99, transition:"width 1s ease" }} />
+                  </div>
+                  <div style={{ fontSize:12, color, fontWeight:700, marginTop:5 }}>{Math.round(p)}%</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ textAlign:"center", marginTop:36, fontSize:10, opacity:0.35,
+          letterSpacing:"0.14em", textTransform:"uppercase" }}>
+          Rapid City Therapeutic Massage · rctmassage.com · Precise Care, Real Solutions.
+        </div>
+      </div>
+
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400;1,600&display=swap');
+        @keyframes salPulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.03)} }
+      `}</style>
+    </div>
+  );
+}
+
 // ─── NAV CONFIG ───────────────────────────────────────────────────────────────
 const NAV_ITEMS = [
   {
@@ -3813,6 +4336,10 @@ const NAV_ITEMS = [
     icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6",
   },
   { id: "pulse",     label: "Pulse",     short: "Pulse",     isPulse: true },
+  {
+    id: "sales", label: "Sales", short: "Sales",
+    icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
+  },
   {
     id: "clients", label: "Clients", short: "Clients",
     icon: "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z",
@@ -4427,6 +4954,7 @@ function App() {
             onFilterClients={(f) => { setFilter(f); setTab("clients"); }}
           />}
         {tab === "pulse"     && <PulsePage clients={clients} templates={templates} onGoToClient={goToClient} onUpdateClient={updateClient} />}
+        {tab === "sales"     && <SalesDashboard />}
         {tab === "settings"  && (
           <SettingsPage
             clientId={clientId} setClientId={setClientId}
