@@ -4046,9 +4046,13 @@ class ErrorBoundary extends React.Component {
 // ─── APP ROOT ────────────────────────────────────────────────────────────────
 function App() {
   // ── ALL HOOKS MUST BE DECLARED BEFORE ANY CONDITIONAL RETURNS ──
-  const [clients, setClients]           = useState(INITIAL_CLIENTS);
+  const [clients, setClients]           = useState(() => {
+    try { const s = localStorage.getItem("cp_clients"); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
   const [templates, setTemplates]       = useState(DEFAULT_TEMPLATES);
-  const [tasks, setTasks]               = useState(INITIAL_TASKS);
+  const [tasks, setTasks]               = useState(() => {
+    try { const s = localStorage.getItem("cp_tasks"); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
   const [tab, setTab]                   = useState("dashboard");
   const [selected, setSelected]         = useState(null);
   const [filter, setFilter]             = useState("all");
@@ -4096,6 +4100,14 @@ function App() {
         setDbLoading(false);
       });
   }, [supabaseUrl, supabaseAnonKey, auth.user]);
+
+  useEffect(() => {
+    try { localStorage.setItem("cp_clients", JSON.stringify(clients)); } catch {}
+  }, [clients]);
+
+  useEffect(() => {
+    try { localStorage.setItem("cp_tasks", JSON.stringify(tasks)); } catch {}
+  }, [tasks]);
 
   const searchResults = useMemo(() => {
     if (!globalSearch.trim()) return [];
@@ -4228,8 +4240,6 @@ function App() {
   return (
     <div style={{ minHeight: "100vh", background: "#faf8f5", fontFamily: "'DM Sans',sans-serif", color: "#2e2418", display: "flex", flexDirection: "column" }}>
       <style>{CSS}</style>
-      <SyncBar mockMode={mockMode} dbLoading={dbLoading} usingDB={usingDB} dbError={dbLoadError} />
-
       <header style={{ background: "#ffffff", borderBottom: "1px solid #e8e0d6", padding: "0 24px", height: "58px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 500, gap: "12px" }}>
         <div onClick={() => setTab("dashboard")} style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0, cursor: "pointer" }}>
           <div style={{ width: "34px", height: "34px", background: "linear-gradient(135deg,#a0785a,#7a5640)", borderRadius: "9px", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 10px rgba(160,120,90,0.22)", flexShrink: 0 }}>
