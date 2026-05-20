@@ -2059,16 +2059,21 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
   }, [clients]);
 
   const filtered = useMemo(() =>
-    clients.filter((cl) => {
-      const matchF = filter === "all" || deriveStatus(cl) === filter;
-      const q = search.toLowerCase();
-      const matchS = !q ||
-        fullName(cl).toLowerCase().includes(q) ||
-        cl.email?.toLowerCase().includes(q) ||
-        cl.phone?.includes(q);
-      const matchT = !tagFilter || (cl.tags || []).includes(tagFilter);
-      return matchF && matchS && matchT;
-    }),
+    clients
+      .filter((cl) => {
+        const matchF = filter === "all" || deriveStatus(cl) === filter;
+        const q = search.toLowerCase();
+        const matchS = !q ||
+          fullName(cl).toLowerCase().includes(q) ||
+          cl.email?.toLowerCase().includes(q) ||
+          cl.phone?.includes(q);
+        const matchT = !tagFilter || (cl.tags || []).includes(tagFilter);
+        return matchF && matchS && matchT;
+      })
+      .sort((a, b) => {
+        const last = (a.lastName || "").localeCompare(b.lastName || "");
+        return last !== 0 ? last : (a.firstName || "").localeCompare(b.firstName || "");
+      }),
     [clients, filter, search, tagFilter]
   );
 
@@ -2115,6 +2120,13 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
                 fontFamily: "'DM Sans',sans-serif",
               }}
             />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", color: "#b0a090", fontSize: "16px", lineHeight: 1, flexShrink: 0 }}
+                title="Clear search"
+              >×</button>
+            )}
           </div>
           <button onClick={() => setShowNewClient(true)}
             style={{ ...S.btn("primary"), fontSize: "12px", padding: "0 12px", whiteSpace: "nowrap", borderRadius: 10, flexShrink: 0 }}
