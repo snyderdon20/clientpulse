@@ -411,21 +411,23 @@ function CSVImportModal({ onImport, onClose, usingDB }) {
 
   // Vagaro field names → our field names
   const FIELD_MAP = {
-    firstName:    ["first name", "firstname", "first_name", "fname"],
-    lastName:     ["last name", "lastname", "last_name", "lname", "surname"],
-    email:        ["email", "email address", "e-mail"],
-    phone:        ["mobile", "phone", "phone number", "cell", "telephone"],
-    birthday:     ["birthdate", "birthday", "birth date", "date of birth", "dob"],
-    customerSince:["customer since", "member since", "join date", "created"],
-    lastVisit:    ["last visited", "last visit", "last visit date"],
-    address:      ["address", "street", "street address", "address 1"],
-    aptSuite:     ["apt/suite", "apt suite", "apartment", "suite", "unit"],
-    city:         ["city"],
-    state:        ["state", "province"],
-    zip:          ["zip", "zip code", "postal", "postal code"],
-    referredBy:   ["refered by", "referred by", "referral", "referral source"],
-    membership:   ["membership"],
-    tags:         ["banktags", "bank tags", "tags"],
+    firstName:          ["first name", "firstname", "first_name", "fname"],
+    lastName:           ["last name", "lastname", "last_name", "lname", "surname"],
+    email:              ["email", "email address", "e-mail"],
+    phone:              ["mobile", "phone", "phone number", "cell", "telephone"],
+    dayPhone:           ["day", "day phone"],
+    birthday:           ["birthdate", "birthday", "birth date", "date of birth", "dob"],
+    customerSince:      ["customer since", "member since", "join date", "created"],
+    lastVisit:          ["last visited", "last visit", "last visit date"],
+    address:            ["address", "street", "street address", "address 1"],
+    aptSuite:           ["apt/suite", "apt suite", "apartment", "suite", "unit"],
+    city:               ["city"],
+    state:              ["state", "province"],
+    zip:                ["zip", "zip code", "postal", "postal code"],
+    referredBy:         ["refered by", "referred by", "referral", "referral source"],
+    membership:         ["membership"],
+    tags:               ["tags"],
+    appointmentsBooked: ["appointments booked", "appointments booked"],
   };
 
   const autoMap = (hdrs) => {
@@ -480,9 +482,18 @@ function CSVImportModal({ onImport, onClose, usingDB }) {
   const buildClient = (row) => {
     const get = (field) => (row[mapping[field]] || "").trim();
     const addrParts = [get("address"), get("aptSuite")].filter(Boolean);
-    const rawTags = get("tags").split(/[,;|]/).map((t) => t.trim()).filter(Boolean);
+    const tags = get("tags").split(/[,;|]/).map((t) => t.trim()).filter(Boolean);
     const membership = get("membership");
-    if (membership && !rawTags.includes(membership)) rawTags.unshift(membership);
+    if (membership && !tags.includes(membership)) tags.unshift(membership);
+    const phone = get("phone") || get("dayPhone");
+    const since = get("customerSince") || TODAY;
+    const lastVisit = get("lastVisit") || null;
+    const apptCount = parseInt(get("appointmentsBooked")) || 0;
+    let avgVisitIntervalDays = 30;
+    if (apptCount > 1 && since && lastVisit) {
+      const span = Math.round((new Date(lastVisit) - new Date(since)) / 86400000);
+      if (span > 0) avgVisitIntervalDays = Math.max(7, Math.round(span / apptCount));
+    }
     return {
       id:            uid(),
       vagaroId:      null,
@@ -490,21 +501,21 @@ function CSVImportModal({ onImport, onClose, usingDB }) {
       firstName:     get("firstName"),
       lastName:      get("lastName"),
       email:         get("email"),
-      phone:         get("phone"),
+      phone,
       birthday:      get("birthday") || null,
-      customerSince: get("customerSince") || TODAY,
-      lastVisit:     get("lastVisit") || null,
+      customerSince: since,
+      lastVisit,
       referredBy:    get("referredBy"),
       address:       addrParts.join(", "),
       city:          get("city"),
       state:         get("state"),
       zip:           get("zip"),
-      avgVisitIntervalDays: 30,
+      avgVisitIntervalDays,
       careCategory:  null,
       redLightStatus: null,
       waitlisted:    false,
       goldenNuggets: [],
-      tags:          rawTags,
+      tags,
       appointments:  [],
       history:       [mkEvent("client.created", "Imported from Vagaro CSV", { by: "System" })],
     };
