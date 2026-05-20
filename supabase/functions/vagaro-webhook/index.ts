@@ -1,9 +1,6 @@
-// v3 — name-matching fallback
+// v4 — Vagaro API fallback for unmatched customers
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-// Vagaro sends { type, action, payload: { ... }, createdDate }
-// We combine type + action → "appointment.created" etc.
 
 const BOOKING_STATUS: Record<string, string> = {
   "confirmed":  "scheduled",
@@ -54,9 +51,7 @@ serve(async (req: Request) => {
 
   const secret = Deno.env.get("VAGARO_WEBHOOK_SECRET");
   if (secret) {
-    const provided =
-      req.headers.get("x-webhook-secret") ||
-      req.headers.get("x-vagaro-signature");
+    const provided = req.headers.get("x-webhook-secret") || req.headers.get("x-vagaro-signature");
     if (provided !== secret) {
       return new Response(JSON.stringify({ error: "Invalid signature" }), {
         status: 401, headers: { ...CORS, "Content-Type": "application/json" },
@@ -78,12 +73,7 @@ serve(async (req: Request) => {
   const eventType = type && action ? `${type}.${action}` : "unknown";
   const data      = (body.payload ?? {}) as Record<string, unknown>;
 
-  // Log every event
-  await supabase.from("webhook_log").insert({
-    source:     "vagaro",
-    event_type: eventType,
-    payload:    body,
-  });
+  await supabase.from("webhook_log").insert({ source: "vagaro", event_type: eventType, payload: body });
 
   let processingError: string | null = null;
   try {
@@ -101,90 +91,129 @@ serve(async (req: Request) => {
   );
 });
 
-// ─── CLIENT LOOKUP ───────────────────────────────────────────────────────────
-// Try vagaro_id first. If no match, fall back to first+last name.
-// When found by name, write vagaro_id back so future events skip the fallback.
+// ─── CLIENT RESOLUTION ───────────────────────────────────────────────────────
+// Full fallback chain: vagaro_id → webhook_log name → Vagaro API name → name match
 
 type ClientRow = { id: string; no_shows: number; total_spent: number };
 type SB = ReturnType<typeof createClient>;
 
-async function findOrMatchClient(
-  sb: SB,
-  vagaroId: string,
-  firstName = "",
-  lastName  = "",
-): Promise<ClientRow | null> {
+async function resolveClient(sb: SB, vagaroCustomerId: string, businessId = ""): Promise<ClientRow | null> {
+  // 1. Direct vagaro_id lookup
+  let client = await findByVagaroId(sb, vagaroCustomerId);
+  if (client) return client;
 
-  // 1. Exact vagaro_id match
-  if (vagaroId) {
-    const { data } = await sb
-      .from("clients")
-      .select("id, no_shows, total_spent")
-      .eq("vagaro_id", vagaroId)
-      .maybeSingle();
-    if (data) return data as ClientRow;
+  // 2. Recover name from prior customer events in webhook_log
+  let { firstName, lastName } = await nameFromLog(sb, vagaroCustomerId);
+
+  // 3. If still no name, ask the Vagaro API
+  if (!firstName && !lastName && businessId) {
+    const apiName = await nameFromVagaroAPI(businessId, vagaroCustomerId);
+    if (apiName) { firstName = apiName.firstName; lastName = apiName.lastName; }
   }
 
-  // 2. Name match
-  const first = firstName.trim();
-  const last  = lastName.trim();
-  if (first && last) {
-    const { data } = await sb
-      .from("clients")
-      .select("id, no_shows, total_spent")
-      .ilike("first_name", first)
-      .ilike("last_name",  last)
-      .maybeSingle();
-
-    if (data) {
-      const row = data as ClientRow;
-      // Backfill vagaro_id — future events will now match directly
-      if (vagaroId) {
-        await sb.from("clients")
-          .update({ vagaro_id: vagaroId, vagaro_synced: true, updated_at: new Date().toISOString() })
-          .eq("id", row.id);
-        console.log(`Linked client ${row.id} to Vagaro ID ${vagaroId} via name match (${first} ${last})`);
-      }
-      return row;
+  // 4. Name match + backfill vagaro_id
+  if (firstName || lastName) {
+    client = await findByName(sb, firstName, lastName);
+    if (client && vagaroCustomerId) {
+      await sb.from("clients").update({
+        vagaro_id: vagaroCustomerId, vagaro_synced: true, updated_at: new Date().toISOString(),
+      }).eq("id", client.id);
+      // Retroactively link any unlinked appointments for this customer
+      await linkPendingAppointments(sb, vagaroCustomerId, client.id);
+      console.log(`Linked ${firstName} ${lastName} → Vagaro ID ${vagaroCustomerId}`);
     }
   }
 
-  return null;
+  return client;
 }
 
-// For appointment events we only get customerId (encoded), not the name.
-// Look through previous webhook_log customer events for that same customerId
-// to recover the name so we can do a name-match fallback.
-async function lookupNameFromLog(
-  sb: SB,
-  vagaroCustomerId: string,
-): Promise<{ firstName: string; lastName: string }> {
+async function findByVagaroId(sb: SB, vagaroId: string): Promise<ClientRow | null> {
+  const { data } = await sb.from("clients").select("id, no_shows, total_spent")
+    .eq("vagaro_id", vagaroId).maybeSingle();
+  return (data as ClientRow) ?? null;
+}
+
+async function findByName(sb: SB, firstName: string, lastName: string): Promise<ClientRow | null> {
+  if (!firstName.trim() && !lastName.trim()) return null;
+  const { data } = await sb.from("clients").select("id, no_shows, total_spent")
+    .ilike("first_name", firstName.trim())
+    .ilike("last_name",  lastName.trim())
+    .maybeSingle();
+  return (data as ClientRow) ?? null;
+}
+
+// Scan recent customer events in webhook_log to recover a name for a given customerId
+async function nameFromLog(sb: SB, vagaroCustomerId: string): Promise<{ firstName: string; lastName: string }> {
   try {
-    const { data: rows } = await sb
-      .from("webhook_log")
-      .select("payload")
+    const { data } = await sb.from("webhook_log").select("payload")
       .eq("source", "vagaro")
       .in("event_type", ["customer.created", "customer.updated"])
       .order("received_at", { ascending: false })
       .limit(200);
-
-    if (!rows) return { firstName: "", lastName: "" };
-
-    for (const row of rows) {
+    for (const row of data ?? []) {
       const p = (row.payload as Record<string, unknown>)?.payload as Record<string, unknown> | undefined;
       if (!p) continue;
-      const cid = str(p.customerId ?? p.id ?? "");
-      if (cid === vagaroCustomerId) {
-        return {
-          firstName: str(p.firstName ?? p.FirstName ?? ""),
-          lastName:  str(p.lastName  ?? p.LastName  ?? ""),
-        };
+      if (str(p.customerId ?? p.id) === vagaroCustomerId) {
+        return { firstName: str(p.firstName ?? p.FirstName ?? ""), lastName: str(p.lastName ?? p.LastName ?? "") };
       }
     }
-  } catch (e) {
-    console.error("lookupNameFromLog error:", e);
-  }
+  } catch (e) { console.error("nameFromLog:", e); }
   return { firstName: "", lastName: "" };
+}
+
+// Call the Vagaro API to look up a customer by ID — requires VAGARO_CLIENT_ID + VAGARO_CLIENT_SECRET secrets
+async function nameFromVagaroAPI(businessId: string, customerId: string): Promise<{ firstName: string; lastName: string } | null> {
+  const clientId     = Deno.env.get("VAGARO_CLIENT_ID");
+  const clientSecret = Deno.env.get("VAGARO_CLIENT_SECRET");
+  if (!clientId || !clientSecret) return null;
+
+  try {
+    // Get access token
+    const tokenRes = await fetch("https://api.vagaro.com/v1/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "client_credentials", client_id: clientId, client_secret: clientSecret }),
+    });
+    if (!tokenRes.ok) { console.error("Vagaro token error:", tokenRes.status); return null; }
+    const { access_token } = await tokenRes.json();
+    if (!access_token) return null;
+
+    // Fetch customer record
+    const url = `https://api.vagaro.com/v2/businesses/${encodeURIComponent(businessId)}/customers/${encodeURIComponent(customerId)}`;
+    const custRes = await fetch(url, { headers: { "Authorization": `Bearer ${access_token}` } });
+    if (!custRes.ok) { console.error("Vagaro customer API error:", custRes.status, await custRes.text()); return null; }
+    const c = await custRes.json();
+
+    const firstName = str(c.firstName ?? c.first_name ?? "");
+    const lastName  = str(c.lastName  ?? c.last_name  ?? "");
+    if (firstName || lastName) {
+      console.log(`Vagaro API resolved: ${firstName} ${lastName} for customerId ${customerId}`);
+      return { firstName, lastName };
+    }
+  } catch (e) { console.error("nameFromVagaroAPI:", e); }
+  return null;
+}
+
+// After linking a client to a vagaro_id, link any appointments that arrived before the match
+async function linkPendingAppointments(sb: SB, vagaroCustomerId: string, clientId: string) {
+  try {
+    const { data: logRows } = await sb.from("webhook_log").select("payload")
+      .eq("source", "vagaro")
+      .like("event_type", "appointment.%")
+      .filter("payload->payload->customerId", "eq", vagaroCustomerId);
+
+    const apptIds = (logRows ?? []).map((r) => {
+      const p = (r.payload as Record<string, unknown>)?.payload as Record<string, unknown> | undefined;
+      return str(p?.appointmentId ?? "");
+    }).filter(Boolean);
+
+    if (apptIds.length > 0) {
+      await sb.from("appointments").update({ client_id: clientId })
+        .in("vagaro_appt_id", apptIds)
+        .is("client_id", null);
+      console.log(`Retroactively linked ${apptIds.length} appointment(s) to client ${clientId}`);
+    }
+  } catch (e) { console.error("linkPendingAppointments:", e); }
 }
 
 // ─── APPOINTMENT ─────────────────────────────────────────────────────────────
@@ -192,18 +221,17 @@ async function lookupNameFromLog(
 async function handleAppointment(sb: SB, eventType: string, data: Record<string, unknown>) {
   const vagaroApptId   = str(data.appointmentId);
   const vagaroClientId = str(data.customerId);
+  const businessId     = str(data.businessId);
   if (!vagaroApptId) return;
 
-  const startIso  = str(data.startTime);
-  const apptDate  = startIso ? startIso.split("T")[0] : new Date().toISOString().split("T")[0];
-  const apptTime  = startIso.includes("T") ? startIso.split("T")[1].slice(0, 5) : null;
-
+  const startIso   = str(data.startTime);
+  const apptDate   = startIso ? startIso.split("T")[0] : new Date().toISOString().split("T")[0];
+  const apptTime   = startIso.includes("T") ? startIso.split("T")[1].slice(0, 5) : null;
   const rawStatus  = str(data.bookingStatus).toLowerCase().trim();
   const apptStatus = BOOKING_STATUS[rawStatus] ?? (
     eventType.endsWith(".cancelled") || eventType.endsWith(".deleted") ? "cancelled" :
     eventType.endsWith(".completed") ? "completed" : "scheduled"
   );
-
   const service  = str(data.serviceTitle ?? data.serviceName ?? "");
   const duration = calcDuration(data.startTime, data.endTime);
 
@@ -213,25 +241,10 @@ async function handleAppointment(sb: SB, eventType: string, data: Record<string,
   );
 
   if (!vagaroClientId) return;
+  const client = await resolveClient(sb, vagaroClientId, businessId);
+  if (!client) { console.log(`No client found for Vagaro ID ${vagaroClientId} — appointment stored unlinked`); return; }
 
-  // Try direct match first; if that fails, recover name from webhook_log and name-match
-  let client = await findOrMatchClient(sb, vagaroClientId);
-  if (!client) {
-    const { firstName, lastName } = await lookupNameFromLog(sb, vagaroClientId);
-    if (firstName || lastName) {
-      client = await findOrMatchClient(sb, vagaroClientId, firstName, lastName);
-    }
-  }
-
-  if (!client) {
-    console.log(`No client found for Vagaro ID ${vagaroClientId} — appointment stored unlinked`);
-    return;
-  }
-
-  // Link appointment to client
-  await sb.from("appointments")
-    .update({ client_id: client.id })
-    .eq("vagaro_appt_id", vagaroApptId);
+  await sb.from("appointments").update({ client_id: client.id }).eq("vagaro_appt_id", vagaroApptId);
 
   if (apptStatus === "completed") {
     const updates: Record<string, unknown> = { last_visit: apptDate, updated_at: new Date().toISOString() };
@@ -246,11 +259,7 @@ async function handleAppointment(sb: SB, eventType: string, data: Record<string,
       .eq("id", client.id);
   }
 
-  await logHistory(
-    sb, client.id,
-    HISTORY_TYPE[eventType] ?? "appt.scheduled",
-    `${service || "Appointment"} — Vagaro sync`,
-  );
+  await logHistory(sb, client.id, HISTORY_TYPE[eventType] ?? "appt.scheduled", `${service || "Appointment"} — Vagaro sync`);
 }
 
 // ─── CUSTOMER ────────────────────────────────────────────────────────────────
@@ -261,42 +270,29 @@ async function handleCustomer(sb: SB, eventType: string, data: Record<string, un
   const lastName  = str(data.lastName   ?? data.LastName   ?? "");
   const email     = str(data.email      ?? data.Email      ?? "") || null;
   const phone     = str(data.mobilePhone ?? data.phone     ?? "") || null;
-  const rawBday   = str(data.birthDate  ?? data.birthday   ?? "");
-  const birthday  = rawBday ? rawBday.split("T")[0] : null;
-
+  const birthday  = str(data.birthDate  ?? data.birthday   ?? "").split("T")[0] || null;
   if (!vagaroId) return;
 
   if (eventType === "customer.created") {
-    // Try to find by vagaro_id or name before inserting to avoid duplicates
-    const existing = await findOrMatchClient(sb, vagaroId, firstName, lastName);
+    const existing = await resolveClient(sb, vagaroId, "");
     if (!existing && firstName) {
       await sb.from("clients").insert({
-        id:            crypto.randomUUID(),
-        vagaro_id:     vagaroId,
-        vagaro_synced: true,
-        first_name:    firstName,
-        last_name:     lastName,
-        email,
-        phone,
-        birthday,
-        tags:           [],
-        golden_nuggets: [],
+        id: crypto.randomUUID(), vagaro_id: vagaroId, vagaro_synced: true,
+        first_name: firstName, last_name: lastName, email, phone, birthday,
+        tags: [], golden_nuggets: [],
       });
     }
     return;
   }
 
-  // customer.updated — find (with name fallback) then patch
-  const client = await findOrMatchClient(sb, vagaroId, firstName, lastName);
+  const client = await resolveClient(sb, vagaroId, "");
   if (!client) return;
-
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString(), vagaro_synced: true };
   if (firstName) updates.first_name = firstName;
   if (lastName)  updates.last_name  = lastName;
   if (email)     updates.email      = email;
   if (phone)     updates.phone      = phone;
   if (birthday)  updates.birthday   = birthday;
-
   await sb.from("clients").update(updates).eq("id", client.id);
   await logHistory(sb, client.id, "client.updated", "Profile synced from Vagaro");
 }
@@ -308,16 +304,9 @@ async function handleSale(sb: SB, data: Record<string, unknown>) {
   const amount = num(data.totalAmount ?? data.amount ?? 0);
   if (!vagaroClientId || !amount) return;
 
-  let client = await findOrMatchClient(sb, vagaroClientId);
-  if (!client) {
-    const { firstName, lastName } = await lookupNameFromLog(sb, vagaroClientId);
-    client = await findOrMatchClient(sb, vagaroClientId, firstName, lastName);
-  }
+  const client = await resolveClient(sb, vagaroClientId, str(data.businessId ?? ""));
   if (!client) return;
-
-  await sb.from("clients")
-    .update({ total_spent: (client.total_spent ?? 0) + amount, updated_at: new Date().toISOString() })
-    .eq("id", client.id);
+  await sb.from("clients").update({ total_spent: (client.total_spent ?? 0) + amount, updated_at: new Date().toISOString() }).eq("id", client.id);
   await logHistory(sb, client.id, "payment.charged", `Payment of $${amount.toFixed(2)} synced from Vagaro`);
 }
 
@@ -334,7 +323,7 @@ function calcDuration(start: unknown, end: unknown): number | null {
 
 async function logHistory(sb: SB, clientId: string, type: string, detail: string) {
   await sb.from("history").insert({
-    client_id: clientId, type, detail,
-    by: "Vagaro", ts: Date.now(), source: "vagaro", direction: "internal",
+    client_id: clientId, type, detail, by: "Vagaro",
+    ts: Date.now(), source: "vagaro", direction: "internal",
   });
 }
