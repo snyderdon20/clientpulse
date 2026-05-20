@@ -1,54 +1,130 @@
-// vagaro-sync: fetches all Vagaro customers, matches by name, writes vagaro_id back to clients
+/**
+ * vagaro-sync — Supabase Edge Function
+ *
+ * Syncs Vagaro customer IDs into the ClientPulse `clients` table by:
+ *   1. Collecting all unique customerIds from webhook_log
+ *   2. Looking up each via the Vagaro V2 Customer API
+ *   3. Matching by name to local clients with no vagaro_id
+ *   4. Writing vagaro_id + vagaro_synced back to Supabase
+ *
+ * Auth uses the real Vagaro V2 token endpoint:
+ *   POST https://api.vagaro.com/{region}/api/v2/merchants/generate-access-token
+ *   Body: { clientId, clientSecretKey, scope }
+ *
+ * Supabase secrets required:
+ *   VAGARO_CLIENT_ID        — your Vagaro clientId
+ *   VAGARO_CLIENT_SECRET_KEY — your Vagaro clientSecretKey
+ *   VAGARO_REGION           — your account region, e.g. "us04"
+ *
+ * Also supports { test: true, region, clientId, clientSecretKey } for
+ * credential validation from the Settings page (bypasses CORS).
+ */
+
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const CORS = {
-  "Access-Control-Allow-Origin":  "*",
+  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
+// ─── Vagaro V2 helpers ────────────────────────────────────────────────────────
+
+async function getAccessToken(
+  region: string,
+  clientId: string,
+  clientSecretKey: string,
+  scope = "read access",
+): Promise<string> {
+  const res = await fetch(
+    `https://api.vagaro.com/${region}/api/v2/merchants/generate-access-token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId, clientSecretKey, scope }),
+    },
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`Vagaro auth failed: ${res.status} ${msg}`);
+  }
+  const body = await res.json();
+  const token = body?.data?.access_token;
+  if (!token) throw new Error("No access_token in Vagaro response");
+  return token;
+}
+
+interface VagaroCustomer {
+  customerId: string;
+  customerFirstName: string;
+  customerLastName: string;
+  email?: string;
+  mobilePhone?: string;
+}
+
+async function fetchCustomer(
+  region: string,
+  accessToken: string,
+  businessId: string,
+  customerId: string,
+): Promise<VagaroCustomer | null> {
+  try {
+    const res = await fetch(
+      `https://api.vagaro.com/${region}/api/v2/customers`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", accessToken },
+        body: JSON.stringify({ businessId, customerId }),
+      },
+    );
+    if (!res.ok) return null;
+    const body = await res.json();
+    return (body?.data as VagaroCustomer) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Main handler ─────────────────────────────────────────────────────────────
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
-  if (req.method !== "POST") {
-    return json({ error: "Method not allowed" }, 405);
-  }
-
+  if (req.method !== "POST")    return json({ error: "Method not allowed" }, 405);
 
   const reqBody = await req.json().catch(() => ({})) as Record<string, unknown>;
 
-  // ── Test mode: validate credentials without running a full sync ───────────
+  // ── Test mode: validate credentials from the Settings page ────────────────
   if (reqBody.test === true) {
-    const testClientId     = str(reqBody.clientId);
-    const testClientSecret = str(reqBody.clientSecret);
-    if (!testClientId || !testClientSecret) {
-      return json({ ok: false, msg: "clientId and clientSecret are required." });
+    const region          = str(reqBody.region);
+    const clientId        = str(reqBody.clientId);
+    const clientSecretKey = str(reqBody.clientSecretKey);
+
+    if (!region || !clientId || !clientSecretKey) {
+      return json({ ok: false, msg: "region, clientId, and clientSecretKey are required." });
     }
     try {
-      const tokenRes = await fetch("https://api.vagaro.com/v1/oauth2/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ grant_type: "client_credentials", client_id: testClientId, client_secret: testClientSecret }),
-      });
-      if (tokenRes.ok) {
-        const data = await tokenRes.json();
-        if (data.access_token) return json({ ok: true, msg: "Credentials verified — Vagaro API connection successful." });
-        return json({ ok: false, msg: "Vagaro returned OK but no access_token. Check your credentials." });
-      }
-      const errText = await tokenRes.text().catch(() => "");
-      let errMsg = `HTTP ${tokenRes.status}`;
-      try { const errJson = JSON.parse(errText); errMsg = errJson.error_description || errJson.message || errMsg; } catch { /* ignore */ }
-      return json({ ok: false, msg: errMsg });
+      await getAccessToken(region, clientId, clientSecretKey);
+      return json({ ok: true, msg: "Credentials verified — Vagaro V2 API connection successful." });
     } catch (e) {
-      return json({ ok: false, msg: `Network error: ${String(e)}` });
+      const msg = e instanceof Error ? e.message : String(e);
+      // Surface friendly messages for common errors
+      if (msg.includes("401") || msg.includes("Unauthorized")) {
+        return json({ ok: false, msg: "Invalid credentials — check your Client ID and Client Secret Key." });
+      }
+      return json({ ok: false, msg: `Connection failed: ${msg}` });
     }
   }
 
+  // ── Full sync mode ────────────────────────────────────────────────────────
+  const clientId        = Deno.env.get("VAGARO_CLIENT_ID");
+  const clientSecretKey = Deno.env.get("VAGARO_CLIENT_SECRET_KEY");
+  const region          = Deno.env.get("VAGARO_REGION");
 
-  const clientId     = Deno.env.get("VAGARO_CLIENT_ID");
-  const clientSecret = Deno.env.get("VAGARO_CLIENT_SECRET");
-  if (!clientId || !clientSecret) {
-    return json({ error: "VAGARO_CLIENT_ID and VAGARO_CLIENT_SECRET secrets are not set in Supabase." }, 400);
+  if (!clientId || !clientSecretKey || !region) {
+    return json({
+      error: "VAGARO_CLIENT_ID, VAGARO_CLIENT_SECRET_KEY, and VAGARO_REGION secrets must be set in Supabase.",
+    }, 400);
   }
 
   const supabase = createClient(
@@ -56,21 +132,8 @@ serve(async (req: Request) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  // ── Get Vagaro OAuth token ─────────────────────────────────────────────────
-  const tokenRes = await fetch("https://api.vagaro.com/v1/oauth2/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ grant_type: "client_credentials", client_id: clientId, client_secret: clientSecret }),
-  });
-  if (!tokenRes.ok) {
-    const msg = await tokenRes.text();
-    return json({ error: `Vagaro auth failed: ${tokenRes.status} ${msg}` }, 502);
-  }
-  const { access_token } = await tokenRes.json();
-  if (!access_token) return json({ error: "No access_token in Vagaro response" }, 502);
-
-  // ── Get businessId from webhook_log if not provided ────────────────────────
-  let { businessId } = reqBody as { businessId?: string };
+  // Get businessId from request body or fall back to webhook_log
+  let businessId = str(reqBody.businessId);
   if (!businessId) {
     const { data: logRow } = await supabase
       .from("webhook_log")
@@ -80,107 +143,137 @@ serve(async (req: Request) => {
       .order("received_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    businessId = (logRow?.payload as Record<string, unknown>)?.payload?.businessId as string ?? "";
+    businessId = str((logRow?.payload as Record<string, unknown>)?.payload?.businessId ?? "");
   }
-  if (!businessId) return json({ error: "Could not determine businessId — create at least one appointment in Vagaro first, or pass businessId in the request body." }, 400);
-
-  // ── Fetch all Vagaro customers (paginated) ─────────────────────────────────
-  const vagaroCustomers: VagaroCustomer[] = [];
-  let page = 1;
-  const pageSize = 100;
-
-  while (true) {
-    const url = `https://api.vagaro.com/v2/businesses/${encodeURIComponent(businessId)}/customers?pageNumber=${page}&pageSize=${pageSize}`;
-    const res = await fetch(url, { headers: { "Authorization": `Bearer ${access_token}` } });
-
-    if (!res.ok) {
-      const msg = await res.text();
-      return json({ error: `Vagaro customers API failed: ${res.status} ${msg}`, fetched: vagaroCustomers.length }, 502);
-    }
-
-    const body = await res.json();
-    // Vagaro may return array directly or wrapped in { data: [...] } or { customers: [...] }
-    const batch: VagaroCustomer[] = Array.isArray(body) ? body : (body.data ?? body.customers ?? body.items ?? []);
-    if (batch.length === 0) break;
-
-    vagaroCustomers.push(...batch);
-    if (batch.length < pageSize) break; // last page
-    page++;
+  if (!businessId) {
+    return json({
+      error: "Could not determine businessId — trigger at least one Vagaro webhook first, or pass businessId in the request body.",
+    }, 400);
   }
 
-  if (vagaroCustomers.length === 0) {
-    return json({ error: "Vagaro returned 0 customers. The API endpoint may need adjustment — check Supabase Edge Function logs.", businessId }, 502);
+  // Get access token
+  let accessToken: string;
+  try {
+    accessToken = await getAccessToken(region, clientId, clientSecretKey);
+  } catch (e) {
+    return json({ error: String(e) }, 502);
   }
 
-  // ── Load all ClientPulse clients that still have no vagaro_id ─────────────
+  // Collect all unique customerIds from webhook_log
+  const { data: logRows } = await supabase
+    .from("webhook_log")
+    .select("payload")
+    .eq("source", "vagaro")
+    .not("payload->payload->customerId", "is", null);
+
+  const customerIds = new Set<string>();
+  for (const row of logRows ?? []) {
+    const cid = str((row.payload as Record<string, unknown>)?.payload?.customerId ?? "");
+    if (cid) customerIds.add(cid);
+  }
+
+  if (customerIds.size === 0) {
+    return json({
+      error: "No customerIds found in webhook_log — receive at least one appointment webhook from Vagaro first.",
+    }, 400);
+  }
+
+  // Load ClientPulse clients that still have no vagaro_id
   const { data: cpClients, error: cpErr } = await supabase
     .from("clients")
-    .select("id, first_name, last_name, vagaro_id")
+    .select("id, first_name, last_name")
     .is("vagaro_id", null);
   if (cpErr) return json({ error: `Supabase error: ${cpErr.message}` }, 500);
 
-  // Build a lookup: "firstname lastname" (lowercase) → client row
+  // Build name → client lookup (lowercase for case-insensitive matching)
   const nameMap = new Map<string, { id: string }>();
   for (const c of cpClients ?? []) {
-    const key = `${(c.first_name ?? "").trim().toLowerCase()} ${(c.last_name ?? "").trim().toLowerCase()}`;
+    const key = `${str(c.first_name).toLowerCase()} ${str(c.last_name).toLowerCase()}`.trim();
     nameMap.set(key, c);
   }
 
-  // ── Match + update ─────────────────────────────────────────────────────────
-  let matched = 0;
+  // For each Vagaro customerId, fetch customer details and try to match
+  let matched   = 0;
   let unmatched = 0;
-  const unmatchedNames: string[] = [];
+  const unmatchedSample: string[] = [];
 
-  for (const vc of vagaroCustomers) {
-    const firstName = str(vc.firstName ?? vc.first_name ?? "");
-    const lastName  = str(vc.lastName  ?? vc.last_name  ?? "");
-    const vagaroId  = str(vc.customerId ?? vc.id ?? "");
-    if (!vagaroId || !firstName) continue;
+  for (const customerId of customerIds) {
+    const vc = await fetchCustomer(region, accessToken, businessId, customerId);
+    if (!vc) continue;
 
-    const key = `${firstName.trim().toLowerCase()} ${lastName.trim().toLowerCase()}`;
+    const firstName = str(vc.customerFirstName);
+    const lastName  = str(vc.customerLastName);
+    const key = `${firstName.toLowerCase()} ${lastName.toLowerCase()}`.trim();
     const cp  = nameMap.get(key);
 
     if (cp) {
       await supabase.from("clients").update({
-        vagaro_id:     vagaroId,
+        vagaro_id:     customerId,
         vagaro_synced: true,
         updated_at:    new Date().toISOString(),
       }).eq("id", cp.id);
 
-      // Also retroactively link any unlinked appointments in the DB
-      await supabase.from("appointments")
-        .update({ client_id: cp.id })
-        .eq("vagaro_appt_id", vagaroId)   // won't match much — belt+suspenders
-        .is("client_id", null);
+      // Retroactively link any unlinked appointments in webhook_log
+      await linkPendingAppointments(supabase, customerId, cp.id);
 
-      nameMap.delete(key); // prevent double-matching
+      nameMap.delete(key);
       matched++;
     } else {
       unmatched++;
-      if (unmatchedNames.length < 20) unmatchedNames.push(`${firstName} ${lastName}`);
+      if (unmatchedSample.length < 20) unmatchedSample.push(`${firstName} ${lastName}`);
     }
   }
 
   return json({
     success: true,
-    total:       vagaroCustomers.length,
+    scanned: customerIds.size,
     matched,
     unmatched,
-    unmatchedSample: unmatchedNames,
-    note: unmatched > 0 ? "Unmatched customers have no corresponding client in ClientPulse (different name or not yet imported)." : undefined,
+    unmatchedSample,
+    note: unmatched > 0
+      ? "Unmatched customers have no corresponding client in ClientPulse (name mismatch or not yet imported)."
+      : undefined,
   });
 });
 
-interface VagaroCustomer {
-  customerId?: string;
-  id?: string;
-  firstName?: string;
-  first_name?: string;
-  lastName?: string;
-  last_name?: string;
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async function linkPendingAppointments(
+  // deno-lint-ignore no-explicit-any
+  sb: any,
+  vagaroCustomerId: string,
+  clientId: string,
+) {
+  try {
+    const { data: logRows } = await sb
+      .from("webhook_log")
+      .select("payload")
+      .eq("source", "vagaro")
+      .like("event_type", "appointment.%")
+      .filter("payload->payload->customerId", "eq", vagaroCustomerId);
+
+    const apptIds = (logRows ?? [])
+      .map((r: Record<string, unknown>) => {
+        const p = (r.payload as Record<string, unknown>)?.payload as Record<string, unknown> | undefined;
+        return str(p?.appointmentId ?? "");
+      })
+      .filter(Boolean);
+
+    if (apptIds.length > 0) {
+      await sb.from("appointments")
+        .update({ client_id: clientId })
+        .in("vagaro_appt_id", apptIds)
+        .is("client_id", null);
+    }
+  } catch (e) {
+    console.error("linkPendingAppointments:", e);
+  }
 }
 
 function str(v: unknown): string { return v == null ? "" : String(v); }
 function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS, "Content-Type": "application/json" },
+  });
 }

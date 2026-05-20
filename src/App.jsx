@@ -3384,7 +3384,7 @@ function VagaroSyncCard({ supabaseUrl }) {
   );
 }
 
-function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, webhookLog, templates, onSaveTemplate, gmailClientId, setGmailClientId, supabaseUrl, setSupabaseUrl, supabaseAnonKey, setSupabaseAnonKey, usingDB, dbError, onAddClient }) {
+function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, vagaroRegion, setVagaroRegion, webhookLog, templates, onSaveTemplate, gmailClientId, setGmailClientId, supabaseUrl, setSupabaseUrl, supabaseAnonKey, setSupabaseAnonKey, usingDB, dbError, onAddClient }) {
   const [activeTab, setActiveTab] = useState("database");
   const [showSecret, setShowSecret] = useState(false);
   const [testResult, setTestResult] = useState(null);
@@ -3415,7 +3415,7 @@ function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, we
   const testConnection = async () => {
     setTesting(true);
     setTestResult(null);
-    const result = await testVagaroConnection(supabaseUrl, clientId, clientSecret);
+    const result = await testVagaroConnection(supabaseUrl, vagaroRegion, clientId, clientSecret);
     setTestResult(result);
     setTesting(false);
   };
@@ -3628,23 +3628,31 @@ create policy "Allow all" on tasks for all using (true);`}
       <div style={{ ...S.card, marginBottom: "14px" }}>
         <div style={{ fontSize: "14px", fontWeight: "700", color: "#2e2418", marginBottom: 3 }}>Vagaro API credentials</div>
         <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 16 }}>
-          Find these in Vagaro: <strong>Settings → Developers → APIs &amp; Webhooks → OAuth Apps</strong>
+          Find these in Vagaro: <strong>Settings → Developers → APIs &amp; Webhooks</strong>
         </div>
+        <label style={S.lbl}>Region</label>
+        <input
+          type="text"
+          value={vagaroRegion}
+          onChange={(e) => { setVagaroRegion(e.target.value); localStorage.setItem("cp_vagaro_region", e.target.value); }}
+          placeholder="e.g. us04  (from your Vagaro URL subdomain)"
+          style={{ ...S.inp, fontFamily: "monospace", marginBottom: 12 }}
+        />
         <label style={S.lbl}>Client ID</label>
         <input
           type="text"
           value={clientId}
           onChange={(e) => { setClientId(e.target.value); localStorage.setItem("cp_vagaro_client_id", e.target.value); }}
-          placeholder="Your Vagaro OAuth Client ID"
+          placeholder="Your Vagaro Client ID"
           style={{ ...S.inp, fontFamily: "monospace", marginBottom: 12 }}
         />
-        <label style={S.lbl}>Client Secret</label>
+        <label style={S.lbl}>Client Secret Key</label>
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
           <input
             type={showSecret ? "text" : "password"}
             value={clientSecret}
-            onChange={(e) => { setClientSecret(e.target.value); localStorage.setItem("cp_vagaro_client_secret", e.target.value); }}
-            placeholder="Your Vagaro OAuth Client Secret"
+            onChange={(e) => { setClientSecret(e.target.value); localStorage.setItem("cp_vagaro_client_secret_key", e.target.value); }}
+            placeholder="Your Vagaro Client Secret Key"
             style={{ ...S.inp, fontFamily: "monospace", flex: 1 }}
           />
           <button style={S.sm("ghost")} onClick={() => setShowSecret((s) => !s)}>
@@ -4749,8 +4757,9 @@ function App() {
   const [search, setSearch]             = useState("");
   const [globalSearch, setGlobalSearch] = useState("");
   const [showGS, setShowGS]             = useState(false);
-  const [clientId, setClientId]         = useState(() => localStorage.getItem("cp_vagaro_client_id") || "");
-  const [clientSecret, setClientSecret] = useState(() => localStorage.getItem("cp_vagaro_client_secret") || "");
+  const [clientId, setClientId]             = useState(() => localStorage.getItem("cp_vagaro_client_id") || "");
+  const [clientSecret, setClientSecret]     = useState(() => localStorage.getItem("cp_vagaro_client_secret_key") || "");
+  const [vagaroRegion, setVagaroRegion]     = useState(() => localStorage.getItem("cp_vagaro_region") || "");
   const [gmailClientId, setGmailClientId] = useState(() => localStorage.getItem("cp_gmail_client_id") || "");
   const [supabaseUrl,     setSupabaseUrl]     = useState(() => "https://dewsznqxagzahtkpriuk.supabase.co");
   const [supabaseAnonKey, setSupabaseAnonKey] = useState(() => "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRld3N6bnF4YWd6YWh0a3ByaXVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMDQ5MTcsImV4cCI6MjA5NDc4MDkxN30.PdVejzd-Mi3utM9xF7s2i3AU7UeBgNBE71eDFhjmteo");
@@ -5025,6 +5034,7 @@ function App() {
           <SettingsPage
             clientId={clientId} setClientId={setClientId}
             clientSecret={clientSecret} setClientSecret={setClientSecret}
+            vagaroRegion={vagaroRegion} setVagaroRegion={setVagaroRegion}
             webhookLog={WEBHOOK_LOG}
             templates={templates} onSaveTemplate={saveTemplate}
             gmailClientId={gmailClientId} setGmailClientId={(id) => { setGmailClientId(id); }}

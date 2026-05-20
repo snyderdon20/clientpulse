@@ -1,16 +1,18 @@
 /**
  * vagaroService.ts
  *
- * Typed service functions for Vagaro operations that are proxied through
- * Supabase Edge Functions (the browser can't call Vagaro directly due to CORS).
+ * Browser-side proxy calls that route through Supabase Edge Functions.
+ * The browser cannot call api.vagaro.com directly (IP allowlist), so all
+ * Vagaro API calls from the React app go through edge functions.
  *
- * Internally uses axios so all requests benefit from timeout handling,
- * structured error parsing, and consistent response types.
+ * Vagaro V2 auth uses:
+ *   POST /{region}/api/v2/merchants/generate-access-token
+ *   Body: { clientId, clientSecretKey, scope }        ← NOT OAuth2 client_credentials
  */
 
 import axios, { AxiosInstance } from "axios";
 
-// ─── Response types ───────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface TestConnectionResult {
   ok: boolean;
@@ -19,7 +21,6 @@ export interface TestConnectionResult {
 
 export interface SyncResult {
   success?: boolean;
-  total?: number;
   matched?: number;
   unmatched?: number;
   unmatchedSample?: string[];
@@ -29,11 +30,6 @@ export interface SyncResult {
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
-/**
- * Creates a short-lived axios instance scoped to a specific Supabase project's
- * edge functions base URL.  A new instance is created per call so callers
- * don't need to manage lifecycle.
- */
 function makeEdgeClient(supabaseUrl: string): AxiosInstance {
   return axios.create({
     baseURL: `${supabaseUrl.replace(/\/$/, "")}/functions/v1`,
@@ -42,14 +38,13 @@ function makeEdgeClient(supabaseUrl: string): AxiosInstance {
   });
 }
 
-/** Extracts the most useful error message from a failed edge function call. */
 function extractErrorMsg(err: unknown, fallback = "Unknown error"): string {
   if (axios.isAxiosError(err)) {
     const d = err.response?.data as Record<string, unknown> | undefined;
     const candidate = d?.msg ?? d?.error ?? d?.message;
     if (typeof candidate === "string" && candidate.trim()) return candidate;
     if (err.response?.status) return `HTTP ${err.response.status}`;
-    if (err.code === "ECONNABORTED") return "Request timed out — edge function did not respond in 30 s.";
+    if (err.code === "ECONNABORTED") return "Request timed out.";
     return err.message || fallback;
   }
   return String(err) || fallback;
@@ -58,28 +53,30 @@ function extractErrorMsg(err: unknown, fallback = "Unknown error"): string {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Validates a pair of Vagaro OAuth credentials by asking the edge function
- * to attempt a token exchange server-side (bypassing CORS).
+ * Validates Vagaro V2 credentials by asking the edge function to call
+ *   POST /{region}/api/v2/merchants/generate-access-token
+ * server-side (bypasses the IP allowlist that blocks browser requests).
  *
- * @returns {TestConnectionResult} `ok: true` when credentials are valid.
- *
- * @example
- * const result = await testVagaroConnection(supabaseUrl, clientId, clientSecret);
- * if (!result.ok) console.error(result.msg);
+ * @param supabaseUrl     Your project's Supabase URL.
+ * @param region          Your Vagaro region, e.g. "us04".
+ * @param clientId        From Vagaro Developer Settings.
+ * @param clientSecretKey From Vagaro Developer Settings.
  */
 export async function testVagaroConnection(
   supabaseUrl: string,
+  region: string,
   clientId: string,
-  clientSecret: string,
+  clientSecretKey: string,
 ): Promise<TestConnectionResult> {
-  if (!supabaseUrl)   return { ok: false, msg: "Supabase URL is not configured." };
-  if (!clientId)      return { ok: false, msg: "Client ID is required." };
-  if (!clientSecret)  return { ok: false, msg: "Client Secret is required." };
+  if (!supabaseUrl)     return { ok: false, msg: "Supabase URL is not configured." };
+  if (!region)          return { ok: false, msg: "Vagaro region is required (e.g. \"us04\")." };
+  if (!clientId)        return { ok: false, msg: "Client ID is required." };
+  if (!clientSecretKey) return { ok: false, msg: "Client Secret Key is required." };
 
   try {
     const { data } = await makeEdgeClient(supabaseUrl).post<TestConnectionResult>(
       "/vagaro-sync",
-      { test: true, clientId, clientSecret },
+      { test: true, region, clientId, clientSecretKey },
     );
     return { ok: Boolean(data.ok), msg: data.msg ?? (data.ok ? "Connected." : "Failed.") };
   } catch (err) {
@@ -88,16 +85,12 @@ export async function testVagaroConnection(
 }
 
 /**
- * Triggers a full Vagaro → ClientPulse client ID sync via the edge function.
- * Fetches all Vagaro customers, matches them to local clients by name, and
- * writes `vagaro_id` back to the `clients` table.
+ * Triggers a Vagaro → ClientPulse client ID sync via the edge function.
+ * The edge function uses webhook_log to find customerIds, then calls the
+ * Vagaro V2 Customer API to resolve names and match to local clients.
  *
  * @param supabaseUrl  Your project's Supabase URL.
- * @param businessId   Optional — auto-detected from `webhook_log` if omitted.
- *
- * @example
- * const result = await syncVagaroClients(supabaseUrl);
- * console.log(`Matched ${result.matched} of ${result.total} Vagaro customers.`);
+ * @param businessId   Optional — auto-detected from webhook_log if omitted.
  */
 export async function syncVagaroClients(
   supabaseUrl: string,

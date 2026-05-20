@@ -1,220 +1,175 @@
 /**
- * appointmentService.ts
+ * appointmentService.ts — Vagaro V2 Appointments
  *
- * Pure async functions for every Vagaro appointment endpoint.
- * No React — safe to call from hooks, server actions, or tests.
+ * The Vagaro V2 API is READ-ONLY for appointments.
+ * There are no create / update / cancel endpoints — those happen
+ * inside Vagaro's own UI or online booking widget.
  *
- * All functions use the shared `vagaroClient` Axios instance, which
- * automatically attaches auth headers and handles 400/401/403/429 errors.
+ * Endpoints:
+ *   POST /{region}/api/v2/appointments              — Retrieve Appointments
+ *   POST /{region}/api/v2/appointments/availability — Search Availability
  */
 
-import { vagaroClient } from "./vagaroClient";
+import { vagaroClient, unwrap, type VagaroEnvelope } from "./vagaroClient";
 
-// ─── Enums & literals ─────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-export type AppointmentStatus =
-  | "scheduled"
-  | "confirmed"
-  | "checked-in"
-  | "in-progress"
-  | "completed"
-  | "cancelled"
-  | "no-show";
-
-// ─── Domain types ─────────────────────────────────────────────────────────────
-
-/** Lightweight reference embedded inside an Appointment (avoid circular deps). */
-export interface AppointmentRef {
-  id: string;
-  name: string;
-}
-
-export interface AppointmentService {
-  id: string;
-  name: string;
-  /** Duration in minutes. */
-  duration: number;
-  /** Price in USD. */
-  price: number;
-  category?: string;
-}
+/**
+ * bookingStatus values observed in production data.
+ * Vagaro returns these capitalised ("Confirmed", not "confirmed").
+ */
+export type BookingStatus =
+  | "Confirmed"
+  | "Pending"
+  | "Checked In"
+  | "In Progress"
+  | "Completed"
+  | "Cancelled"
+  | "No Show";
 
 export interface Appointment {
-  id: string;
-  status: AppointmentStatus;
-
-  /** ISO-8601 datetime string — e.g. "2024-07-15T09:00:00". */
-  startDateTime: string;
-  /** ISO-8601 datetime string. */
-  endDateTime: string;
-
-  customer: AppointmentRef;
-  location: AppointmentRef;
-  employee: AppointmentRef;
-  service: AppointmentService;
-
-  notes?: string;
-
-  /** Price charged for this specific booking (may differ from service list price). */
-  price?: number;
-
-  createdAt: string;
-  updatedAt: string;
-}
-
-// ─── Request / response shapes ────────────────────────────────────────────────
-
-/**
- * Query parameters accepted by `GET /appointments`.
- * All fields are optional — omit any you don't need.
- */
-export interface FetchAppointmentsParams {
-  /** ISO-8601 date string "YYYY-MM-DD". */
-  startDate?: string;
-  /** ISO-8601 date string "YYYY-MM-DD". */
-  endDate?: string;
-  locationId?: string;
-  employeeId?: string;
-  /** Pagination: 1-based page number (default 1). */
-  page?: number;
-  /** Results per page — max 100 (default 20). */
-  pageSize?: number;
-}
-
-/** Paginated envelope returned by `GET /appointments`. */
-export interface AppointmentsPage {
-  data: Appointment[];
-  total: number;
-  page: number;
-  pageSize: number;
-  totalPages: number;
-}
-
-/** Payload for `POST /appointments`. */
-export interface CreateAppointmentPayload {
-  customerId: string;
-  locationId: string;
-  employeeId: string;
+  appointmentId: string;
+  /** ISO-8601 datetime, e.g. "2024-10-10T21:15:00.000Z" */
+  startTime: string;
+  /** ISO-8601 datetime */
+  endTime: string;
+  bookingStatus: BookingStatus;
+  serviceTitle: string;
   serviceId: string;
-  /** ISO-8601 datetime string — e.g. "2024-07-15T09:00:00". */
-  startDateTime: string;
-  notes?: string;
+  calendarEventId: string | null;
+  /** Price charged, in business currency. */
+  amount: number;
+  eventType: string;
+  /** "Booked Online" | "Walk In" | etc. */
+  onlineVsInhouse: string;
+  appointmentTypeCode: string | null;
+  appointmentTypeName: string | null;
+  customerId: string;
+  bookingSource: string;
+  serviceProviderId: string;
+  serviceCategory: string;
+  createdDate: string;
+  createdBy: string;
+  modifiedDate: string | null;
+  modifiedBy: string | null;
+  /** IDs of form responses linked to this appointment. */
+  formResponseIds: string[];
+}
+
+// ─── Retrieve Appointments ────────────────────────────────────────────────────
+
+export interface RetrieveAppointmentsBody {
+  /** Required — the business location to query. */
+  businessId: string;
+  /**
+   * Retrieve a specific appointment.
+   * At least one of appointmentId or customerId is expected by the API.
+   */
+  appointmentId?: string;
+  /** Retrieve all appointments for a specific customer. */
+  customerId?: string;
+}
+
+export interface RetrieveAppointmentsQuery {
+  pageNumber?: number;
+  pageSize?: number;
+  /** Sort by start time: "asc" | "desc" */
+  orderBy?: "asc" | "desc";
 }
 
 /**
- * Payload for `PUT /appointments/{id}`.
- * All fields optional — send only what changed.
+ * `POST /{region}/api/v2/appointments`
+ *
+ * Returns appointments for a business, filtered by appointmentId or customerId.
+ * Paginated — use `pageNumber` and `pageSize` query params to page through results.
+ *
+ * @example
+ * // All appointments for a customer:
+ * const appts = await retrieveAppointments({ businessId, customerId });
+ *
+ * // A specific appointment:
+ * const appts = await retrieveAppointments({ businessId, appointmentId });
  */
-export interface UpdateAppointmentPayload {
-  startDateTime?: string;
-  employeeId?: string;
-  notes?: string;
+export async function retrieveAppointments(
+  body: RetrieveAppointmentsBody,
+  query?: RetrieveAppointmentsQuery,
+): Promise<Appointment[]> {
+  const res = await vagaroClient.post<VagaroEnvelope<Appointment[]>>(
+    "/appointments",
+    body,
+    { params: query },
+  );
+  return unwrap(res) ?? [];
 }
 
 // ─── Query key factory ────────────────────────────────────────────────────────
-//
-// Centralising keys prevents string typos and lets you invalidate
-// precisely — e.g. invalidate every list without touching detail caches.
-//
-// Usage:
-//   queryClient.invalidateQueries({ queryKey: appointmentKeys.lists() });
-//   queryClient.invalidateQueries({ queryKey: appointmentKeys.detail(id) });
 
 export const appointmentKeys = {
-  /** Root key — invalidates everything appointment-related. */
   all: ["appointments"] as const,
-
-  /** Invalidates every list query regardless of filter params. */
   lists: () => [...appointmentKeys.all, "list"] as const,
-
-  /** Cache key for a specific set of filter params. */
-  list: (params: FetchAppointmentsParams) =>
-    [...appointmentKeys.lists(), params] as const,
-
-  /** Invalidates every detail query. */
-  details: () => [...appointmentKeys.all, "detail"] as const,
-
-  /** Cache key for a single appointment. */
-  detail: (id: string) => [...appointmentKeys.details(), id] as const,
+  list: (body: RetrieveAppointmentsBody, query?: RetrieveAppointmentsQuery) =>
+    [...appointmentKeys.lists(), body, query] as const,
+  availability: (body: SearchAvailabilityBody) =>
+    [...appointmentKeys.all, "availability", body] as const,
 } as const;
 
-// ─── Service functions ────────────────────────────────────────────────────────
+// ─── Search Appointment Availability ─────────────────────────────────────────
 
-/**
- * `GET /appointments`
- *
- * Fetch a paginated, filtered list of appointments.
- * Params with undefined values are automatically stripped by Axios.
- */
-export async function fetchAppointments(
-  params: FetchAppointmentsParams = {},
-): Promise<AppointmentsPage> {
-  const { data } = await vagaroClient.get<AppointmentsPage>("/appointments", {
-    params,
-  });
-  return data;
+/** A single service + provider combination to check availability for. */
+export interface BookingItem {
+  serviceId: string;
+  /** Optionally restrict to a specific service provider. */
+  serviceProviderId?: string;
+}
+
+export interface SearchAvailabilityBody {
+  /** Required — the business location to search. */
+  businessId: string;
+  /**
+   * Date to search in "YYYY-MM-DD" format.
+   * If omitted, Vagaro returns the first available date's slots.
+   */
+  appointmentDate?: string;
+  /** One or more service + provider combinations to find slots for. */
+  bookingItems: BookingItem[];
+}
+
+export interface AvailabilityItem {
+  serviceProviderId: string;
+  serviceProvider: string;
+  serviceId: string;
+  serviceTitle: string;
+  /** Duration in minutes. */
+  duration: number;
+}
+
+export interface AvailabilitySlot {
+  items: AvailabilityItem[];
+  /** "YYYY-MM-DD" */
+  appointmentDate: string;
+  /** Available start times in "HH:MM" format, e.g. ["09:00", "09:30"]. */
+  timeSlot: string[];
 }
 
 /**
- * `POST /appointments`
+ * `POST /{region}/api/v2/appointments/availability`
  *
- * Book a new appointment. Throws `VagaroClientError` on validation failure (400)
- * or auth issues (401/403) — no try/catch needed in the hook.
- */
-export async function createAppointment(
-  payload: CreateAppointmentPayload,
-): Promise<Appointment> {
-  const { data } = await vagaroClient.post<Appointment>("/appointments", payload);
-  return data;
-}
-
-/**
- * `GET /appointments/{id}`
+ * Returns available time slots for one or more services at a location.
+ * Use this to power a booking widget or calendar view.
  *
- * Fetch full details for a single appointment.
- * Returns `null` if the appointment is not found (404) rather than throwing,
- * so components can distinguish "not found" from real errors.
+ * @example
+ * const slots = await searchAppointmentAvailability({
+ *   businessId,
+ *   appointmentDate: "2025-09-15",
+ *   bookingItems: [{ serviceId: "abc123", serviceProviderId: "xyz456" }],
+ * });
  */
-export async function getAppointmentById(id: string): Promise<Appointment | null> {
-  try {
-    const { data } = await vagaroClient.get<Appointment>(`/appointments/${id}`);
-    return data;
-  } catch (err: unknown) {
-    // Surface 404 as null; re-throw everything else so the interceptor handles it.
-    if (
-      typeof err === "object" &&
-      err !== null &&
-      "status" in err &&
-      (err as { status: number }).status === 404
-    ) {
-      return null;
-    }
-    throw err;
-  }
-}
-
-/**
- * `PUT /appointments/{id}`
- *
- * Reschedule or update notes/employee on an existing appointment.
- * Send only the fields you want to change.
- */
-export async function updateAppointment(
-  id: string,
-  payload: UpdateAppointmentPayload,
-): Promise<Appointment> {
-  const { data } = await vagaroClient.put<Appointment>(
-    `/appointments/${id}`,
-    payload,
+export async function searchAppointmentAvailability(
+  body: SearchAvailabilityBody,
+): Promise<AvailabilitySlot[]> {
+  const res = await vagaroClient.post<VagaroEnvelope<AvailabilitySlot[]>>(
+    "/appointments/availability",
+    body,
   );
-  return data;
-}
-
-/**
- * `DELETE /appointments/{id}`
- *
- * Cancel an appointment. Returns void on success (Vagaro responds 204).
- */
-export async function cancelAppointment(id: string): Promise<void> {
-  await vagaroClient.delete(`/appointments/${id}`);
+  return unwrap(res) ?? [];
 }

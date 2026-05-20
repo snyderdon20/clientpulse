@@ -1,383 +1,138 @@
 /**
- * useAppointments.ts
+ * useAppointments.ts — TanStack Query v5 hooks for Vagaro V2 Appointments
  *
- * TanStack Query v5 hooks for the Vagaro appointments API.
+ * The Vagaro V2 API is READ-ONLY for appointments — there are no create,
+ * update, or cancel endpoints. Those actions happen inside Vagaro's UI.
+ * These hooks cover the two available endpoints:
  *
- * SETUP REQUIRED — wrap your app root with QueryClientProvider once:
+ *   useAppointments         → POST /appointments        (retrieve list)
+ *   useAppointmentAvailability → POST /appointments/availability (search slots)
  *
- *   // main.tsx
+ * SETUP — wrap your app root once in main.tsx:
  *   import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
  *   const queryClient = new QueryClient();
- *   root.render(
- *     <QueryClientProvider client={queryClient}>
- *       <App />
- *     </QueryClientProvider>
- *   );
+ *   <QueryClientProvider client={queryClient}><App /></QueryClientProvider>
  *
- * ─── Loading & error patterns (see bottom of file for component examples) ────
- *
- *  • `isPending`  — true on the very first fetch (no cached data yet).
- *                   Show a skeleton/spinner for this state.
- *  • `isFetching` — true whenever a request is in-flight, including background
- *                   refetches.  Use for a subtle top-bar progress indicator.
- *  • `isError`    — true when the latest fetch threw.  Show an error message.
- *  • `error`      — the thrown value (a VagaroClientError or AxiosError).
- *  • `refetch`    — manually re-trigger the query (e.g. a "Retry" button).
- *
- * For mutations:
- *  • `isPending`  — the mutation is currently in-flight.  Disable the button.
- *  • `isError`    — the mutation threw.
- *  • `reset`      — clears error/data state (useful after dismissing an error).
+ * ─── Loading/error pattern ────────────────────────────────────────────────────
+ *  isPending   → first-ever fetch, no data yet    → show skeleton / spinner
+ *  isFetching  → any in-flight request             → show subtle progress bar
+ *  isError     → latest fetch threw               → show error UI
+ *  error       → the thrown VagaroClientError or AxiosError
+ *  refetch     → manually re-trigger the query
  */
 
-import {
-  useQuery,
-  useMutation,
-  useQueryClient,
-  keepPreviousData,
-  type UseQueryResult,
-  type UseMutationResult,
-} from "@tanstack/react-query";
+import { useQuery, keepPreviousData, type UseQueryResult } from "@tanstack/react-query";
 
 import {
-  fetchAppointments,
-  createAppointment,
-  getAppointmentById,
-  updateAppointment,
-  cancelAppointment,
+  retrieveAppointments,
+  searchAppointmentAvailability,
   appointmentKeys,
   type Appointment,
-  type AppointmentsPage,
-  type FetchAppointmentsParams,
-  type CreateAppointmentPayload,
-  type UpdateAppointmentPayload,
+  type RetrieveAppointmentsBody,
+  type RetrieveAppointmentsQuery,
+  type AvailabilitySlot,
+  type SearchAvailabilityBody,
 } from "../api/appointmentService";
 
 import { isVagaroClientError } from "../api/vagaroClient";
 
-// ─── Shared stale time ────────────────────────────────────────────────────────
-// Appointments change often — consider data stale after 2 minutes.
+// ─── Stale time ───────────────────────────────────────────────────────────────
+// Appointments change frequently — treat cache as stale after 2 minutes.
 const APPOINTMENTS_STALE_MS = 2 * 60 * 1_000;
+// Availability slots are ephemeral — stale after 30 seconds.
+const AVAILABILITY_STALE_MS = 30 * 1_000;
 
-// ─── Return types (re-exported for component use) ─────────────────────────────
+// ─── useAppointments ──────────────────────────────────────────────────────────
 
-export type UseAppointmentsResult = UseQueryResult<AppointmentsPage, Error> & {
+export type UseAppointmentsResult = UseQueryResult<Appointment[], Error> & {
+  /** Convenience alias for `data ?? []`. Never undefined. */
   appointments: Appointment[];
-  totalCount: number;
 };
 
-export type UseAppointmentResult = UseQueryResult<Appointment | null, Error>;
-
-export type UseCreateAppointmentResult = UseMutationResult<
-  Appointment,
-  Error,
-  CreateAppointmentPayload
->;
-
-export type UseUpdateAppointmentResult = UseMutationResult<
-  Appointment,
-  Error,
-  { id: string; payload: UpdateAppointmentPayload }
->;
-
-export type UseCancelAppointmentResult = UseMutationResult<void, Error, string>;
-
-// ─── Hooks ────────────────────────────────────────────────────────────────────
-
 /**
- * Fetch a filtered, paginated list of appointments.
+ * Fetch appointments for a customer or a specific appointment ID.
  *
- * - Results are cached per unique `params` object.
- * - While new params load, the previous page's data stays visible
- *   (`keepPreviousData`) so the UI doesn't flash empty.
- * - Pass `enabled: false` to skip fetching (e.g. until a location is selected).
+ * @param body     Required `businessId` + optional `customerId` or `appointmentId`.
+ * @param query    Optional pagination / sort params.
+ * @param options  Pass `{ enabled: false }` to defer fetching.
  *
  * @example
- * const { appointments, isPending, isFetching, isError, error } = useAppointments({
- *   startDate: "2024-07-01",
- *   endDate:   "2024-07-31",
- *   locationId: selectedLocationId,
- * });
+ * const { appointments, isPending, isFetching, isError, error } = useAppointments(
+ *   { businessId, customerId },
+ *   { orderBy: "desc" }
+ * );
+ *
+ * if (isPending) return <Spinner />;
+ * if (isError)   return <p>{getErrorMessage(error)}</p>;
+ * return <AppointmentList items={appointments} />;
  */
 export function useAppointments(
-  params: FetchAppointmentsParams = {},
+  body: RetrieveAppointmentsBody,
+  query?: RetrieveAppointmentsQuery,
   options: { enabled?: boolean } = {},
 ): UseAppointmentsResult {
   const result = useQuery({
-    queryKey: appointmentKeys.list(params),
-    queryFn:  () => fetchAppointments(params),
+    queryKey: appointmentKeys.list(body, query),
+    queryFn:  () => retrieveAppointments(body, query),
     staleTime: APPOINTMENTS_STALE_MS,
-    // Keep the previous page visible while the new one loads (prevents flicker
-    // when the user changes date range or flips pages).
+    // Keep previous results visible while new params load — prevents empty flash.
     placeholderData: keepPreviousData,
-    enabled: options.enabled ?? true,
+    enabled: options.enabled ?? Boolean(body.businessId),
   });
 
-  return {
-    ...result,
-    appointments: result.data?.data ?? [],
-    totalCount:   result.data?.total ?? 0,
-  };
+  return { ...result, appointments: result.data ?? [] };
 }
 
+// ─── useAppointmentAvailability ───────────────────────────────────────────────
+
+export type UseAvailabilityResult = UseQueryResult<AvailabilitySlot[], Error> & {
+  /** Convenience alias for `data ?? []`. Never undefined. */
+  slots: AvailabilitySlot[];
+};
+
 /**
- * Fetch a single appointment by ID.
+ * Search available appointment slots for one or more services at a location.
  *
- * Returns `null` (not an error) when the appointment is not found (404),
- * so you can render a "Not found" state separately from real errors.
+ * @param body    Required `businessId` + `bookingItems`; optional `appointmentDate`.
+ * @param options Pass `{ enabled: false }` to defer fetching (e.g. until a date is picked).
  *
  * @example
- * const { data: appointment, isPending, isError } = useAppointment(appointmentId);
- * if (isPending)        return <Spinner />;
- * if (!appointment)     return <p>Appointment not found.</p>;
- * if (isError)          return <ErrorBanner />;
+ * const { slots, isPending, isError } = useAppointmentAvailability({
+ *   businessId,
+ *   appointmentDate: selectedDate,  // "YYYY-MM-DD"
+ *   bookingItems: [{ serviceId, serviceProviderId }],
+ * });
+ *
+ * if (isPending) return <Spinner />;
+ * return slots.map(s => <TimeSlotGrid key={s.appointmentDate} slot={s} />);
  */
-export function useAppointment(id: string | null | undefined): UseAppointmentResult {
-  return useQuery({
-    queryKey: appointmentKeys.detail(id ?? ""),
-    queryFn:  () => getAppointmentById(id!),
-    staleTime: APPOINTMENTS_STALE_MS,
-    // Don't fetch until we actually have an ID.
-    enabled: Boolean(id),
+export function useAppointmentAvailability(
+  body: SearchAvailabilityBody,
+  options: { enabled?: boolean } = {},
+): UseAvailabilityResult {
+  const result = useQuery({
+    queryKey: appointmentKeys.availability(body),
+    queryFn:  () => searchAppointmentAvailability(body),
+    staleTime: AVAILABILITY_STALE_MS,
+    enabled: options.enabled ?? Boolean(body.businessId && body.bookingItems?.length),
   });
+
+  return { ...result, slots: result.data ?? [] };
 }
 
-/**
- * Book a new appointment.
- *
- * On success, automatically invalidates the appointments list cache so
- * any open list views refetch and show the new booking.
- *
- * @example
- * const { mutate: book, isPending, isError, error } = useCreateAppointment();
- *
- * book(
- *   { customerId, locationId, employeeId, serviceId, startDateTime },
- *   {
- *     onSuccess: (newAppt) => navigate(`/appointments/${newAppt.id}`),
- *     onError:   (err)     => toast.error(err.message),
- *   }
- * );
- */
-export function useCreateAppointment(): UseCreateAppointmentResult {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (payload: CreateAppointmentPayload) => createAppointment(payload),
-
-    onSuccess: (newAppointment) => {
-      // Seed the detail cache so navigating straight to the new appointment
-      // is instant (no extra network round-trip).
-      queryClient.setQueryData(
-        appointmentKeys.detail(newAppointment.id),
-        newAppointment,
-      );
-      // Invalidate all list queries — they need to refetch to include the new row.
-      queryClient.invalidateQueries({ queryKey: appointmentKeys.lists() });
-    },
-  });
-}
+// ─── Error helper ─────────────────────────────────────────────────────────────
 
 /**
- * Reschedule an appointment or update its notes / employee.
- *
- * Uses an optimistic update: the UI reflects the change immediately and
- * rolls back if the server rejects it — keeps the experience snappy.
+ * Extracts a user-readable message from any error a hook might surface.
  *
  * @example
- * const { mutate: reschedule, isPending } = useUpdateAppointment();
- *
- * reschedule(
- *   { id: appointment.id, payload: { startDateTime: newTime } },
- *   { onError: (err) => toast.error(err.message) }
- * );
- */
-export function useUpdateAppointment(): UseUpdateAppointmentResult {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: UpdateAppointmentPayload }) =>
-      updateAppointment(id, payload),
-
-    // Optimistically patch the detail cache before the request completes.
-    onMutate: async ({ id, payload }) => {
-      // Cancel in-flight fetches for this appointment so they don't overwrite
-      // our optimistic update.
-      await queryClient.cancelQueries({ queryKey: appointmentKeys.detail(id) });
-
-      // Snapshot the current value for rollback.
-      const previous = queryClient.getQueryData<Appointment>(
-        appointmentKeys.detail(id),
-      );
-
-      // Apply the optimistic patch.
-      if (previous) {
-        queryClient.setQueryData(appointmentKeys.detail(id), {
-          ...previous,
-          ...payload,
-        });
-      }
-
-      return { previous, id };
-    },
-
-    // Roll back on failure.
-    onError: (_err, _vars, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(
-          appointmentKeys.detail(context.id),
-          context.previous,
-        );
-      }
-    },
-
-    // Always sync with the server response (success or error).
-    onSettled: (_data, _err, { id }) => {
-      queryClient.invalidateQueries({ queryKey: appointmentKeys.detail(id) });
-      queryClient.invalidateQueries({ queryKey: appointmentKeys.lists() });
-    },
-  });
-}
-
-/**
- * Cancel an appointment.
- *
- * Removes the appointment from the detail cache and refetches all lists
- * so cancelled items disappear from the UI without a manual refresh.
- *
- * @example
- * const { mutate: cancel, isPending: cancelling } = useCancelAppointment();
- *
- * <button disabled={cancelling} onClick={() => cancel(appointment.id)}>
- *   {cancelling ? "Cancelling…" : "Cancel appointment"}
- * </button>
- */
-export function useCancelAppointment(): UseCancelAppointmentResult {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (id: string) => cancelAppointment(id),
-
-    onSuccess: (_data, id) => {
-      // Remove the stale detail entry immediately.
-      queryClient.removeQueries({ queryKey: appointmentKeys.detail(id) });
-      // Refetch all lists so the cancelled appointment disappears.
-      queryClient.invalidateQueries({ queryKey: appointmentKeys.lists() });
-    },
-  });
-}
-
-// ─── Error helper (re-exported for components) ────────────────────────────────
-
-/**
- * Extracts a human-readable message from any error a hook might surface.
- * Handles `VagaroClientError` (structured), `Error`, and plain strings.
- *
- * @example
- * const { isError, error } = useAppointments(params);
- * if (isError) return <p>{getErrorMessage(error)}</p>;
+ * const { isError, error } = useAppointments(body);
+ * if (isError) return <ErrorBanner message={getErrorMessage(error)} />;
  */
 export function getErrorMessage(err: unknown): string {
   if (isVagaroClientError(err)) {
-    return (
-      err.payload.error_description ??
-      err.payload.message ??
-      err.message
-    );
+    return err.payload.message || err.message;
   }
   if (err instanceof Error) return err.message;
   return "An unexpected error occurred.";
 }
-
-// ─── Component usage examples ─────────────────────────────────────────────────
-//
-// ── 1. List with filters ──────────────────────────────────────────────────────
-//
-// function AppointmentList({ locationId }: { locationId: string }) {
-//   const [page, setPage] = useState(1);
-//   const {
-//     appointments,
-//     totalCount,
-//     isPending,   // true on first load only — show a full-page skeleton
-//     isFetching,  // true on every fetch — show a subtle spinner in the header
-//     isError,
-//     error,
-//   } = useAppointments({ locationId, startDate: "2024-07-01", page });
-//
-//   if (isPending) return <SkeletonList />;
-//   if (isError)   return <ErrorBanner message={getErrorMessage(error)} />;
-//
-//   return (
-//     <>
-//       {isFetching && <TopBarSpinner />}
-//       <ul>{appointments.map(a => <AppointmentRow key={a.id} appt={a} />)}</ul>
-//       <Pagination total={totalCount} page={page} onChange={setPage} />
-//     </>
-//   );
-// }
-//
-// ── 2. Detail view ────────────────────────────────────────────────────────────
-//
-// function AppointmentDetail({ id }: { id: string }) {
-//   const { data: appt, isPending, isError, error } = useAppointment(id);
-//
-//   if (isPending)  return <Spinner />;
-//   if (!appt)      return <p>Appointment not found.</p>;  // 404 → null
-//   if (isError)    return <ErrorBanner message={getErrorMessage(error)} />;
-//
-//   return <AppointmentCard appt={appt} />;
-// }
-//
-// ── 3. Create form ────────────────────────────────────────────────────────────
-//
-// function BookAppointmentForm() {
-//   const { mutate: book, isPending, isError, error, reset } = useCreateAppointment();
-//
-//   const handleSubmit = (formData: CreateAppointmentPayload) =>
-//     book(formData, {
-//       onSuccess: (appt) => navigate(`/appointments/${appt.id}`),
-//       // onError handled via isError below — no need to duplicate
-//     });
-//
-//   return (
-//     <form onSubmit={...}>
-//       {isError && (
-//         <ErrorBanner message={getErrorMessage(error)} onDismiss={reset} />
-//       )}
-//       <button type="submit" disabled={isPending}>
-//         {isPending ? "Booking…" : "Book appointment"}
-//       </button>
-//     </form>
-//   );
-// }
-//
-// ── 4. Reschedule (optimistic) ────────────────────────────────────────────────
-//
-// function RescheduleButton({ appt }: { appt: Appointment }) {
-//   const { mutate: reschedule, isPending } = useUpdateAppointment();
-//
-//   return (
-//     <button
-//       disabled={isPending}
-//       onClick={() =>
-//         reschedule(
-//           { id: appt.id, payload: { startDateTime: newTime } },
-//           { onError: (err) => toast.error(getErrorMessage(err)) }
-//         )
-//       }
-//     >
-//       {isPending ? "Saving…" : "Reschedule"}
-//     </button>
-//   );
-// }
-//
-// ── 5. Cancel ─────────────────────────────────────────────────────────────────
-//
-// function CancelButton({ apptId }: { apptId: string }) {
-//   const { mutate: cancel, isPending } = useCancelAppointment();
-//   return (
-//     <button disabled={isPending} onClick={() => cancel(apptId)}>
-//       {isPending ? "Cancelling…" : "Cancel"}
-//     </button>
-//   );
-// }

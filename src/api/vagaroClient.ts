@@ -1,11 +1,15 @@
 /**
- * vagaroClient.ts
+ * vagaroClient.ts — Vagaro Public Enterprise Business API V2
  *
- * Production-ready Axios client for the Vagaro Public REST API.
+ * What changed from the old implementation:
+ *  - Base URL:  https://api.vagaro.com/{region}/api/v2  (was /v1)
+ *  - Auth:      custom `accessToken` request header     (was Authorization: Bearer)
+ *  - Token:     POST /merchants/generate-access-token   (was /oauth2/token)
+ *  - Creds:     clientId + clientSecretKey              (was client_id + client_secret)
+ *  - Region:    required path segment                   (was absent)
  *
- * Environment variable (Vite):  VITE_VAGARO_API_BASE_URL
- * Note: Vite uses import.meta.env.VITE_* instead of process.env.REACT_APP_*.
- *       Add  VITE_VAGARO_API_BASE_URL=https://api.vagaro.com/v1  to your .env file.
+ * Every response is wrapped in { status, responseId, responseCode, message, data }.
+ * Service functions call `unwrap(response)` to get the inner `data` value.
  */
 
 import axios, {
@@ -15,17 +19,37 @@ import axios, {
   InternalAxiosRequestConfig,
 } from "axios";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Response envelope ────────────────────────────────────────────────────────
 
-/** Shape of the JSON body Vagaro returns for 4xx errors. */
-export interface VagaroApiErrorPayload {
-  error: string;
-  error_description?: string;
-  message?: string;
-  code?: string | number;
+/** Shape of every Vagaro V2 API response body. */
+export interface VagaroEnvelope<T = unknown> {
+  status: number;
+  responseId: string;
+  responseCode: number;
+  message: string;
+  data: T;
 }
 
-/** Rich error thrown by the response interceptor for handled status codes. */
+/** Extracts the inner `data` from a Vagaro response. */
+export function unwrap<T>(response: AxiosResponse<VagaroEnvelope<T>>): T {
+  return response.data.data;
+}
+
+// ─── Error types ──────────────────────────────────────────────────────────────
+
+export interface VagaroErrorDetail {
+  [field: string]: string | undefined;
+}
+
+export interface VagaroApiErrorPayload {
+  status: number;
+  responseId: string;
+  responseCode: number;
+  message: string;
+  errors?: VagaroErrorDetail;
+}
+
+/** Structured error thrown by the response interceptor for 400/401/403 responses. */
 export class VagaroClientError extends Error {
   readonly status: number;
   readonly payload: VagaroApiErrorPayload;
@@ -36,201 +60,213 @@ export class VagaroClientError extends Error {
     this.name = "VagaroClientError";
     this.status = status;
     this.payload = payload;
-    // Restore prototype chain so `instanceof VagaroClientError` works after transpilation.
     Object.setPrototypeOf(this, VagaroClientError.prototype);
   }
 }
 
-/** Type guard — narrows an unknown error to VagaroClientError. */
 export function isVagaroClientError(err: unknown): err is VagaroClientError {
   return err instanceof VagaroClientError;
 }
 
-// ─── Client config ────────────────────────────────────────────────────────────
+// ─── Token management ─────────────────────────────────────────────────────────
+
+interface TokenCache {
+  accessToken: string;
+  /** Unix timestamp (ms) after which the token is stale. */
+  expiresAt: number;
+}
+
+interface TokenApiResponse {
+  access_token: string;
+  /** Seconds until expiry (3600 = 1 hour). */
+  expires_in: number;
+}
+
+// ─── Config ───────────────────────────────────────────────────────────────────
+
+export interface VagaroCredentials {
+  clientId: string;
+  clientSecretKey: string;
+}
 
 export interface VagaroClientConfig {
   /**
-   * Returns the current OAuth Bearer token.
-   * Defaults to reading `vagaro_access_token` from localStorage.
-   * Replace with your auth-state selector (Redux, Zustand, Context, etc.).
+   * Returns the account region (e.g. "us04").
+   * Find yours by looking at the subdomain of your Vagaro business URL.
+   * Defaults to reading `cp_vagaro_region` from localStorage.
    */
-  getToken?: () => string | null;
+  getRegion?: () => string | null;
 
   /**
-   * Returns the static Vagaro API key (X-API-Key header).
-   * Defaults to reading `vagaro_api_key` from localStorage.
+   * Returns API credentials for token generation.
+   * Defaults to reading from localStorage:
+   *   cp_vagaro_client_id, cp_vagaro_client_secret_key
    */
-  getApiKey?: () => string | null;
+  getCredentials?: () => VagaroCredentials | null;
 
   /**
-   * Called on every 401 response.
-   * Use this to trigger a logout, redirect to login, or start a token-refresh flow.
+   * Comma-separated scopes to request on the access token.
+   * Vagaro scopes: "read access" | "write access" | "write employee"
+   * Defaults to requesting all three.
    */
+  scope?: string;
+
+  /** Called on 401 — use to redirect to login or clear stored credentials. */
   onUnauthorized?: () => void;
 
-  /**
-   * Called on every 403 response.
-   * `requiredScopes` is populated from the `X-Required-Scopes` header when present.
-   */
-  onForbidden?: (requiredScopes?: string) => void;
+  /** Called on 403 — use to show a "missing permissions" message. */
+  onForbidden?: () => void;
 }
 
-// ─── Retry config for 429 Too Many Requests ──────────────────────────────────
+// ─── Retry config for 429 ────────────────────────────────────────────────────
 
 const RATE_LIMIT_RETRY = {
-  /** Maximum number of automatic retries before giving up. */
   maxRetries: 2,
-  /** Fallback delay (ms) when the API omits a `Retry-After` header. */
   defaultDelayMs: 1_000,
 } as const;
 
-// Axios doesn't expose a `_retryCount` field — extend the config type locally.
-interface RetryableRequestConfig extends InternalAxiosRequestConfig {
+interface RetryableConfig extends InternalAxiosRequestConfig {
   _retryCount?: number;
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────────────
 
 /**
- * Creates a fully configured Vagaro API client.
+ * Creates a configured Vagaro V2 API client.
  *
- * @example
- * // Default singleton (reads from localStorage, no auth callbacks):
- * import { vagaroClient } from './api/vagaroClient';
- * const data = await vagaroClient.get('/businesses/me');
+ * @example — default singleton, reads from localStorage:
+ *   import { vagaroClient } from './api/vagaroClient';
+ *   const res = await vagaroClient.post('/appointments', { businessId });
+ *   return unwrap(res); // → Appointment[]
  *
- * @example
- * // Custom instance wired to your auth layer:
- * const client = createVagaroClient({
- *   getToken:       () => authStore.getState().accessToken,
- *   onUnauthorized: () => authStore.getState().logout(),
- *   onForbidden:    (scopes) => toast.error(`Missing scopes: ${scopes}`),
- * });
+ * @example — custom instance wired to your auth store:
+ *   const client = createVagaroClient({
+ *     getRegion:      () => settingsStore.region,
+ *     getCredentials: () => settingsStore.credentials,
+ *     onUnauthorized: () => settingsStore.clearCredentials(),
+ *   });
  */
 export function createVagaroClient(config: VagaroClientConfig = {}): AxiosInstance {
   const {
-    getToken  = () => localStorage.getItem("vagaro_access_token"),
-    getApiKey = () => localStorage.getItem("vagaro_api_key"),
+    getRegion = () => localStorage.getItem("cp_vagaro_region"),
+    getCredentials = () => {
+      const clientId = localStorage.getItem("cp_vagaro_client_id");
+      const clientSecretKey = localStorage.getItem("cp_vagaro_client_secret_key");
+      return clientId && clientSecretKey ? { clientId, clientSecretKey } : null;
+    },
+    scope = "read access,write access,write employee",
     onUnauthorized,
     onForbidden,
   } = config;
 
-  // ── Base instance ──────────────────────────────────────────────────────────
+  let tokenCache: TokenCache | null = null;
+
+  async function getAccessToken(): Promise<string | null> {
+    // Return cached token if still valid with a 60-second buffer.
+    if (tokenCache && Date.now() < tokenCache.expiresAt - 60_000) {
+      return tokenCache.accessToken;
+    }
+
+    const region = getRegion();
+    const creds  = getCredentials();
+    if (!region || !creds) return null;
+
+    try {
+      const res = await axios.post<VagaroEnvelope<TokenApiResponse>>(
+        `https://api.vagaro.com/${region}/api/v2/merchants/generate-access-token`,
+        { clientId: creds.clientId, clientSecretKey: creds.clientSecretKey, scope },
+        { headers: { "Content-Type": "application/json" } },
+      );
+      const { access_token, expires_in } = res.data.data;
+      tokenCache = { accessToken: access_token, expiresAt: Date.now() + expires_in * 1_000 };
+      return access_token;
+    } catch (e) {
+      console.error("[Vagaro] Token generation failed:", e);
+      tokenCache = null;
+      return null;
+    }
+  }
+
   const client = axios.create({
-    baseURL: import.meta.env.VITE_VAGARO_API_BASE_URL ?? "https://api.vagaro.com/v1",
     timeout: 15_000,
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
   });
 
-  // ── Request interceptor — attach auth headers ──────────────────────────────
+  // ── Request interceptor — inject baseURL from region + accessToken header ──
   client.interceptors.request.use(
-    (reqConfig: InternalAxiosRequestConfig): InternalAxiosRequestConfig => {
-      const token  = getToken();
-      const apiKey = getApiKey();
+    async (reqConfig: InternalAxiosRequestConfig): Promise<InternalAxiosRequestConfig> => {
+      const region = getRegion() ?? "us04";
+      reqConfig.baseURL = `https://api.vagaro.com/${region}/api/v2`;
 
-      if (token)  reqConfig.headers.Authorization = `Bearer ${token}`;
-      if (apiKey) reqConfig.headers["X-API-Key"]  = apiKey;
+      const token = await getAccessToken();
+      if (token) reqConfig.headers.accessToken = token;
 
       return reqConfig;
     },
-    (error: unknown) => Promise.reject(error),
+    (err: unknown) => Promise.reject(err),
   );
 
   // ── Response interceptor — structured error handling ───────────────────────
   client.interceptors.response.use(
-    (response: AxiosResponse): AxiosResponse => response,
+    (res: AxiosResponse): AxiosResponse => res,
 
-    async (error: AxiosError<VagaroApiErrorPayload>): Promise<never> => {
-      const status  = error.response?.status;
-      const headers = error.response?.headers ?? {};
-      const payload = error.response?.data;
+    async (err: AxiosError<VagaroApiErrorPayload>): Promise<never> => {
+      const status  = err.response?.status;
+      const payload = err.response?.data;
+      const headers = err.response?.headers ?? {};
+
+      const blankPayload = (msg: string): VagaroApiErrorPayload => ({
+        status: status ?? 0, responseId: "", responseCode: 0, message: msg,
+      });
 
       switch (status) {
-        // ── 400 Bad Request ─────────────────────────────────────────────────
-        // Parse the Vagaro JSON error body and surface a readable message.
-        case 400: {
-          const message =
-            payload?.error_description ??
-            payload?.message ??
-            payload?.error ??
-            "Bad Request";
+        case 400:
+          throw new VagaroClientError(
+            payload?.message ?? "Bad Request",
+            400,
+            payload ?? blankPayload("Bad Request"),
+          );
 
-          throw new VagaroClientError(message, 400, payload ?? { error: "Bad Request" });
-        }
-
-        // ── 401 Unauthorized ────────────────────────────────────────────────
-        // Token is missing, expired, or revoked.  Delegate to the caller's
-        // auth layer (logout, token refresh, redirect to login, etc.).
-        case 401: {
-          console.warn("[Vagaro] 401 Unauthorized — triggering onUnauthorized callback.");
+        case 401:
+          tokenCache = null;
+          console.warn("[Vagaro] 401 Unauthorized — token cache cleared.");
           onUnauthorized?.();
-          throw new VagaroClientError("Unauthorized", 401, payload ?? { error: "Unauthorized" });
-        }
+          throw new VagaroClientError("Unauthorized", 401, payload ?? blankPayload("Unauthorized"));
 
-        // ── 403 Forbidden ───────────────────────────────────────────────────
-        // The token is valid but lacks the required OAuth scopes.
-        case 403: {
-          const requiredScopes = headers["x-required-scopes"] as string | undefined;
-          console.warn(
-            `[Vagaro] 403 Forbidden — insufficient scopes.` +
-            (requiredScopes ? ` Required: ${requiredScopes}` : " No scope detail provided."),
-          );
-          onForbidden?.(requiredScopes);
-          throw new VagaroClientError("Forbidden", 403, payload ?? { error: "Forbidden" });
-        }
+        case 403:
+          console.warn("[Vagaro] 403 Forbidden — check API scopes.");
+          onForbidden?.();
+          throw new VagaroClientError("Forbidden", 403, payload ?? blankPayload("Forbidden"));
 
-        // ── 429 Too Many Requests ───────────────────────────────────────────
-        // Respect the `Retry-After` header and retry automatically up to
-        // RATE_LIMIT_RETRY.maxRetries times before propagating the error.
         case 429: {
-          const remaining   = headers["x-ratelimit-remaining"] ?? headers["x-rate-limit-remaining"];
-          const retryAfter  = headers["retry-after"] as string | undefined;
-          const originalReq = error.config as RetryableRequestConfig | undefined;
+          const retryAfter = headers["retry-after"] as string | undefined;
+          const orig = err.config as RetryableConfig | undefined;
+          console.warn(`[Vagaro] 429 Too Many Requests${retryAfter ? ` — Retry-After: ${retryAfter}s` : ""}`);
 
-          console.warn(
-            `[Vagaro] 429 Too Many Requests` +
-            ` — X-RateLimit-Remaining: ${remaining ?? "unknown"}` +
-            (retryAfter ? ` — Retry-After: ${retryAfter}s` : ""),
-          );
+          if (!orig) break;
+          orig._retryCount = (orig._retryCount ?? 0) + 1;
 
-          if (!originalReq) break;
-
-          originalReq._retryCount = (originalReq._retryCount ?? 0) + 1;
-
-          if (originalReq._retryCount > RATE_LIMIT_RETRY.maxRetries) {
-            console.error(
-              `[Vagaro] Exhausted ${RATE_LIMIT_RETRY.maxRetries} retries after 429. Giving up.`,
-            );
+          if (orig._retryCount > RATE_LIMIT_RETRY.maxRetries) {
+            console.error(`[Vagaro] Exhausted ${RATE_LIMIT_RETRY.maxRetries} retries after 429.`);
             break;
           }
 
           const delayMs = retryAfter
             ? parseInt(retryAfter, 10) * 1_000
-            : RATE_LIMIT_RETRY.defaultDelayMs * originalReq._retryCount;
+            : RATE_LIMIT_RETRY.defaultDelayMs * orig._retryCount;
 
-          console.info(
-            `[Vagaro] Retrying in ${delayMs}ms` +
-            ` (attempt ${originalReq._retryCount}/${RATE_LIMIT_RETRY.maxRetries})`,
-          );
-
+          console.info(`[Vagaro] Retrying in ${delayMs}ms (${orig._retryCount}/${RATE_LIMIT_RETRY.maxRetries})`);
           await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
-          return client(originalReq) as Promise<never>;
+          return client(orig) as Promise<never>;
         }
       }
 
-      // Re-throw everything else (500, network errors, etc.) as-is.
-      return Promise.reject(error);
+      return Promise.reject(err);
     },
   );
 
   return client;
 }
 
-// ─── Singleton ────────────────────────────────────────────────────────────────
-// Import this directly for simple use cases.
-// For apps with a proper auth store, call createVagaroClient({ getToken, onUnauthorized })
-// once at startup and export the result instead.
+// ─── Default singleton ────────────────────────────────────────────────────────
 export const vagaroClient = createVagaroClient();
