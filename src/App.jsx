@@ -197,7 +197,7 @@ const DEFAULT_TEMPLATES = {
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 const TODAY = new Date().toISOString().split("T")[0];
-const uid = () => Math.random().toString(36).slice(2, 8);
+const uid = () => crypto.randomUUID();
 const fullName = (c) => `${c.firstName} ${c.lastName}`;
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
