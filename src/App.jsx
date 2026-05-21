@@ -3272,6 +3272,7 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
   const [inviting,  setInviting]    = useState(false);
   const [inviteMsg, setInviteMsg]   = useState(null);
   const [error,     setError]       = useState(null);
+  const [resetSent, setResetSent]   = useState({});
 
   const sb = () => getSB(supabaseUrl, supabaseAnonKey);
 
@@ -3338,6 +3339,16 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
     } catch (e) { setError(e.message); }
   };
 
+  const sendReset = async (id, email) => {
+    if (!email) return;
+    try {
+      const { error: err } = await sb().auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+      if (err) throw err;
+      setResetSent((s) => ({ ...s, [id]: true }));
+      setTimeout(() => setResetSent((s) => { const n = { ...s }; delete n[id]; return n; }), 4000);
+    } catch (e) { setError(e.message); }
+  };
+
   const ROLES = ["admin", "manager", "staff"];
   const ROLE_COLORS = { admin: { bg: "#fee2e2", color: "#991b1b" }, manager: { bg: "#fef3c7", color: "#92400e" }, staff: { bg: "#dbeafe", color: "#1d5fa8" } };
 
@@ -3391,6 +3402,13 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
                 style={{ fontSize: "11px", fontWeight: "700", color: ROLE_COLORS[member.role]?.color || "#1d5fa8", background: ROLE_COLORS[member.role]?.bg || "#dbeafe", border: "none", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
                 {ROLES.map((r) => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
               </select>
+              {member.email && member.active && (
+                <button
+                  onClick={() => sendReset(member.id, member.email)}
+                  style={{ fontSize: "11px", fontWeight: "700", color: resetSent[member.id] ? "#065f46" : "#6b5244", background: resetSent[member.id] ? "#d1fae5" : "#f5ede4", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", whiteSpace: "nowrap" }}>
+                  {resetSent[member.id] ? "Sent!" : "Reset pw"}
+                </button>
+              )}
               <button
                 onClick={() => toggleActive(member.id, member.active)}
                 style={{ fontSize: "11px", fontWeight: "700", color: member.active ? "#dc2626" : "#065f46", background: member.active ? "#fee2e2" : "#d1fae5", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
