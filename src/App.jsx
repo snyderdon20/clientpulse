@@ -3629,18 +3629,26 @@ function parseMoney(v) {
 
 function parseVagaroDate(v) {
   if (!v || !v.trim()) return null;
-  const parts = v.trim().split("/");
-  if (parts.length === 3) {
-    const [m, d, y] = parts;
+  const s = v.trim();
+  // M/D/YYYY or MM/DD/YYYY
+  const slashParts = s.split("/");
+  if (slashParts.length === 3) {
+    const [m, d, y] = slashParts;
     return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
   }
+  // Already YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  // Last resort: native parse
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return d.toLocaleDateString("en-CA");
   return null;
 }
 
 function parseVagaroTransactionCSV(text) {
-  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  // Strip Excel BOM and normalize line endings
+  const lines = text.replace(/^﻿/, "").split(/\r?\n/).filter(l => l.trim());
   if (lines.length < 2) return [];
-  const headers = parseCSVLine(lines[0]).map(h => h.trim());
+  const headers = parseCSVLine(lines[0]).map(h => h.trim().replace(/^﻿/, ""));
   const idx = (name) => headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
 
   const COL = {
@@ -3739,14 +3747,23 @@ function TransactionCSVImport({ supabaseUrl, supabaseAnonKey }) {
       const r = rows[i];
       setProgress(Math.round((i / rows.length) * 100));
 
-      // Dedup check
+      // Dedup check — update missing fields on existing rows
       if (r.transactionId && r.itemSold) {
         const { data: ex } = await sb.from("transactions")
-          .select("id")
+          .select("id, transaction_date, client_id")
           .eq("vagaro_transaction_id", r.transactionId)
           .eq("item_sold", r.itemSold)
           .maybeSingle();
-        if (ex) { skipped++; continue; }
+        if (ex) {
+          const patch = {};
+          if (!ex.transaction_date && r.checkoutDate) patch.transaction_date = r.checkoutDate + "T12:00:00Z";
+          const nameKey2 = `${r.firstName.toLowerCase()} ${r.lastName.toLowerCase()}`;
+          const cId = nameMap[nameKey2] || null;
+          if (!ex.client_id && cId) patch.client_id = cId;
+          if (Object.keys(patch).length > 0) await sb.from("transactions").update(patch).eq("id", ex.id);
+          skipped++;
+          continue;
+        }
       }
 
       const nameKey = `${r.firstName.toLowerCase()} ${r.lastName.toLowerCase()}`;
