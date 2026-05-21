@@ -4,7 +4,7 @@
  * Receives Vagaro webhook events and syncs them into ClientPulse.
  *
  * Vagaro webhook payload format:
- *   { type: "appointment"|"customer"|"sale", action: "created"|..., payload: {...} }
+ *   { type: "appointment"|"customer"|"transaction", action: "created"|..., payload: {...} }
  *
  * Client resolution chain (creates a new client if no match found):
  *   1. Direct vagaro_id lookup
@@ -100,9 +100,9 @@ serve(async (req: Request) => {
 
   let processingError: string | null = null;
   try {
-    if (type === "appointment") await handleAppointment(supabase, eventType, data);
-    else if (type === "customer") await handleCustomer(supabase, eventType, data);
-    else if (type === "sale")     await handleSale(supabase, data);
+    if (type === "appointment")  await handleAppointment(supabase, eventType, data);
+    else if (type === "customer")    await handleCustomer(supabase, eventType, data);
+    else if (type === "transaction") await handleTransaction(supabase, data);
   } catch (err) {
     processingError = String(err);
     console.error("Processing error:", processingError);
@@ -460,18 +460,82 @@ async function handleCustomer(sb: SB, eventType: string, data: Record<string, un
   await logHistory(sb, client.id, "client.updated", "Profile synced from Vagaro");
 }
 
-async function handleSale(sb: SB, data: Record<string, unknown>) {
-  const vagaroClientId = str(data.customerId ?? data.CustomerId ?? "");
-  const amount = num(data.totalAmount ?? data.amount ?? 0);
-  if (!vagaroClientId || !amount) return;
+async function handleTransaction(sb: SB, data: Record<string, unknown>) {
+  const vagaroCustomerId       = str(data.customerId       ?? data.CustomerId       ?? "");
+  const vagaroUserPaymentId    = str(data.userPaymentId    ?? "");
+  const vagaroUserPaymentMstId = str(data.userPaymentsMstId ?? data.userPaymentMstId ?? "");
+  const vagaroTransactionId    = str(data.transactionId    ?? "");
+  const vagaroApptId           = str(data.appointmentId    ?? "");
+  const vagaroProviderId       = str(data.serviceProviderId ?? "");
+  const businessId             = str(data.businessId       ?? "");
 
-  const client = await resolveClient(sb, vagaroClientId, str(data.businessId ?? ""));
+  const ccAmount          = num(data.ccAmount);
+  const cashAmount        = num(data.cashAmount);
+  const checkAmount       = num(data.checkAmount);
+  const achAmount         = num(data.achAmount);
+  const packageRedemption = num(data.packageRedemption);
+  const gcRedemption      = num(data.gcRedemption);
+  const bankAccountAmount = num(data.bankAccountAmount);
+  const vplAmount         = num(data.vagaroPayLaterAmount);
+  const otherAmount       = num(data.otherAmount);
+  const totalPaid         = ccAmount + cashAmount + checkAmount + achAmount +
+                            packageRedemption + gcRedemption + bankAccountAmount + vplAmount + otherAmount;
+
+  const txRecord: Record<string, unknown> = {
+    vagaro_user_payment_id:     vagaroUserPaymentId    || null,
+    vagaro_user_payment_mst_id: vagaroUserPaymentMstId || null,
+    vagaro_transaction_id:      vagaroTransactionId    || null,
+    vagaro_customer_id:         vagaroCustomerId        || null,
+    vagaro_appointment_id:      vagaroApptId            || null,
+    vagaro_service_provider_id: vagaroProviderId        || null,
+    transaction_date:           str(data.transactionDate) || new Date().toISOString(),
+    item_sold:                  str(data.itemSold        ?? ""),
+    purchase_type:              str(data.purchaseType    ?? ""),
+    service_category:           str(data.serviceCategory ?? ""),
+    brand_name:                 str(data.brandName       ?? ""),
+    quantity:                   num(data.quantity) || 1,
+    cc_amount:                  ccAmount,
+    cash_amount:                cashAmount,
+    check_amount:               checkAmount,
+    ach_amount:                 achAmount,
+    package_redemption:         packageRedemption,
+    gc_redemption:              gcRedemption,
+    bank_account_amount:        bankAccountAmount,
+    vagaro_pay_later_amount:    vplAmount,
+    other_amount:               otherAmount,
+    tax:                        num(data.tax),
+    tip:                        num(data.tip),
+    discount:                   num(data.discount),
+    membership_amount:          num(data.memberShipAmount),
+    cc_type:                    str(data.ccType ?? "") || null,
+    cc_mode:                    str(data.ccMode ?? "") || null,
+    amount_due:                 num(data.amountDue),
+    business_id:                businessId || null,
+    created_by:                 str(data.createdBy ?? "") || null,
+  };
+
+  if (vagaroUserPaymentId) {
+    await sb.from("transactions").upsert(txRecord, { onConflict: "vagaro_user_payment_id" });
+  } else {
+    await sb.from("transactions").insert(txRecord);
+  }
+
+  if (!vagaroCustomerId) return;
+  const client = await resolveClient(sb, vagaroCustomerId, businessId);
   if (!client) return;
-  await sb.from("clients").update({
-    total_spent: (client.total_spent ?? 0) + amount,
-    updated_at:  new Date().toISOString(),
-  }).eq("id", client.id);
-  await logHistory(sb, client.id, "payment.charged", `Payment of $${amount.toFixed(2)} synced from Vagaro`);
+
+  if (vagaroUserPaymentId) {
+    await sb.from("transactions").update({ client_id: client.id }).eq("vagaro_user_payment_id", vagaroUserPaymentId);
+  }
+
+  if (totalPaid > 0) {
+    await sb.from("clients").update({
+      total_spent: (client.total_spent ?? 0) + totalPaid,
+      updated_at:  new Date().toISOString(),
+    }).eq("id", client.id);
+    const label = str(data.itemSold || data.purchaseType || "Payment");
+    await logHistory(sb, client.id, "payment.charged", `$${totalPaid.toFixed(2)} — ${label} via Vagaro`);
+  }
 }
 
 // ─── Utils ────────────────────────────────────────────────────────────────────

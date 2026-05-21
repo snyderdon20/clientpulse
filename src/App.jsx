@@ -4189,13 +4189,15 @@ function saveSalesData(year, month, data) {
   try { localStorage.setItem(salesStorageKey(year, month), JSON.stringify(data)); } catch {}
 }
 
-function SalesDashboard() {
+function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
   const now = new Date();
   const [selYear,  setSelYear]  = useState(now.getFullYear());
   const [selMonth, setSelMonth] = useState(now.getMonth() + 1);
   const [animated, setAnimated] = useState(false);
   const [showNote, setShowNote] = useState(false);
   const [data, setData] = useState(() => loadSalesData(now.getFullYear(), now.getMonth() + 1));
+  const [liveData,    setLiveData]    = useState(null);
+  const [liveLoading, setLiveLoading] = useState(false);
 
   useEffect(() => {
     setData(loadSalesData(selYear, selMonth));
@@ -4204,6 +4206,40 @@ function SalesDashboard() {
   }, [selYear, selMonth]);
 
   useEffect(() => { setTimeout(() => setAnimated(true), 120); }, []);
+
+  useEffect(() => {
+    if (!usingDB || !supabaseUrl || !supabaseAnonKey) { setLiveData(null); return; }
+    setLiveLoading(true);
+    const startDate = new Date(selYear, selMonth - 1, 1).toISOString();
+    const endDate   = new Date(selYear, selMonth,     1).toISOString();
+    getSB(supabaseUrl, supabaseAnonKey)
+      .from("transactions")
+      .select("purchase_type,cc_amount,cash_amount,check_amount,ach_amount,package_redemption,gc_redemption,bank_account_amount,vagaro_pay_later_amount,other_amount,tip,tax,item_sold,transaction_date,vagaro_service_provider_id")
+      .gte("transaction_date", startDate)
+      .lt("transaction_date", endDate)
+      .order("transaction_date", { ascending: false })
+      .then(({ data: rows }) => {
+        if (!rows) { setLiveLoading(false); return; }
+        const totalRevenue = rows.reduce((s, t) =>
+          s + (+t.cc_amount||0) + (+t.cash_amount||0) + (+t.check_amount||0) + (+t.ach_amount||0)
+            + (+t.package_redemption||0) + (+t.gc_redemption||0) + (+t.bank_account_amount||0)
+            + (+t.vagaro_pay_later_amount||0) + (+t.other_amount||0), 0);
+        const totalTips = rows.reduce((s, t) => s + (+t.tip||0), 0);
+        const byType = {};
+        for (const t of rows) {
+          const pt = t.purchase_type || "Other";
+          const amt = (+t.cc_amount||0) + (+t.cash_amount||0) + (+t.check_amount||0) + (+t.ach_amount||0)
+            + (+t.package_redemption||0) + (+t.gc_redemption||0) + (+t.bank_account_amount||0)
+            + (+t.vagaro_pay_later_amount||0) + (+t.other_amount||0);
+          byType[pt] = (byType[pt] || 0) + amt;
+        }
+        const packageRevenue = (byType["Package"] || 0) + (byType["Membership"] || 0);
+        const serviceRevenue = byType["Service"] || 0;
+        setLiveData({ totalRevenue, totalTips, byType, packageRevenue, serviceRevenue,
+          count: rows.length, recent: rows.slice(0, 8) });
+        setLiveLoading(false);
+      });
+  }, [usingDB, supabaseUrl, supabaseAnonKey, selYear, selMonth]);
 
   const updateData = (updates) => {
     setData(prev => {
@@ -4258,6 +4294,72 @@ function SalesDashboard() {
           </select>
         </div>
       </div>
+
+      {/* Live Revenue from Vagaro */}
+      {usingDB && (
+        <div style={{ ...S.card, marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <label style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", letterSpacing: "1.5px", textTransform: "uppercase" }}>
+              Live Revenue — {MONTH_NAMES[selMonth - 1]} {selYear}
+            </label>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {liveLoading && <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#a0785a", animation: "pulse 1s infinite" }} />}
+              <span style={{ fontSize: "10px", color: "#8a7a6a" }}>{liveData ? `${liveData.count} transactions` : "Loading…"}</span>
+            </div>
+          </div>
+          {liveData ? (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 16 }}>
+                {[
+                  { l: "Total Revenue", v: fmtDollar(liveData.totalRevenue), c: "#0f7a4a", bg: "#dcf5ec" },
+                  { l: "Services",      v: fmtDollar(liveData.serviceRevenue), c: "#1d5fa8", bg: "#dbeafe" },
+                  { l: "Packages/Mbr", v: fmtDollar(liveData.packageRevenue), c: "#a0785a", bg: "#f5ede4" },
+                ].map(({ l, v, c, bg }) => (
+                  <div key={l} style={{ background: bg, borderRadius: 10, padding: "12px 14px", textAlign: "center" }}>
+                    <div style={{ fontSize: "18px", fontWeight: "800", color: c }}>{v}</div>
+                    <div style={{ fontSize: "9px", color: c, opacity: 0.7, marginTop: 3, textTransform: "uppercase", letterSpacing: "0.06em" }}>{l}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: liveData.recent.length ? 14 : 0 }}>
+                {Object.entries(liveData.byType)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([type, amt]) => (
+                    <div key={type} style={{ background: "#f5f0ea", borderRadius: 8, padding: "5px 10px", fontSize: "11px", color: "#5a4a3a" }}>
+                      <span style={{ fontWeight: "700" }}>{type}</span>
+                      <span style={{ color: "#8a7a6a", marginLeft: 6 }}>{fmtDollar(amt)}</span>
+                    </div>
+                  ))}
+              </div>
+              {liveData.recent.length > 0 && (
+                <div style={{ borderTop: "1px solid #e8e0d6", paddingTop: 12 }}>
+                  <div style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 8 }}>Recent Transactions</div>
+                  {liveData.recent.map((t, i) => {
+                    const amt = (+t.cc_amount||0) + (+t.cash_amount||0) + (+t.check_amount||0) + (+t.ach_amount||0)
+                      + (+t.package_redemption||0) + (+t.gc_redemption||0) + (+t.bank_account_amount||0)
+                      + (+t.vagaro_pay_later_amount||0) + (+t.other_amount||0);
+                    const dateStr = t.transaction_date ? new Date(t.transaction_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
+                    return (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                        padding: "6px 0", borderBottom: i < liveData.recent.length - 1 ? "1px solid #f0ece6" : "none" }}>
+                        <div>
+                          <div style={{ fontSize: "12px", fontWeight: "600", color: "#2e2418" }}>{t.item_sold || t.purchase_type || "Transaction"}</div>
+                          <div style={{ fontSize: "10px", color: "#8a7a6a" }}>{t.purchase_type}{dateStr ? ` · ${dateStr}` : ""}</div>
+                        </div>
+                        <div style={{ fontSize: "13px", fontWeight: "700", color: "#0f7a4a" }}>{fmtDollar(amt)}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{ fontSize: "13px", color: "#8a7a6a", textAlign: "center", padding: "16px 0" }}>
+              {liveLoading ? "Loading transactions…" : "No transactions found for this month"}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Vagaro reminder */}
       <div style={{ ...S.card, marginBottom: 16, padding: "0", overflow: "hidden" }}>
@@ -5190,7 +5292,7 @@ function App() {
             onFilterClients={(f) => { setFilter(f); setTab("clients"); }}
           />}
         {tab === "pulse"     && <PulsePage clients={clients} templates={templates} onGoToClient={goToClient} onUpdateClient={updateClient} />}
-        {tab === "sales"     && <SalesDashboard />}
+        {tab === "sales"     && <SalesDashboard supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} />}
         {tab === "settings"  && (
           <SettingsPage
             clientId={clientId} setClientId={setClientId}
