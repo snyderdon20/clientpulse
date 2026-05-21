@@ -3525,6 +3525,8 @@ function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, va
   const [copiedWebhook, setCopiedWebhook] = useState(false);
   const gmail = useGmail(getGmailClientId());
 
+  const [expandedWebhook, setExpandedWebhook] = useState(null);
+
   const webhookUrl = supabaseUrl ? `${supabaseUrl.replace(/\/$/, "")}/functions/v1/vagaro-webhook` : null;
 
   const refreshWebhookLog = useCallback(async () => {
@@ -3923,23 +3925,44 @@ supabase functions deploy vagaro-webhook`}</code>
         {(liveWebhookLog || webhookLog).length === 0 ? (
           <div style={{ fontSize: "13px", color: "#b0a090", textAlign: "center", padding: "24px 0" }}>No webhook events received yet.</div>
         ) : (liveWebhookLog || webhookLog).map((ev, i, arr) => {
-          const isLive = !!liveWebhookLog;
-          const event   = isLive ? ev.event_type : ev.event;
-          const time    = isLive ? ev.received_at : ev.time;
-          const detail  = isLive ? (ev.payload?.data ? JSON.stringify(ev.payload.data).slice(0, 80) : "—") : `${ev.client} · ${ev.detail}`;
-          const hasErr  = isLive && ev.error;
+          const isLive    = !!liveWebhookLog;
+          const event     = isLive ? ev.event_type : ev.event;
+          const time      = isLive ? ev.received_at : ev.time;
+          const detail    = isLive ? (ev.payload ? JSON.stringify(ev.payload).slice(0, 80) : "—") : `${ev.client} · ${ev.detail}`;
+          const hasErr    = isLive && ev.error;
+          const expanded  = expandedWebhook === ev.id;
+          const canExpand = isLive && ev.payload;
           return (
-            <div key={ev.id} style={{ display: "flex", gap: "10px", padding: "9px 0", borderBottom: i < arr.length - 1 ? "1px solid #f0e8de" : "none" }}>
-              <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: hasErr ? "#991b1b" : "#0f7a4a", marginTop: 5, flexShrink: 0 }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                  <span style={{ fontSize: "12px", fontFamily: "monospace", color: "#7a5640", fontWeight: "700" }}>{event}</span>
-                  <span style={{ fontSize: "11px", color: "#b0a090", flexShrink: 0 }}>{fmtWebhookTS(time)}</span>
-                </div>
-                <div style={{ fontSize: "12px", color: hasErr ? "#991b1b" : "#7a6a5a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {hasErr ? `Error: ${ev.error}` : detail}
+            <div key={ev.id} style={{ borderBottom: i < arr.length - 1 ? "1px solid #f0e8de" : "none" }}>
+              <div
+                onClick={() => canExpand && setExpandedWebhook(expanded ? null : ev.id)}
+                style={{ display: "flex", gap: "10px", padding: "9px 0", cursor: canExpand ? "pointer" : "default" }}
+              >
+                <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: hasErr ? "#991b1b" : "#0f7a4a", marginTop: 5, flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                    <span style={{ fontSize: "12px", fontFamily: "monospace", color: "#7a5640", fontWeight: "700" }}>{event}</span>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+                      <span style={{ fontSize: "11px", color: "#b0a090" }}>{fmtWebhookTS(time)}</span>
+                      {canExpand && <span style={{ fontSize: "10px", color: "#a0785a" }}>{expanded ? "▲" : "▼"}</span>}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: "12px", color: hasErr ? "#991b1b" : "#7a6a5a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {hasErr ? `Error: ${ev.error}` : detail}
+                  </div>
                 </div>
               </div>
+              {expanded && (
+                <pre style={{
+                  margin: "0 0 10px 17px", padding: "12px 14px",
+                  background: "#1a120b", color: "#e8d5b0",
+                  borderRadius: 10, fontSize: "11px", fontFamily: "monospace",
+                  lineHeight: 1.6, overflowX: "auto", whiteSpace: "pre-wrap",
+                  wordBreak: "break-all", maxHeight: 320, overflowY: "auto",
+                }}>
+                  {JSON.stringify(ev.payload, null, 2)}
+                </pre>
+              )}
             </div>
           );
         })}
