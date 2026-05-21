@@ -38,10 +38,16 @@ serve(async (req: Request) => {
   });
 
   // Send invite email — creates the auth user and emails them a sign-up link
-  const origin = req.headers.get("origin");
+  // Prefer the request origin unless it's localhost (dev machine), then fall back
+  // to the SITE_URL secret set in the Edge Function environment.
+  const origin = req.headers.get("origin") ?? "";
+  const isLocal = origin.includes("localhost") || origin.includes("127.0.0.1");
+  const redirectTo = isLocal
+    ? (Deno.env.get("SITE_URL") ?? undefined)
+    : (origin || undefined);
   const { data: inviteData, error: inviteErr } = await supabase.auth.admin.inviteUserByEmail(email, {
     data: { full_name, role },
-    redirectTo: origin ?? undefined,
+    redirectTo,
   });
 
   if (inviteErr) {
