@@ -3512,7 +3512,229 @@ function DuplicateMergeModal({ clients, supabaseUrl, onMerged, onClose }) {
   );
 }
 
-function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, vagaroRegion, setVagaroRegion, webhookLog, templates, onSaveTemplate, gmailClientId, setGmailClientId, supabaseUrl, setSupabaseUrl, supabaseAnonKey, setSupabaseAnonKey, usingDB, dbError, onAddClient, onFindDuplicates }) {
+// ─── TRANSACTION CSV IMPORT ──────────────────────────────────────────────────
+
+function parseCSVLine(line) {
+  const cols = [];
+  let cur = "", inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '"') { inQ = !inQ; }
+    else if (line[i] === ',' && !inQ) { cols.push(cur); cur = ""; }
+    else { cur += line[i]; }
+  }
+  cols.push(cur);
+  return cols;
+}
+
+function parseMoney(v) {
+  if (!v || v === "-" || v.trim() === "") return 0;
+  return parseFloat(v.replace(/[$,\s]/g, "")) || 0;
+}
+
+function parseVagaroDate(v) {
+  if (!v || !v.trim()) return null;
+  const parts = v.trim().split("/");
+  if (parts.length === 3) {
+    const [m, d, y] = parts;
+    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+  return null;
+}
+
+function parseVagaroTransactionCSV(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) return [];
+  const headers = parseCSVLine(lines[0]).map(h => h.trim());
+  const idx = (name) => headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
+
+  const COL = {
+    checkoutDate:   idx("Checkout Date"),
+    checkedOutBy:   idx("CheckedOut By"),
+    transactionId:  idx("Transaction ID"),
+    customer:       idx("Customer"),
+    itemSold:       idx("Service/Product/GC/Package/Membership/Class"),
+    txType:         idx("Transaction Type"),
+    provider:       idx("Service Provider"),
+    qty:            idx("Qty"),
+    tax:            idx("Tax"),
+    tip:            idx("Tip"),
+    disc:           idx("Disc"),
+    cash:           idx("Cash"),
+    check:          idx("Check"),
+    gcRedeem:       idx("GC redeem"),
+    pkg:            idx("Pkg"),
+    mbsp:           idx("Mbsp"),
+    cc:             idx("CC"),
+    bank:           idx("BankAccount"),
+    vpl:            idx("Buy Now, Pay Later"),
+    other:          idx("OtherAmount"),
+  };
+
+  const get = (cols, i) => (i >= 0 && i < cols.length ? cols[i]?.trim() ?? "" : "");
+
+  return lines.slice(1).map(line => {
+    const c = parseCSVLine(line);
+    const customerRaw = get(c, COL.customer);
+    let firstName = "", lastName = "";
+    if (customerRaw.includes(", ")) {
+      [lastName, firstName] = customerRaw.split(", ");
+    } else {
+      const parts = customerRaw.split(" ");
+      firstName = parts.slice(0, -1).join(" ");
+      lastName  = parts[parts.length - 1] || "";
+    }
+    return {
+      checkoutDate:  parseVagaroDate(get(c, COL.checkoutDate)),
+      checkedOutBy:  get(c, COL.checkedOutBy),
+      transactionId: get(c, COL.transactionId),
+      customerRaw,
+      firstName: firstName.trim(),
+      lastName:  lastName.trim(),
+      itemSold:  get(c, COL.itemSold),
+      txType:    get(c, COL.txType),
+      provider:  get(c, COL.provider),
+      qty:       parseInt(get(c, COL.qty)) || 1,
+      tax:       parseMoney(get(c, COL.tax)),
+      tip:       parseMoney(get(c, COL.tip)),
+      disc:      parseMoney(get(c, COL.disc)),
+      cash:      parseMoney(get(c, COL.cash)),
+      check:     parseMoney(get(c, COL.check)),
+      gcRedeem:  parseMoney(get(c, COL.gcRedeem)),
+      pkg:       parseMoney(get(c, COL.pkg)),
+      mbsp:      parseMoney(get(c, COL.mbsp)),
+      cc:        parseMoney(get(c, COL.cc)),
+      bank:      parseMoney(get(c, COL.bank)),
+      vpl:       parseMoney(get(c, COL.vpl)),
+      other:     parseMoney(get(c, COL.other)),
+    };
+  }).filter(r => r.itemSold || r.transactionId);
+}
+
+function TransactionCSVImport({ supabaseUrl, supabaseAnonKey }) {
+  const [rows,      setRows]      = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [result,    setResult]    = useState(null);
+  const [progress,  setProgress]  = useState(0);
+
+  const handleFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setResult(null);
+    const reader = new FileReader();
+    reader.onload = (ev) => setRows(parseVagaroTransactionCSV(ev.target.result));
+    reader.readAsText(f);
+  };
+
+  const handleImport = async () => {
+    if (!rows?.length) return;
+    setImporting(true);
+    setProgress(0);
+    const sb = getSB(supabaseUrl, supabaseAnonKey);
+
+    const { data: clients } = await sb.from("clients").select("id,first_name,last_name");
+    const nameMap = {};
+    for (const c of clients || []) {
+      const key = `${(c.first_name || "").toLowerCase().trim()} ${(c.last_name || "").toLowerCase().trim()}`;
+      nameMap[key] = c.id;
+    }
+
+    let imported = 0, skipped = 0, matched = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      setProgress(Math.round((i / rows.length) * 100));
+
+      // Dedup check
+      if (r.transactionId && r.itemSold) {
+        const { data: ex } = await sb.from("transactions")
+          .select("id")
+          .eq("vagaro_transaction_id", r.transactionId)
+          .eq("item_sold", r.itemSold)
+          .maybeSingle();
+        if (ex) { skipped++; continue; }
+      }
+
+      const nameKey = `${r.firstName.toLowerCase()} ${r.lastName.toLowerCase()}`;
+      const clientId = nameMap[nameKey] || null;
+      if (clientId) matched++;
+
+      const { error } = await sb.from("transactions").insert({
+        vagaro_transaction_id:     r.transactionId  || null,
+        vagaro_customer_id:        r.customerRaw    || null,
+        vagaro_service_provider_id: r.provider      || null,
+        client_id:                 clientId,
+        transaction_date:          r.checkoutDate ? r.checkoutDate + "T12:00:00Z" : null,
+        item_sold:                 r.itemSold       || null,
+        purchase_type:             r.txType         || null,
+        quantity:                  r.qty,
+        tax:                       r.tax,
+        tip:                       r.tip,
+        discount:                  r.disc,
+        cash_amount:               r.cash,
+        check_amount:              r.check,
+        gc_redemption:             r.gcRedeem,
+        package_redemption:        r.pkg,
+        membership_amount:         r.mbsp,
+        cc_amount:                 r.cc,
+        bank_account_amount:       r.bank,
+        vagaro_pay_later_amount:   r.vpl,
+        other_amount:              r.other,
+        created_by:                r.checkedOutBy   || null,
+      });
+      if (!error) imported++;
+    }
+
+    setResult({ imported, skipped, matched, total: rows.length });
+    setImporting(false);
+    setRows(null);
+  };
+
+  return (
+    <div style={{ ...S.card, marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: rows ? 14 : 0 }}>
+        <div>
+          <div style={{ fontSize: "14px", fontWeight: "700", color: "#2e2418", marginBottom: 3 }}>Import transaction history from Vagaro</div>
+          <div style={{ fontSize: "12px", color: "#8a7a6a" }}>Vagaro → Reports → Deposit Report → Export</div>
+        </div>
+        <label style={{ ...S.btn("primary"), fontSize: "12px", whiteSpace: "nowrap", flexShrink: 0, cursor: "pointer" }}>
+          {rows ? `${rows.length} rows loaded` : "Choose CSV"}
+          <input type="file" accept=".csv" onChange={handleFile} style={{ display: "none" }} />
+        </label>
+      </div>
+
+      {result && (
+        <div style={{ background: "#f0fdf4", borderRadius: 10, padding: "10px 14px", fontSize: "12px", color: "#065f46", marginBottom: rows ? 10 : 0 }}>
+          ✓ Imported {result.imported} transactions ({result.matched} matched to clients, {result.skipped} duplicates skipped)
+        </div>
+      )}
+
+      {rows && rows.length > 0 && (
+        <>
+          <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 8 }}>
+            Preview — first 3 rows of {rows.length}:
+          </div>
+          <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #e8e0d6", marginBottom: 12 }}>
+            {rows.slice(0, 3).map((r, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 12px",
+                background: i % 2 === 0 ? "#faf8f5" : "#fff", fontSize: "12px", borderBottom: i < 2 ? "1px solid #f0ece6" : "none" }}>
+                <span style={{ color: "#2e2418", fontWeight: "600" }}>{r.customerRaw || "—"}</span>
+                <span style={{ color: "#5a4a3a" }}>{r.itemSold || "—"}</span>
+                <span style={{ color: "#0f7a4a", fontWeight: "700" }}>
+                  ${(r.cc + r.cash + r.check + r.gcRedeem + r.pkg + r.mbsp + r.bank + r.vpl + r.other).toFixed(2)}
+                </span>
+                <span style={{ color: "#8a7a6a" }}>{r.checkoutDate || "—"}</span>
+              </div>
+            ))}
+          </div>
+          <button onClick={handleImport} disabled={importing} style={{ ...S.btn("primary"), fontSize: "12px" }}>
+            {importing ? `Importing… ${progress}%` : `Import ${rows.length} transactions`}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+
   const [activeTab, setActiveTab] = useState("database");
   const [showSecret, setShowSecret] = useState(false);
   const [testResult, setTestResult] = useState(null);
@@ -3730,7 +3952,7 @@ create policy "Allow all" on tasks for all using (true);`}
           )}
 
           {usingDB && (
-            <div style={{ ...S.card }}>
+            <div style={{ ...S.card, marginBottom: 14 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <div style={{ fontSize: "14px", fontWeight: "700", color: "#2e2418", marginBottom: 3 }}>Duplicate clients</div>
@@ -3742,6 +3964,7 @@ create policy "Allow all" on tasks for all using (true);`}
               </div>
             </div>
           )}
+          {usingDB && <TransactionCSVImport supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} />}
         </div>
       )}
 
