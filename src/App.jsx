@@ -1844,8 +1844,11 @@ function HistoryFeed({ history, transactions = [], onLog, onNote }) {
                 {transactions.map((t, i) => {
                   const total = txTotal(t);
                   const dateStr = t.transaction_date
-                    ? new Date(t.transaction_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-                    : "—";
+                    ? new Date(t.transaction_date.length <= 10
+                        ? t.transaction_date + "T12:00:00"
+                        : t.transaction_date
+                      ).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                    : null;
                   const tipAmt = +t.tip || 0;
                   return (
                     <div key={t.id} style={{
