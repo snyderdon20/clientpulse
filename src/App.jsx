@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { testVagaroConnection, syncVagaroClients } from "./api/vagaroService";
+import { computeClientStatus, LAYER1_CFG, LAYER2_CFG, getStatusCfg } from "./lib/clientStatus";
 
 // ─── RESPONSIVE HOOK ─────────────────────────────────────────────────────────
 function useIsMobile(bp = 640) {
@@ -110,13 +111,11 @@ function findDuplicates(clients) {
 }
 
 // ─── STATUS CONFIG ────────────────────────────────────────────────────────────
-const STATUS_CFG = {
-  "active":    { label: "Active",    bg: "#dcf5ec", color: "#0f7a4a" },
-  "overdue":   { label: "Overdue",   bg: "#fef3c7", color: "#92400e" },
-  "lapsed":    { label: "Lapsed",    bg: "#fee2e2", color: "#991b1b" },
-  "new-lead":  { label: "New Lead",  bg: "#dbeafe", color: "#1d5fa8" },
-  "follow-up": { label: "Follow-up", bg: "#ede9fe", color: "#5b21b6" },
-};
+// Legacy flat map kept for any code that still reads STATUS_CFG[key].
+// New code should use computeClientStatus() + LAYER2_CFG from clientStatus.js.
+const STATUS_CFG = Object.fromEntries(
+  Object.entries(LAYER2_CFG).map(([k, v]) => [k, { label: v.label, bg: v.bg, color: v.color }])
+);
 
 const DEFAULT_TAGS = [
   "Deep Tissue", "Swedish", "Hot Stone", "Prenatal", "Sports",
@@ -282,14 +281,33 @@ function lastCompletedDate(client) {
 }
 
 function deriveStatus(client) {
-  if (client.statusOverride) return client.statusOverride;
-  const lastDate = lastCompletedDate(client);
-  if (!lastDate) return "new-lead";
-  const ds = daysSince(lastDate);
-  const ivl = client.avgVisitIntervalDays || 30;
-  if (ds > ivl * 2) return "lapsed";
-  if (ds > ivl * 1.25) return "overdue";
-  return "active";
+  // Legacy override: map old flat keys to new two-layer sub-status keys.
+  if (client.statusOverride) {
+    const legacyMap = {
+      "active":    "regular",
+      "overdue":   "overdue",
+      "lapsed":    "stale",
+      "new-lead":  "new",
+      "follow-up": "needs-follow-up",
+    };
+    return legacyMap[client.statusOverride] ?? client.statusOverride;
+  }
+  return computeClientStatus(client).layer2;
+}
+
+/** Returns { layer1, layer2 } for a client. Prefer this over deriveStatus() for new code. */
+function clientStatus(client) {
+  if (client.statusOverride) {
+    const legacyMap = {
+      "active":    { layer1: "active",   layer2: "regular" },
+      "overdue":   { layer1: "lapsed",   layer2: "overdue" },
+      "lapsed":    { layer1: "lapsed",   layer2: "stale"   },
+      "new-lead":  { layer1: "lead",     layer2: "new"     },
+      "follow-up": { layer1: "active",   layer2: "needs-follow-up" },
+    };
+    if (legacyMap[client.statusOverride]) return legacyMap[client.statusOverride];
+  }
+  return computeClientStatus(client);
 }
 
 function fillTemplate(text, client) {
@@ -992,85 +1010,145 @@ function useGmail(clientId) {
 }
 
 // ─── ATOMS ───────────────────────────────────────────────────────────────────
-function StatusPill({ status }) {
-  const cfg = STATUS_CFG[status] || { label: status, bg: "#e8e0d6", color: "#8a7a6a" };
+function StatusPill({ status, client }) {
+  // Accept either a pre-computed layer2 key (status) or a full client object.
+  let layer1Key, layer2Key;
+  if (client) {
+    const s = clientStatus(client);
+    layer1Key = s.layer1;
+    layer2Key = s.layer2;
+  } else {
+    const cfg2 = LAYER2_CFG[status];
+    layer1Key = cfg2?.layer1 ?? "lead";
+    layer2Key = status;
+  }
+  const l1 = LAYER1_CFG[layer1Key] ?? { label: layer1Key, bg: "#e8e0d6", color: "#8a7a6a" };
+  const l2 = LAYER2_CFG[layer2Key] ?? { label: layer2Key, bg: "#e8e0d6", color: "#8a7a6a" };
   return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: "5px",
-      padding: "3px 10px", borderRadius: "20px",
-      fontSize: "11px", fontWeight: "700",
-      background: cfg.bg, color: cfg.color, flexShrink: 0,
-    }}>
-      <span style={{ width: "5px", height: "5px", borderRadius: "50%", background: cfg.color, flexShrink: 0 }} />
-      {cfg.label}
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
+      {/* Layer 1 parent chip */}
+      <span style={{
+        display: "inline-flex", alignItems: "center", gap: "4px",
+        padding: "3px 8px", borderRadius: "20px 0 0 20px",
+        fontSize: "10px", fontWeight: "800", letterSpacing: "0.5px",
+        background: l1.bg, color: l1.color,
+        borderRight: `1px solid ${l1.color}22`,
+      }}>
+        <span style={{ width: "4px", height: "4px", borderRadius: "50%", background: l1.color, flexShrink: 0 }} />
+        {l1.label.toUpperCase()}
+      </span>
+      {/* Layer 2 sub-status chip */}
+      <span style={{
+        display: "inline-flex", alignItems: "center",
+        padding: "3px 9px 3px 7px", borderRadius: "0 20px 20px 0",
+        fontSize: "11px", fontWeight: "700",
+        background: l2.bg, color: l2.color,
+      }}>
+        {l2.label}
+      </span>
     </span>
   );
 }
 
 function StatusSelector({ client, status, onUpdate }) {
-  const [open, setOpen] = useState(false);
-  const cfg = STATUS_CFG[status] || { label: status, bg: "#e8e0d6", color: "#8a7a6a" };
-  const isOverridden = !!client.statusOverride;
+  const [open, setOpen]           = useState(false);
+  const [flagNote, setFlagNote]   = useState("");
+  const [showFlagInput, setShowFlagInput] = useState(false);
+
+  const { layer1, layer2 } = clientStatus(client);
+  const hasManualOverride = !!client.restrictedStatus || !!client.needsFollowUp || !!client.statusOverride;
+  const l2cfg = LAYER2_CFG[layer2] ?? { label: layer2, bg: "#e8e0d6", color: "#8a7a6a" };
+
+  const MANUAL_OPTIONS = [
+    { key: "needs-follow-up", label: "Needs Follow Up",
+      desc: "Active client — left without booking next appt",
+      action: () => { onUpdate(client.id, { needsFollowUp: true, restrictedStatus: null, restrictedNote: null }); setOpen(false); } },
+    { key: "deactivated", label: "Deactivate Profile",
+      desc: "Hide from dashboards; suppress all communications",
+      action: () => { onUpdate(client.id, { restrictedStatus: "deactivated", restrictedNote: null, needsFollowUp: false }); setOpen(false); } },
+    { key: "flag-prompt", label: "Flag Profile",
+      desc: "Booking intercept — requires a mandatory note",
+      action: () => setShowFlagInput(true) },
+  ];
+
   return (
     <div style={{ position: "relative", display: "inline-flex" }}>
       <button
-        onClick={() => setOpen((v) => !v)}
-        title={isOverridden ? "Status manually set — click to change" : "Click to override status"}
+        onClick={() => { setOpen((v) => !v); setShowFlagInput(false); setFlagNote(""); }}
+        title={hasManualOverride ? "Status manually set — click to change" : "Click to set manual override"}
         style={{
-          display: "inline-flex", alignItems: "center", gap: "5px",
-          padding: "3px 10px", borderRadius: "20px",
-          fontSize: "11px", fontWeight: "700",
-          background: cfg.bg, color: cfg.color, flexShrink: 0,
-          border: isOverridden ? `1.5px solid ${cfg.color}` : "1.5px solid transparent",
-          cursor: "pointer",
+          display: "inline-flex", alignItems: "center", gap: "4px",
+          padding: "2px 0", background: "transparent", border: "none", cursor: "pointer",
         }}
       >
-        <span style={{ width: "5px", height: "5px", borderRadius: "50%", background: cfg.color, flexShrink: 0 }} />
-        {cfg.label}
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ opacity: 0.6 }}>
+        <StatusPill status={layer2} />
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={l2cfg.color} strokeWidth="2.5" strokeLinecap="round" style={{ opacity: 0.6, flexShrink: 0 }}>
           <path d="M6 9l6 6 6-6" />
         </svg>
       </button>
+
       {open && (
         <div style={{
-          position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 200,
-          background: "#fff", border: "1px solid #e8e0d6", borderRadius: "10px",
-          boxShadow: "0 4px 16px rgba(0,0,0,0.12)", padding: "6px", minWidth: "160px",
+          position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 200,
+          background: "#fff", border: "1px solid #e8e0d6", borderRadius: "12px",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.13)", padding: "8px", minWidth: "240px",
         }}>
-          {Object.entries(STATUS_CFG).map(([key, c]) => (
-            <button
-              key={key}
-              onClick={() => { onUpdate(client.id, { statusOverride: key }); setOpen(false); }}
-              style={{
-                display: "flex", alignItems: "center", gap: "8px", width: "100%",
-                padding: "7px 10px", border: "none", borderRadius: "7px",
-                background: status === key ? c.bg : "transparent",
-                color: c.color, fontSize: "12px", fontWeight: "700",
-                cursor: "pointer", textAlign: "left",
-              }}
-            >
-              <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: c.color, flexShrink: 0 }} />
-              {c.label}
-              {status === key && <span style={{ marginLeft: "auto", fontSize: "10px", opacity: 0.6 }}>✓</span>}
-            </button>
-          ))}
-          {isOverridden && (
-            <button
-              onClick={() => { onUpdate(client.id, { statusOverride: null }); setOpen(false); }}
-              style={{
-                display: "flex", alignItems: "center", gap: "8px", width: "100%",
-                padding: "7px 10px", border: "none", borderRadius: "7px",
-                background: "transparent", color: "#8a7a6a",
-                fontSize: "11px", fontWeight: "600", cursor: "pointer", marginTop: "2px",
-                borderTop: "1px solid #e8e0d6",
-              }}
-            >
-              Reset to auto-detect
-            </button>
+          {!showFlagInput ? (
+            <>
+              <div style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", letterSpacing: "1px", textTransform: "uppercase", padding: "4px 8px 6px" }}>Manual Overrides</div>
+              {MANUAL_OPTIONS.map((opt) => (
+                <button key={opt.key} onClick={opt.action} style={{
+                  display: "flex", flexDirection: "column", alignItems: "flex-start", width: "100%",
+                  padding: "8px 10px", border: "none", borderRadius: "8px",
+                  background: layer2 === opt.key ? "#f5ede4" : "transparent",
+                  cursor: "pointer", textAlign: "left", marginBottom: "2px",
+                }}>
+                  <span style={{ fontSize: "12px", fontWeight: "700", color: opt.key === "flag-prompt" ? "#881337" : opt.key === "deactivated" ? "#9d174d" : "#5b21b6" }}>{opt.label}</span>
+                  <span style={{ fontSize: "10px", color: "#8a7a6a", marginTop: "1px" }}>{opt.desc}</span>
+                </button>
+              ))}
+              {hasManualOverride && (
+                <button
+                  onClick={() => { onUpdate(client.id, { restrictedStatus: null, restrictedNote: null, needsFollowUp: false, statusOverride: null }); setOpen(false); }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: "6px", width: "100%",
+                    padding: "7px 10px", border: "none", borderRadius: "8px", borderTop: "1px solid #e8e0d6",
+                    background: "transparent", color: "#8a7a6a",
+                    fontSize: "11px", fontWeight: "600", cursor: "pointer", marginTop: "4px",
+                  }}
+                >
+                  Reset to auto-detect
+                </button>
+              )}
+            </>
+          ) : (
+            <div style={{ padding: "4px" }}>
+              <div style={{ fontSize: "12px", fontWeight: "700", color: "#881337", marginBottom: "8px" }}>Flag Profile — Reason Required</div>
+              <textarea
+                autoFocus
+                value={flagNote}
+                onChange={(e) => setFlagNote(e.target.value)}
+                placeholder="Describe the policy or safety reason…"
+                style={{ ...S.inp, height: "80px", resize: "vertical", marginBottom: "8px" }}
+              />
+              <div style={{ display: "flex", gap: "6px" }}>
+                <button
+                  disabled={!flagNote.trim()}
+                  onClick={() => {
+                    onUpdate(client.id, { restrictedStatus: "flagged", restrictedNote: flagNote.trim(), needsFollowUp: false });
+                    setOpen(false); setShowFlagInput(false); setFlagNote("");
+                  }}
+                  style={{ ...S.sm("danger"), flex: 1, justifyContent: "center", opacity: flagNote.trim() ? 1 : 0.5 }}
+                >
+                  Confirm Flag
+                </button>
+                <button onClick={() => setShowFlagInput(false)} style={{ ...S.sm(), padding: "6px 10px" }}>Cancel</button>
+              </div>
+            </div>
           )}
         </div>
       )}
-      {open && <div style={{ position: "fixed", inset: 0, zIndex: 199 }} onClick={() => setOpen(false)} />}
+      {open && <div style={{ position: "fixed", inset: 0, zIndex: 199 }} onClick={() => { setOpen(false); setShowFlagInput(false); setFlagNote(""); }} />}
     </div>
   );
 }
@@ -1935,7 +2013,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
     setInfoForm(initInfoForm());
   }, [client.id]);
 
-  const status = deriveStatus(client);
+  const { layer1: statusLayer1, layer2: status } = clientStatus(client);
   const ds = daysSince(lastCompletedDate(client));
   const interval = client.avgVisitIntervalDays || 30;
   const isBirthday = client.birthday && client.birthday.slice(5) === TODAY.slice(5);
@@ -1974,6 +2052,15 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
 
   const addCommunication = (event) => {
     appendHistory(event);
+    // Auto-set contactedAt when a comm event is first logged for a Lead,
+    // enabling the 14-day Lost Lead countdown.
+    if (
+      event.type && event.type.startsWith("comm.") &&
+      statusLayer1 === "lead" &&
+      !client.contactedAt
+    ) {
+      onUpdate(client.id, { contactedAt: new Date().toISOString() });
+    }
     // If the log modal had an onAfterSave callback (e.g. Red Light stage advance), call it
     if (showLog && typeof showLog.onAfterSave === "function") {
       showLog.onAfterSave();
@@ -2128,19 +2215,52 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
         </div>
       </div>
 
-      {status === "overdue" && ds && upcoming.length === 0 && (
+      {/* Restricted profile alert banners */}
+      {status === "flagged" && (
+        <div style={{ background: "#fff1f2", border: "2px solid #fda4af", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#881337", display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: "18px", flexShrink: 0 }}>🚨</span>
+          <div>
+            <strong>FLAGGED PROFILE — Booking Intercept Active.</strong>
+            {client.restrictedNote && <div style={{ marginTop: 4, fontWeight: "400" }}>{client.restrictedNote}</div>}
+          </div>
+        </div>
+      )}
+      {status === "deactivated" && (
+        <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#9d174d" }}>
+          <strong>Profile Deactivated.</strong> All communications suppressed.
+        </div>
+      )}
+      {/* Needs Follow Up alert */}
+      {status === "needs-follow-up" && upcoming.length === 0 && (
+        <div style={{ background: "#faf5ff", border: "1px solid #c4b5fd", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#5b21b6", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <span>📋 <strong>Needs Follow Up:</strong> {client.firstName} left without booking their next appointment.</span>
+          <button onClick={() => setShowLog({ channel: "Text/SMS", category: "Rebooking Outreach" })} style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#7c3aed", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}>
+            Log outreach →
+          </button>
+        </div>
+      )}
+      {/* Overdue / Lapsed banners */}
+      {(status === "overdue" || status === "overdue-with-package") && ds && upcoming.length === 0 && (
         <div style={{ background: "#fff8f0", border: "1px solid #f0e0c8", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#92400e", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-          <span>⚠️ <strong>Attention:</strong> {client.firstName} last visited {ds} days ago, past their usual {interval}-day interval.</span>
+          <span>⚠️ <strong>Overdue{status === "overdue-with-package" ? " — Has Unused Package!" : ""}:</strong> {client.firstName} last visited {ds} days ago.</span>
           <button onClick={() => setShowLog({ channel: "Text/SMS", category: "Rebooking Outreach" })} style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#d97706", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}>
             Log outreach →
           </button>
         </div>
       )}
-      {status === "lapsed" && ds && upcoming.length === 0 && (
+      {(status === "stale" || status === "expired-package") && ds && upcoming.length === 0 && (
         <div style={{ background: "#fff5f5", border: "1px solid #fca5a5", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#991b1b", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-          <span>🔴 <strong>Lapsed:</strong> {client.firstName} has not visited in {ds} days — more than 2x their usual interval.</span>
+          <span>🔴 <strong>Lapsed{status === "expired-package" ? " — Package Expired" : ` (${ds} days)`}:</strong> {client.firstName} needs a win-back sequence.</span>
           <button onClick={() => setShowLog({ channel: "Text/SMS", category: "Rebooking Outreach" })} style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#dc2626", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}>
             Log outreach →
+          </button>
+        </div>
+      )}
+      {status === "first-session-no-show" && (
+        <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#92400e", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <span>🚫 <strong>First Session No-Show.</strong> High-priority empathy recovery — contact {client.firstName} to rebook.</span>
+          <button onClick={() => setShowLog({ channel: "Phone", category: "No-Show Follow-Up" })} style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#d97706", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}>
+            Log call →
           </button>
         </div>
       )}
@@ -2261,12 +2381,14 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
 
 
 // ─── CLIENT SIDEBAR ───────────────────────────────────────────────────────────
+// Filters match on Layer 1 parent key or Layer 2 sub-status key.
 const SIDEBAR_FILTERS = [
-  { key: "all",      label: "All"      },
-  { key: "active",   label: "Active"   },
-  { key: "overdue",  label: "Overdue"  },
-  { key: "lapsed",   label: "Lapsed"   },
-  { key: "new-lead", label: "New Lead" },
+  { key: "all",        label: "All"      },
+  { key: "lead",       label: "Leads"    },
+  { key: "active",     label: "Active"   },
+  { key: "lapsed",     label: "Lapsed"   },
+  { key: "inactive",   label: "Inactive" },
+  { key: "restricted", label: "Restricted" },
 ];
 
 function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search, setSearch, tagFilter, setTagFilter, fullWidth, onAddClient }) {
@@ -2278,8 +2400,8 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
   const counts = useMemo(() => {
     const c = { all: clients.length };
     clients.forEach((cl) => {
-      const s = deriveStatus(cl);
-      c[s] = (c[s] || 0) + 1;
+      const s = clientStatus(cl);
+      c[s.layer1] = (c[s.layer1] || 0) + 1;
     });
     return c;
   }, [clients]);
@@ -2287,7 +2409,8 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
   const filtered = useMemo(() =>
     clients
       .filter((cl) => {
-        const matchF = filter === "all" || deriveStatus(cl) === filter;
+        const s = clientStatus(cl);
+        const matchF = filter === "all" || s.layer1 === filter || s.layer2 === filter;
         const q = search.toLowerCase();
         const matchS = !q ||
           fullName(cl).toLowerCase().includes(q) ||
@@ -2389,7 +2512,7 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
           <p style={{ padding: "20px 16px", fontSize: "13px", color: "#b0a090" }}>No clients match.</p>
         )}
         {filtered.map((cl) => {
-          const st = deriveStatus(cl);
+          const { layer2: st } = clientStatus(cl);
           const isSel = selected?.id === cl.id;
           const ds = daysSince(lastCompletedDate(cl));
           return (
@@ -2466,16 +2589,16 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
   }[weekday];
 
   const counts = useMemo(() => {
-    const c = { active: 0, overdue: 0, lapsed: 0, "new-lead": 0 };
-    clients.forEach((cl) => { const s = deriveStatus(cl); if (c[s] !== undefined) c[s]++; });
+    const c = { lead: 0, active: 0, lapsed: 0, inactive: 0, restricted: 0 };
+    clients.forEach((cl) => { const s = clientStatus(cl); if (c[s.layer1] !== undefined) c[s.layer1]++; });
     return c;
   }, [clients]);
 
   const statCards = [
-    { label: "Active",    value: counts.active,       bg: "#dcf5ec", color: "#0f7a4a", filter: "active"   },
-    { label: "Overdue",   value: counts.overdue,       bg: "#fef3c7", color: "#92400e", filter: "overdue"  },
-    { label: "Lapsed",    value: counts.lapsed,        bg: "#fee2e2", color: "#991b1b", filter: "lapsed"   },
-    { label: "New Leads", value: counts["new-lead"],   bg: "#dbeafe", color: "#1d5fa8", filter: "new-lead" },
+    { label: "Active",     value: counts.active,     bg: "#dcf5ec", color: "#0f7a4a", filter: "active"     },
+    { label: "Lapsed",     value: counts.lapsed,     bg: "#fee2e2", color: "#991b1b", filter: "lapsed"     },
+    { label: "Leads",      value: counts.lead,       bg: "#dbeafe", color: "#1d5fa8", filter: "lead"       },
+    { label: "Inactive",   value: counts.inactive,   bg: "#f1f5f9", color: "#64748b", filter: "inactive"   },
   ];
 
   // Build daily action items
@@ -2520,9 +2643,10 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
       if (!alreadySent) items.push({ type: "postVisit", priority: 1, client: c, reason: `Visit ${daysSince(recentCompleted.date)}d ago — follow-up not yet sent`, icon: "❤️", color: "#be185d", bg: "#fce7f3" });
     });
 
-    // 3. Win-back — lapsed clients with no upcoming appointment
+    // 3. Win-back — lapsed/stale clients with no upcoming appointment
     clients.forEach((c) => {
-      if (deriveStatus(c) !== "lapsed") return;
+      const { layer1 } = clientStatus(c);
+      if (layer1 !== "lapsed") return;
       const hasUpcoming = (c.appointments || []).some((a) => a.date >= selectedDate && a.status !== "cancelled");
       if (hasUpcoming) return;
       const ds = daysSince(lastCompletedDate(c));
@@ -2531,11 +2655,13 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
 
     // 4. Reach out — overdue clients with no upcoming appointment
     clients.forEach((c) => {
-      if (deriveStatus(c) !== "overdue") return;
+      const { layer2 } = clientStatus(c);
+      if (layer2 !== "overdue" && layer2 !== "overdue-with-package") return;
       const hasUpcoming = (c.appointments || []).some((a) => a.date >= selectedDate && a.status !== "cancelled");
       if (hasUpcoming) return;
       const ds = daysSince(lastCompletedDate(c));
-      items.push({ type: "overdue", priority: 3, client: c, reason: `Overdue — ${ds} days since last visit (usually every ${c.avgVisitIntervalDays || 30}d)`, icon: "🟡", color: "#92400e", bg: "#fef3c7" });
+      const pkgNote = layer2 === "overdue-with-package" ? " — has unused package!" : "";
+      items.push({ type: "overdue", priority: 3, client: c, reason: `Overdue — ${ds} days since last visit${pkgNote}`, icon: layer2 === "overdue-with-package" ? "📦" : "🟡", color: "#92400e", bg: "#fef3c7" });
     });
 
     // 5. Red Light — interested clients who haven't booked after 5+ days
@@ -2975,11 +3101,18 @@ function PulsePage({ clients, templates, onGoToClient, onUpdateClient }) {
   const [composer, setComposer] = useState(null); // { client, triggerId }
 
   const lapsed = clients
-    .filter((c) => deriveStatus(c) === "lapsed" && !(c.appointments || []).some((a) => a.date >= TODAY && a.status !== "cancelled"))
+    .filter((c) => {
+      const { layer1 } = clientStatus(c);
+      return layer1 === "lapsed" && !(c.appointments || []).some((a) => a.date >= TODAY && a.status !== "cancelled");
+    })
     .sort((a, b) => (daysSince(lastCompletedDate(b)) || 0) - (daysSince(lastCompletedDate(a)) || 0));
 
   const overdue = clients
-    .filter((c) => deriveStatus(c) === "overdue" && !(c.appointments || []).some((a) => a.date >= TODAY && a.status !== "cancelled"))
+    .filter((c) => {
+      const { layer2 } = clientStatus(c);
+      return (layer2 === "overdue" || layer2 === "overdue-with-package") &&
+        !(c.appointments || []).some((a) => a.date >= TODAY && a.status !== "cancelled");
+    })
     .sort((a, b) => (daysSince(lastCompletedDate(b)) || 0) - (daysSince(lastCompletedDate(a)) || 0));
 
   const now2 = new Date();
@@ -3138,7 +3271,7 @@ function PulsePage({ clients, templates, onGoToClient, onUpdateClient }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
                     <span style={{ fontSize: "13px", fontWeight: "700", color: "#2e2418" }}>{fullName(c)}</span>
-                    <StatusPill status={deriveStatus(c)} />
+                    <StatusPill client={c} />
                     {(c.tags || []).slice(0, 2).map((t) => <TagChip key={t} label={t} />)}
                   </div>
                   <div style={{ fontSize: "12px", color: "#8a7a6a" }}>
@@ -3961,10 +4094,15 @@ function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, va
   ];
 
   const thresholds = [
-    { s: "active",   d: "Visited within their usual interval" },
-    { s: "overdue",  d: "1.25x past their usual interval with no return" },
-    { s: "lapsed",   d: "2x past their usual interval — win-back territory" },
-    { s: "new-lead", d: "No completed visits yet" },
+    { s: "new-client",          d: "First completed visit — onboarding phase" },
+    { s: "regular",             d: "2+ visits, last check-in within 30 days" },
+    { s: "package-holder",      d: "Active credits remaining, last visit ≤30 days" },
+    { s: "overdue-with-package",d: "31–60 days since last visit — has unused package" },
+    { s: "overdue",             d: "31–60 days since last visit, no package" },
+    { s: "stale",               d: "61–90 days since last visit — pre-dormant" },
+    { s: "past-client",         d: "90+ days since last visit, no upcoming appointment" },
+    { s: "new",                 d: "Profile created, no outreach yet" },
+    { s: "first-session-booked",d: "First appointment scheduled, not yet visited" },
   ];
 
   return (
@@ -5018,6 +5156,16 @@ const rowToClient = (row) => ({
   tags: row.tags || [], goldenNuggets: row.golden_nuggets || [],
   noShows: row.no_shows || 0, totalSpent: row.total_spent || 0,
   statusOverride: row.status_override || null,
+  // Two-layer status fields
+  completedAppointmentsCount: row.completed_appointments_count || 0,
+  packageCreditsRemaining: row.package_credits_remaining || 0,
+  packageExpirationDate: row.package_expiration_date || null,
+  giftCardBalance: row.gift_card_balance || 0,
+  giftCardPurchaseDate: row.gift_card_purchase_date || null,
+  contactedAt: row.contacted_at || null,
+  needsFollowUp: row.needs_follow_up || false,
+  restrictedStatus: row.restricted_status || null,
+  restrictedNote: row.restricted_note || null,
   appointments: [], history: [],
 });
 
@@ -5031,6 +5179,16 @@ const clientToRow = (c) => ({
   state: c.state || null, zip: c.zip || null, tags: c.tags || [], golden_nuggets: c.goldenNuggets || [],
   no_shows: c.noShows || 0, total_spent: c.totalSpent || 0,
   status_override: c.statusOverride || null,
+  // Two-layer status fields
+  completed_appointments_count: c.completedAppointmentsCount || 0,
+  package_credits_remaining: c.packageCreditsRemaining || 0,
+  package_expiration_date: c.packageExpirationDate || null,
+  gift_card_balance: c.giftCardBalance || 0,
+  gift_card_purchase_date: c.giftCardPurchaseDate || null,
+  contacted_at: c.contactedAt || null,
+  needs_follow_up: c.needsFollowUp || false,
+  restricted_status: c.restrictedStatus || null,
+  restricted_note: c.restrictedNote || null,
 });
 
 const rowToAppt = (r) => ({ id: r.id, date: r.date, time: r.time, service: r.service, duration: r.duration, therapist: r.therapist, status: r.status });
@@ -5060,7 +5218,7 @@ async function dbSaveClient(url, key, client) {
 async function dbUpdateClient(url, key, id, updates) {
   const sb = getSB(url, key); if (!sb) return;
   const m = {};
-  const map = { firstName:'first_name', lastName:'last_name', email:'email', phone:'phone', birthday:'birthday', customerSince:'customer_since', lastVisit:'last_visit', avgVisitIntervalDays:'avg_visit_interval_days', referredBy:'referred_by', careCategory:'care_category', redLightStatus:'red_light_status', waitlisted:'waitlisted', address:'address', city:'city', state:'state', zip:'zip', tags:'tags', goldenNuggets:'golden_nuggets', noShows:'no_shows', totalSpent:'total_spent', vagaroId:'vagaro_id', vagaroSynced:'vagaro_synced', statusOverride:'status_override' };
+  const map = { firstName:'first_name', lastName:'last_name', email:'email', phone:'phone', birthday:'birthday', customerSince:'customer_since', lastVisit:'last_visit', avgVisitIntervalDays:'avg_visit_interval_days', referredBy:'referred_by', careCategory:'care_category', redLightStatus:'red_light_status', waitlisted:'waitlisted', address:'address', city:'city', state:'state', zip:'zip', tags:'tags', goldenNuggets:'golden_nuggets', noShows:'no_shows', totalSpent:'total_spent', vagaroId:'vagaro_id', vagaroSynced:'vagaro_synced', statusOverride:'status_override', completedAppointmentsCount:'completed_appointments_count', packageCreditsRemaining:'package_credits_remaining', packageExpirationDate:'package_expiration_date', giftCardBalance:'gift_card_balance', giftCardPurchaseDate:'gift_card_purchase_date', contactedAt:'contacted_at', needsFollowUp:'needs_follow_up', restrictedStatus:'restricted_status', restrictedNote:'restricted_note' };
   Object.entries(map).forEach(([k,v]) => { if (updates[k] !== undefined) m[v] = updates[k]; });
   if (Object.keys(m).length > 0) { const { error } = await sb.from('clients').update(m).eq('id', id); if (error) throw error; }
   if (updates.history?.length > 0) {
@@ -5341,7 +5499,10 @@ function App() {
   const auth = useSupabaseAuth(supabaseUrl, supabaseAnonKey);
 
   const lapseCount = useMemo(
-    () => clients.filter((c) => ["overdue", "lapsed"].includes(deriveStatus(c))).length,
+    () => clients.filter((c) => {
+      const { layer1, layer2 } = clientStatus(c);
+      return layer1 === "lapsed" || layer2 === "overdue" || layer2 === "overdue-with-package";
+    }).length,
     [clients]
   );
 
@@ -5534,7 +5695,7 @@ function App() {
                     <div style={{ fontSize: "13px", fontWeight: "700", color: "#2e2418" }}>{fullName(c)}</div>
                     <div style={{ fontSize: "11px", color: "#8a7a6a", marginTop: "1px" }}>{c.phone || c.email}</div>
                   </div>
-                  <StatusPill status={deriveStatus(c)} />
+                  <StatusPill client={c} />
                 </button>
               ))}
             </div>

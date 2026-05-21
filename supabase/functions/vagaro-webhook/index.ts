@@ -116,7 +116,14 @@ serve(async (req: Request) => {
 
 // ─── Client resolution ────────────────────────────────────────────────────────
 
-type ClientRow = { id: string; no_shows: number; total_spent: number };
+type ClientRow = {
+  id: string;
+  no_shows: number;
+  total_spent: number;
+  completed_appointments_count: number;
+  contacted_at: string | null;
+  restricted_status: string | null;
+};
 type SB = ReturnType<typeof createClient>;
 
 interface VagaroProfile {
@@ -225,12 +232,14 @@ async function createClient(
   if (error) { console.error("createClient error:", error.message); return null; }
   console.log(`Created new client ${profile.firstName} ${profile.lastName} from Vagaro ID ${vagaroCustomerId}`);
   await linkPendingAppointments(sb, vagaroCustomerId, newId);
-  return { id: newId, no_shows: 0, total_spent: 0 };
+  return { id: newId, no_shows: 0, total_spent: 0, completed_appointments_count: 0, contacted_at: null, restricted_status: null };
 }
+
+const CLIENT_FIELDS = "id, no_shows, total_spent, completed_appointments_count, contacted_at, restricted_status";
 
 async function findByVagaroId(sb: SB, vagaroId: string): Promise<ClientRow | null> {
   const { data } = await sb.from("clients")
-    .select("id, no_shows, total_spent")
+    .select(CLIENT_FIELDS)
     .eq("vagaro_id", vagaroId)
     .maybeSingle();
   return (data as ClientRow) ?? null;
@@ -239,7 +248,7 @@ async function findByVagaroId(sb: SB, vagaroId: string): Promise<ClientRow | nul
 async function findByName(sb: SB, firstName: string, lastName: string): Promise<ClientRow | null> {
   if (!firstName.trim() && !lastName.trim()) return null;
   const { data } = await sb.from("clients")
-    .select("id, no_shows, total_spent")
+    .select(CLIENT_FIELDS)
     .ilike("first_name", firstName.trim())
     .ilike("last_name",  lastName.trim())
     .maybeSingle();
@@ -249,7 +258,7 @@ async function findByName(sb: SB, firstName: string, lastName: string): Promise<
 async function findByEmail(sb: SB, email: string): Promise<ClientRow | null> {
   if (!email.trim()) return null;
   const { data } = await sb.from("clients")
-    .select("id, no_shows, total_spent")
+    .select(CLIENT_FIELDS)
     .ilike("email", email.trim())
     .maybeSingle();
   return (data as ClientRow) ?? null;
@@ -258,7 +267,7 @@ async function findByEmail(sb: SB, email: string): Promise<ClientRow | null> {
 async function findByPhone(sb: SB, phone: string): Promise<ClientRow | null> {
   if (!phone.trim()) return null;
   const { data } = await sb.from("clients")
-    .select("id, no_shows, total_spent")
+    .select(CLIENT_FIELDS)
     .ilike("phone", phone.trim())
     .maybeSingle();
   return (data as ClientRow) ?? null;
@@ -272,7 +281,7 @@ async function findByFirstNameAndContact(
 ): Promise<ClientRow | null> {
   if (email) {
     const { data } = await sb.from("clients")
-      .select("id, no_shows, total_spent")
+      .select(CLIENT_FIELDS)
       .ilike("first_name", firstName.trim())
       .ilike("email", email.trim())
       .maybeSingle();
@@ -280,7 +289,7 @@ async function findByFirstNameAndContact(
   }
   if (phone) {
     const { data } = await sb.from("clients")
-      .select("id, no_shows, total_spent")
+      .select(CLIENT_FIELDS)
       .ilike("first_name", firstName.trim())
       .ilike("phone", phone.trim())
       .maybeSingle();
@@ -419,10 +428,14 @@ async function handleAppointment(sb: SB, eventType: string, data: Record<string,
 
   await sb.from("appointments").update({ client_id: client.id }).eq("vagaro_appt_id", vagaroApptId);
 
-  if (apptStatus === "completed") {
+  if (apptStatus === "completed" || apptStatus === "checked-in") {
     const updates: Record<string, unknown> = { last_visit: apptDate, updated_at: new Date().toISOString() };
-    const amount = num(data.amount);
-    if (amount > 0) updates.total_spent = (client.total_spent ?? 0) + amount;
+    if (apptStatus === "completed") {
+      // Increment the verified-visit counter used by the two-layer status engine.
+      updates.completed_appointments_count = (client.completed_appointments_count ?? 0) + 1;
+      const amount = num(data.amount);
+      if (amount > 0) updates.total_spent = (client.total_spent ?? 0) + amount;
+    }
     await sb.from("clients").update(updates).eq("id", client.id);
   }
 
@@ -529,6 +542,25 @@ async function handleTransaction(sb: SB, data: Record<string, unknown>) {
 
   if (vagaroUserPaymentId) {
     await sb.from("transactions").update({ client_id: client.id }).eq("vagaro_user_payment_id", vagaroUserPaymentId);
+  }
+
+  // Snapshot package credits when a package or gift-card transaction arrives.
+  const purchaseType = str(data.purchaseType ?? "").toLowerCase();
+  if (purchaseType === "package" || purchaseType === "gift card") {
+    const pkgUpdates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    const remainingNum = num(data.remainingNum ?? data.RemainingNum);
+    const expirationDate = str(data.expirationDate ?? data.ExpirationDate ?? "").split("T")[0] || null;
+    if (remainingNum > 0) pkgUpdates.package_credits_remaining = remainingNum;
+    if (expirationDate) pkgUpdates.package_expiration_date = expirationDate;
+    if (purchaseType === "gift card") {
+      const gcBalance = num(data.remainingBalance ?? data.gcBalance ?? data.balance);
+      if (gcBalance > 0) {
+        pkgUpdates.gift_card_balance = gcBalance;
+        const purchaseDateRaw = str(data.purchaseDate ?? data.issueDate ?? "").split("T")[0];
+        if (purchaseDateRaw) pkgUpdates.gift_card_purchase_date = purchaseDateRaw;
+      }
+    }
+    await sb.from("clients").update(pkgUpdates).eq("id", client.id);
   }
 
   if (totalPaid > 0) {
