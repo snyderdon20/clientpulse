@@ -1905,6 +1905,13 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
       .then(({ data }) => { if (data) setTransactions(data); });
   }, [client.id, usingDB, supabaseUrl, supabaseAnonKey]);
 
+  const lifetimeTotal = transactions.length > 0
+    ? transactions.reduce((sum, t) =>
+        sum + (+t.cc_amount||0) + (+t.cash_amount||0) + (+t.check_amount||0) + (+t.ach_amount||0)
+            + (+t.package_redemption||0) + (+t.gc_redemption||0) + (+t.bank_account_amount||0)
+            + (+t.vagaro_pay_later_amount||0) + (+t.other_amount||0), 0)
+    : client.totalSpent || 0;
+
   const initInfoForm = () => ({
     firstName:          client.firstName          || "",
     lastName:           client.lastName           || "",
@@ -2087,7 +2094,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
             <span>{client.email}</span>
             <span>{client.phone}</span>
             {client.birthday && <span>Birthday: {fmtDate(client.birthday)}</span>}
-            {client.totalSpent > 0 && <span style={{ color: "#065f46", fontWeight: "600" }}>Lifetime: ${Number(client.totalSpent).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>}
+            {lifetimeTotal > 0 && <span style={{ color: "#065f46", fontWeight: "600" }}>Lifetime: ${Number(lifetimeTotal).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>}
             {client.noShows > 0 && <span style={{ color: "#dc2626", fontWeight: "600" }}>No-shows: {client.noShows}</span>}
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
