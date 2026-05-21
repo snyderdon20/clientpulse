@@ -3472,9 +3472,10 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
   const [inviting,  setInviting]    = useState(false);
   const [inviteMsg, setInviteMsg]   = useState(null);
   const [error,     setError]       = useState(null);
-  const [resetSent, setResetSent]   = useState({});
-  const [editingId, setEditingId]   = useState(null);
-  const [editDraft, setEditDraft]   = useState({});
+  const [resetSent, setResetSent]       = useState({});
+  const [editingId, setEditingId]       = useState(null);
+  const [editDraft, setEditDraft]       = useState({});
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const sb = () => getSB(supabaseUrl, supabaseAnonKey);
 
@@ -3569,6 +3570,15 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
     } catch (e) { setError(e.message); }
   };
 
+  const deleteStaff = async (id) => {
+    try {
+      const { error: err } = await sb().from("staff").delete().eq("id", id);
+      if (err) throw err;
+      setStaffList((s) => s.filter((m) => m.id !== id));
+      setConfirmDeleteId(null);
+    } catch (e) { setError(e.message); }
+  };
+
   const ROLES = ["admin", "manager", "staff"];
   const ROLE_COLORS = { admin: { bg: "#fee2e2", color: "#991b1b" }, manager: { bg: "#fef3c7", color: "#92400e" }, staff: { bg: "#dbeafe", color: "#1d5fa8" } };
 
@@ -3640,6 +3650,23 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
                   style={{ fontSize: "11px", fontWeight: "700", color: member.active ? "#dc2626" : "#065f46", background: member.active ? "#fee2e2" : "#d1fae5", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
                   {member.active ? "Deactivate" : "Reactivate"}
                 </button>
+                {confirmDeleteId === member.id ? (
+                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <button onClick={() => deleteStaff(member.id)}
+                      style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#dc2626", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", whiteSpace: "nowrap" }}>
+                      Confirm delete
+                    </button>
+                    <button onClick={() => setConfirmDeleteId(null)}
+                      style={{ fontSize: "11px", color: "#8a7a6a", background: "none", border: "none", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <button onClick={() => setConfirmDeleteId(member.id)}
+                    style={{ fontSize: "11px", fontWeight: "700", color: "#dc2626", background: "none", border: "none", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", padding: "4px 4px" }}>
+                    Delete
+                  </button>
+                )}
               </div>
               {editingId === member.id && (
                 <div style={{ padding: "12px 0 14px 48px", borderBottom: "1px solid #f0e8de" }}>
