@@ -432,7 +432,10 @@ async function handleAppointment(sb: SB, eventType: string, data: Record<string,
       .eq("id", client.id);
   }
 
-  await logHistory(sb, client.id, HISTORY_TYPE[eventType] ?? "appt.scheduled", `${service || "Appointment"} — Vagaro sync`);
+  // Dedup key includes appt time so multiple reschedules to different times are all logged,
+  // but webhook retries for the exact same event are silently ignored.
+  const dedupKey = `${vagaroApptId}:${eventType}:${apptDate}T${apptTime}`;
+  await logHistory(sb, client.id, HISTORY_TYPE[eventType] ?? "appt.scheduled", `${service || "Appointment"} — Vagaro sync`, dedupKey);
 }
 
 async function handleCustomer(sb: SB, eventType: string, data: Record<string, unknown>) {
@@ -559,9 +562,9 @@ function calcDuration(start: unknown, end: unknown): number | null {
   return ms > 0 ? Math.round(ms / 60000) : null;
 }
 
-async function logHistory(sb: SB, clientId: string, type: string, detail: string) {
-  await sb.from("history").insert({
-    client_id: clientId, type, detail, by: "Vagaro",
-    ts: Date.now(), source: "vagaro", direction: "internal",
-  });
+async function logHistory(sb: SB, clientId: string, type: string, detail: string, vagaro_event_id?: string) {
+  await sb.from("history").upsert(
+    { client_id: clientId, type, detail, by: "Vagaro", ts: Date.now(), source: "vagaro", direction: "internal", vagaro_event_id: vagaro_event_id ?? null },
+    { onConflict: "vagaro_event_id", ignoreDuplicates: true },
+  );
 }
