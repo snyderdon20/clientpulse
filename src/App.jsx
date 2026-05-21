@@ -582,6 +582,15 @@ function CSVImportModal({ onImport, onClose, usingDB }) {
       tags,
       appointments:  [],
       history:       [mkEvent("client.created", "Imported from Vagaro CSV", { by: "System" })],
+      completedAppointmentsCount: 0,
+      packageCreditsRemaining:    0,
+      packageExpirationDate:      null,
+      giftCardBalance:            0,
+      giftCardPurchaseDate:       null,
+      contactedAt:                null,
+      needsFollowUp:              false,
+      restrictedStatus:           null,
+      restrictedNote:             null,
     };
   };
 
@@ -732,7 +741,7 @@ function CSVImportModal({ onImport, onClose, usingDB }) {
   );
 }
 
-function NewClientModal({ onSave, onClose }) {
+function NewClientModal({ onSave, onClose, staffName = "Staff" }) {
   const [form, setForm] = useState({
     firstName: "", lastName: "", phone: "", email: "",
     birthday: "", referredBy: "", careCategory: "",
@@ -770,8 +779,17 @@ function NewClientModal({ onSave, onClose }) {
       tags: [],
       appointments: [],
       history: [
-        mkEvent("client.created", "Client record created in Client Pulse — pending Vagaro sync", { by: "Don Snyder" }),
+        mkEvent("client.created", "Client record created in Client Pulse — pending Vagaro sync", { by: staffName }),
       ],
+      completedAppointmentsCount: 0,
+      packageCreditsRemaining: 0,
+      packageExpirationDate: null,
+      giftCardBalance: 0,
+      giftCardPurchaseDate: null,
+      contactedAt: null,
+      needsFollowUp: false,
+      restrictedStatus: null,
+      restrictedNote: null,
     };
     onSave(newClient);
     setSaving(false);
@@ -878,11 +896,11 @@ function NewClientModal({ onSave, onClose }) {
   );
 }
 
-function TaskModal({ clients, task, onSave, onClose }) {
+function TaskModal({ clients, task, onSave, onClose, staffName = "Staff" }) {
   const [title,     setTitle]     = useState(task?.title     || "");
   const [dueDate,   setDueDate]   = useState(task?.dueDate   || TODAY);
   const [clientId,  setClientId]  = useState(task?.clientId  || "");
-  const [createdBy, setCreatedBy] = useState(task?.createdBy || "Don Snyder");
+  const [createdBy, setCreatedBy] = useState(task?.createdBy || staffName);
 
   const handleSave = () => {
     if (!title.trim()) return;
@@ -1370,7 +1388,7 @@ const CATEGORY_TEMPLATES = {
   "Referral Reward":          ["referral"],
 };
 
-function LogModal({ client, templates, onClose, onSave, preset }) {
+function LogModal({ client, templates, onClose, onSave, preset, staffName = "Staff" }) {
   // ALL hooks at the top — no exceptions
   const gmail = useGmail(getGmailClientId());
   const initChannel  = preset?.channel  || "Text/SMS";
@@ -1387,7 +1405,7 @@ function LogModal({ client, templates, onClose, onSave, preset }) {
   const [channel,      setChannel]      = useState(initChannel);
   const [category,     setCategory]     = useState(initCategory);
   const [outcome,      setOutcome]      = useState(OUTCOMES[initChannel]?.[0] || "Done");
-  const [staff,        setStaff]        = useState("Don Snyder");
+  const [staff,        setStaff]        = useState(staffName);
   const [activeTpl,    setActiveTpl]    = useState(preset?.templateKey || null);
   const [notes,        setNotes]        = useState(initNotes);
   const [gmailSending, setGmailSending] = useState(false);
@@ -1629,10 +1647,10 @@ function LogModal({ client, templates, onClose, onSave, preset }) {
 
 // ─── TAG EDITOR ──────────────────────────────────────────────────────────────
 // ─── GOLDEN NUGGETS ──────────────────────────────────────────────────────────
-function GoldenNuggetsCard({ nuggets = [], onAdd, onDelete }) {
+function GoldenNuggetsCard({ nuggets = [], onAdd, onDelete, staffName = "Staff" }) {
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState("");
-  const [staff, setStaff] = useState("Don Snyder");
+  const [staff, setStaff] = useState(staffName);
 
   const handleAdd = () => {
     if (!text.trim()) return;
@@ -2038,7 +2056,7 @@ function HistoryFeed({ history, transactions = [], onLog, onNote }) {
 
 
 // ─── CLIENT DETAIL ────────────────────────────────────────────────────────────
-function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabaseUrl, supabaseAnonKey, usingDB }) {
+function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabaseUrl, supabaseAnonKey, usingDB, staffName = "Staff" }) {
   const [showLog,      setShowLog]      = useState(false);
   const [showEdit,     setShowEdit]     = useState(false);
   const [transactions, setTransactions] = useState([]);
@@ -2109,12 +2127,12 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
 
   const updateCareCategory = (cat) => {
     onUpdate(client.id, { careCategory: cat });
-    appendHistory(mkEvent("client.updated", `Care category set to: ${cat ? CARE_CATEGORIES[cat]?.label : "none"}`, { by: "Don Snyder" }));
+    appendHistory(mkEvent("client.updated", `Care category set to: ${cat ? CARE_CATEGORIES[cat]?.label : "none"}`, { by: staffName }));
   };
 
   const updateRedLight = (val) => {
     onUpdate(client.id, { redLightStatus: val });
-    appendHistory(mkEvent("client.updated", `Red Light Therapy status: ${val ? RED_LIGHT_STATUSES[val]?.label : "cleared"}`, { by: "Don Snyder" }));
+    appendHistory(mkEvent("client.updated", `Red Light Therapy status: ${val ? RED_LIGHT_STATUSES[val]?.label : "cleared"}`, { by: staffName }));
   };
 
   const addCommunication = (event) => {
@@ -2156,7 +2174,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
     };
     onUpdate(client.id, updates);
     setShowEdit(false);
-    appendHistory(mkEvent("client.updated", "Client profile updated", { by: "Don Snyder" }));
+    appendHistory(mkEvent("client.updated", "Client profile updated", { by: staffName }));
   };
 
 
@@ -2164,7 +2182,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
     <div className="page-pad" style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
       {showLog && (
         <LogModal client={client} templates={templates} preset={typeof showLog === "object" ? showLog : undefined}
-          onClose={() => setShowLog(false)} onSave={addCommunication} />
+          onClose={() => setShowLog(false)} onSave={addCommunication} staffName={staffName} />
       )}
 
       {showEdit && (
@@ -2261,7 +2279,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
             tags={client.tags || []}
             onChange={(tags) => {
               onUpdate(client.id, { tags });
-              appendHistory(mkEvent("client.updated", "Client tags updated", { by: "Don Snyder" }));
+              appendHistory(mkEvent("client.updated", "Client tags updated", { by: staffName }));
             }}
           />
         </div>
@@ -2343,6 +2361,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
             nuggets={client.goldenNuggets || []}
             onAdd={addNugget}
             onDelete={deleteNugget}
+            staffName={staffName}
           />
 
           {/* Outreach & touchpoints card */}
@@ -2458,7 +2477,7 @@ const SIDEBAR_FILTERS = [
   { key: "restricted", label: "Restricted" },
 ];
 
-function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search, setSearch, tagFilter, setTagFilter, fullWidth, onAddClient }) {
+function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search, setSearch, tagFilter, setTagFilter, fullWidth, onAddClient, staffName = "Staff" }) {
   const [showNewClient, setShowNewClient] = useState(false);
   const allTags = useMemo(
     () => [...new Set(clients.flatMap((c) => c.tags || []))].sort(),
@@ -2506,6 +2525,7 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
         <NewClientModal
           onSave={(c) => { onAddClient(c); setShowNewClient(false); onSelect(c); }}
           onClose={() => setShowNewClient(false)}
+          staffName={staffName}
         />
       )}
       <div style={{ padding: "14px 14px 8px" }}>
@@ -2623,7 +2643,7 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask, onDeleteTask, onFilterClients }) {
+function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask, onDeleteTask, onFilterClients, staffName = "Staff" }) {
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [editTask, setEditTask] = useState(null);
   const [selectedDate, setSelectedDate] = useState(TODAY);
@@ -2802,6 +2822,7 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
           task={editTask}
           onSave={(t) => { onSaveTask(t); setShowTaskModal(false); setEditTask(null); }}
           onClose={() => { setShowTaskModal(false); setEditTask(null); }}
+          staffName={staffName}
         />
       )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, gap: 12, flexWrap: "wrap" }}>
@@ -3016,7 +3037,7 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
 
 
 // ─── OUTREACH COMPOSER ────────────────────────────────────────────────────────
-function OutreachComposer({ client, triggerId, templates, onLog, onClose }) {
+function OutreachComposer({ client, triggerId, templates, onLog, onClose, staffName = "Staff" }) {
   const tpl = templates[triggerId] || templates["rebooking"];
   const [channel,      setChannel]      = useState("sms");
   const [editedSms,    setEditedSms]    = useState(fillTemplate(tpl?.sms || "", client));
@@ -3039,7 +3060,7 @@ function OutreachComposer({ client, triggerId, templates, onLog, onClose }) {
       date: TODAY,
       timestamp: new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }),
       logTime: Date.now(),
-      createdBy: "Don Snyder",
+      createdBy: staffName,
     });
   };
 
@@ -3162,7 +3183,7 @@ function OutreachComposer({ client, triggerId, templates, onLog, onClose }) {
 }
 
 // ─── PULSE PAGE ───────────────────────────────────────────────────────────────
-function PulsePage({ clients, templates, onGoToClient, onUpdateClient }) {
+function PulsePage({ clients, templates, onGoToClient, onUpdateClient, staffName = "Staff" }) {
   const [groupTab, setGroupTab] = useState("lapsed");
   const [selected, setSelected] = useState(new Set());
   const [showGroupTpl, setShowGroupTpl] = useState(false);
@@ -3381,6 +3402,7 @@ function PulsePage({ clients, templates, onGoToClient, onUpdateClient }) {
             }
           }}
           onClose={() => setComposer(null)}
+          staffName={staffName}
         />
       )}
     </div>
@@ -4638,6 +4660,7 @@ function MobileClientShell({ clients, selected, setSelected, filter, setFilter, 
           setTagFilter={setTagFilter}
           fullWidth={isMobile}
           onAddClient={onAddClient}
+          staffName={auth.staff?.full_name || "Staff"}
         />
       )}
       {(!isMobile || showDetail) && (
@@ -4653,6 +4676,7 @@ function MobileClientShell({ clients, selected, setSelected, filter, setFilter, 
               supabaseUrl={supabaseUrl}
               supabaseAnonKey={supabaseAnonKey}
               usingDB={usingDB}
+              staffName={auth.staff?.full_name || "Staff"}
             />
           ) : (
             <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px", color: "#b0a090" }}>
@@ -5946,8 +5970,9 @@ function App() {
             onToggleTask={handleToggleTask}
             onDeleteTask={handleDeleteTask}
             onFilterClients={(f) => { setFilter(f); setTab("clients"); }}
+            staffName={auth.staff?.full_name || "Staff"}
           />}
-        {tab === "pulse"     && <PulsePage clients={clients} templates={templates} onGoToClient={goToClient} onUpdateClient={updateClient} />}
+        {tab === "pulse"     && <PulsePage clients={clients} templates={templates} onGoToClient={goToClient} onUpdateClient={updateClient} staffName={auth.staff?.full_name || "Staff"} />}
         {tab === "sales"     && <SalesDashboard supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} />}
         {tab === "settings"  && (
           <SettingsPage
