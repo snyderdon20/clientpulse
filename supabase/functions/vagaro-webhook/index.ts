@@ -397,9 +397,9 @@ async function handleAppointment(sb: SB, eventType: string, data: Record<string,
   const businessId     = str(data.businessId);
   if (!vagaroApptId) return;
 
-  const startIso   = str(data.startTime);
-  const apptDate   = startIso ? startIso.split("T")[0] : new Date().toISOString().split("T")[0];
-  const apptTime   = startIso.includes("T") ? startIso.split("T")[1].slice(0, 5) : null;
+  const startIso             = str(data.startTime);
+  const tz                   = Deno.env.get("VAGARO_TIMEZONE") || "America/Los_Angeles";
+  const { date: apptDate, time: apptTime } = localDateAndTime(startIso, tz);
   const rawStatus  = str(data.bookingStatus).toLowerCase().trim();
   const apptStatus = BOOKING_STATUS[rawStatus] ?? (
     eventType.endsWith(".cancelled") || eventType.endsWith(".deleted") ? "cancelled" :
@@ -542,6 +542,16 @@ async function handleTransaction(sb: SB, data: Record<string, unknown>) {
 
 function str(v: unknown): string { return v == null ? "" : String(v); }
 function num(v: unknown): number { return Number(v) || 0; }
+
+function localDateAndTime(isoString: string, tz: string): { date: string; time: string } {
+  const fallbackDate = new Date().toLocaleDateString("en-CA", { timeZone: tz });
+  if (!isoString) return { date: fallbackDate, time: "" };
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) return { date: fallbackDate, time: "" };
+  const date = d.toLocaleDateString("en-CA", { timeZone: tz });                              // YYYY-MM-DD
+  const time = d.toLocaleTimeString("en-US", { timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false }); // HH:MM
+  return { date, time };
+}
 
 function calcDuration(start: unknown, end: unknown): number | null {
   if (!start || !end) return null;
