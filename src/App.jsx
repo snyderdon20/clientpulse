@@ -3273,6 +3273,8 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
   const [inviteMsg, setInviteMsg]   = useState(null);
   const [error,     setError]       = useState(null);
   const [resetSent, setResetSent]   = useState({});
+  const [editingId, setEditingId]   = useState(null);
+  const [editDraft, setEditDraft]   = useState({});
 
   const sb = () => getSB(supabaseUrl, supabaseAnonKey);
 
@@ -3349,6 +3351,16 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
     } catch (e) { setError(e.message); }
   };
 
+  const saveEdit = async () => {
+    if (!editingId) return;
+    try {
+      const { error: err } = await sb().from("staff").update({ full_name: editDraft.full_name, email: editDraft.email }).eq("id", editingId);
+      if (err) throw err;
+      setStaffList((s) => s.map((m) => m.id === editingId ? { ...m, ...editDraft } : m));
+      setEditingId(null);
+    } catch (e) { setError(e.message); }
+  };
+
   const ROLES = ["admin", "manager", "staff"];
   const ROLE_COLORS = { admin: { bg: "#fee2e2", color: "#991b1b" }, manager: { bg: "#fef3c7", color: "#92400e" }, staff: { bg: "#dbeafe", color: "#1d5fa8" } };
 
@@ -3382,39 +3394,73 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
           <div style={{ fontSize: "13px", color: "#b0a090" }}>No staff found. Invite your first team member below.</div>
         ) : (
           staffList.map((member) => (
-            <div key={member.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid #f0e8de" }}>
-              <div style={{ width: 36, height: 36, borderRadius: 10, background: member.active ? "linear-gradient(135deg,#a0785a,#7a5640)" : "#e5e7eb", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", fontWeight: "800", color: member.active ? "#fff" : "#9ca3af", flexShrink: 0 }}>
-                {(member.full_name || "?").slice(0, 1).toUpperCase()}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: "13px", fontWeight: "700", color: member.active ? "#1a120b" : "#9ca3af" }}>
-                  {member.full_name || "Unnamed"}
+            <React.Fragment key={member.id}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: editingId === member.id ? "none" : "1px solid #f0e8de" }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: member.active ? "linear-gradient(135deg,#a0785a,#7a5640)" : "#e5e7eb", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", fontWeight: "800", color: member.active ? "#fff" : "#9ca3af", flexShrink: 0 }}>
+                  {(member.full_name || "?").slice(0, 1).toUpperCase()}
                 </div>
-                <div style={{ fontSize: "11px", color: "#8a7a6a", marginTop: 1 }}>
-                  {member.email ? member.email : (member.active ? "Active" : "Deactivated")}
-                  {member.email && !member.active && " · Deactivated"}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: "13px", fontWeight: "700", color: member.active ? "#1a120b" : "#9ca3af" }}>
+                    {member.full_name || "Unnamed"}
+                  </div>
+                  <div style={{ fontSize: "11px", color: "#8a7a6a", marginTop: 1 }}>
+                    {member.email ? member.email : (member.active ? "Active" : "Deactivated")}
+                    {member.email && !member.active && " · Deactivated"}
+                  </div>
                 </div>
-              </div>
-              <select
-                value={member.role || "staff"}
-                onChange={(e) => updateRole(member.id, e.target.value)}
-                disabled={!member.active}
-                style={{ fontSize: "11px", fontWeight: "700", color: ROLE_COLORS[member.role]?.color || "#1d5fa8", background: ROLE_COLORS[member.role]?.bg || "#dbeafe", border: "none", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
-                {ROLES.map((r) => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
-              </select>
-              {member.email && member.active && (
+                <select
+                  value={member.role || "staff"}
+                  onChange={(e) => updateRole(member.id, e.target.value)}
+                  disabled={!member.active}
+                  style={{ fontSize: "11px", fontWeight: "700", color: ROLE_COLORS[member.role]?.color || "#1d5fa8", background: ROLE_COLORS[member.role]?.bg || "#dbeafe", border: "none", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                  {ROLES.map((r) => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
+                </select>
                 <button
-                  onClick={() => sendReset(member.id, member.email)}
-                  style={{ fontSize: "11px", fontWeight: "700", color: resetSent[member.id] ? "#065f46" : "#6b5244", background: resetSent[member.id] ? "#d1fae5" : "#f5ede4", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", whiteSpace: "nowrap" }}>
-                  {resetSent[member.id] ? "Sent!" : "Reset pw"}
+                  onClick={() => { if (editingId === member.id) { setEditingId(null); } else { setEditingId(member.id); setEditDraft({ full_name: member.full_name || "", email: member.email || "" }); } }}
+                  style={{ fontSize: "11px", fontWeight: "700", color: editingId === member.id ? "#8a7a6a" : "#6b5244", background: editingId === member.id ? "#f0e8de" : "#f5ede4", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                  {editingId === member.id ? "Cancel" : "Edit"}
                 </button>
+                {member.email && member.active && (
+                  <button
+                    onClick={() => sendReset(member.id, member.email)}
+                    style={{ fontSize: "11px", fontWeight: "700", color: resetSent[member.id] ? "#065f46" : "#6b5244", background: resetSent[member.id] ? "#d1fae5" : "#f5ede4", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", whiteSpace: "nowrap" }}>
+                    {resetSent[member.id] ? "Sent!" : "Reset pw"}
+                  </button>
+                )}
+                <button
+                  onClick={() => toggleActive(member.id, member.active)}
+                  style={{ fontSize: "11px", fontWeight: "700", color: member.active ? "#dc2626" : "#065f46", background: member.active ? "#fee2e2" : "#d1fae5", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                  {member.active ? "Deactivate" : "Reactivate"}
+                </button>
+              </div>
+              {editingId === member.id && (
+                <div style={{ padding: "12px 0 14px 48px", borderBottom: "1px solid #f0e8de" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                    <div>
+                      <label style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", display: "block", marginBottom: 4 }}>Full name</label>
+                      <input
+                        value={editDraft.full_name}
+                        onChange={(e) => setEditDraft((d) => ({ ...d, full_name: e.target.value }))}
+                        style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e0d6", fontSize: "13px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", display: "block", marginBottom: 4 }}>Email</label>
+                      <input
+                        type="email"
+                        value={editDraft.email}
+                        onChange={(e) => setEditDraft((d) => ({ ...d, email: e.target.value }))}
+                        style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e0d6", fontSize: "13px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+                    </div>
+                  </div>
+                  <button
+                    onClick={saveEdit}
+                    disabled={!editDraft.full_name.trim()}
+                    style={{ fontSize: "12px", fontWeight: "700", color: "#fff", background: "linear-gradient(135deg,#a0785a,#7a5640)", border: "none", borderRadius: 8, padding: "7px 18px", cursor: editDraft.full_name.trim() ? "pointer" : "not-allowed", opacity: editDraft.full_name.trim() ? 1 : 0.5, fontFamily: "'DM Sans',sans-serif" }}>
+                    Save changes
+                  </button>
+                </div>
               )}
-              <button
-                onClick={() => toggleActive(member.id, member.active)}
-                style={{ fontSize: "11px", fontWeight: "700", color: member.active ? "#dc2626" : "#065f46", background: member.active ? "#fee2e2" : "#d1fae5", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
-                {member.active ? "Deactivate" : "Reactivate"}
-              </button>
-            </div>
+            </React.Fragment>
           ))
         )}
       </div>
