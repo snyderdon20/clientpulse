@@ -5639,6 +5639,19 @@ function App() {
       });
   }, [supabaseUrl, supabaseAnonKey]);
 
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshData = useCallback(() => {
+    if (!usingDB || !supabaseUrl || !supabaseAnonKey || refreshing) return;
+    setRefreshing(true);
+    dbLoadAll(supabaseUrl, supabaseAnonKey)
+      .then(({ clients: dbClients, tasks: dbTasks }) => {
+        setClients(dbClients);
+        setTasks(dbTasks);
+      })
+      .catch((e) => console.warn("Refresh failed:", e))
+      .finally(() => setRefreshing(false));
+  }, [usingDB, supabaseUrl, supabaseAnonKey, refreshing]);
+
   const searchResults = useMemo(() => {
     if (!globalSearch.trim()) return [];
     const q = globalSearch.toLowerCase();
@@ -5745,6 +5758,7 @@ function App() {
     input::placeholder, textarea::placeholder { color: #b0a090; }
     button:hover { opacity: 0.88; }
     @keyframes fadeUp { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     .mobile-bottom-nav { display: none; }
     .header-search { display: flex; }
     .header-user-label { display: flex; }
@@ -5841,6 +5855,33 @@ function App() {
             </button>
           ))}
         </nav>
+
+        {usingDB && (
+          <button
+            onClick={refreshData}
+            disabled={refreshing}
+            title="Refresh data"
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: "32px", height: "32px", borderRadius: "8px",
+              border: "1px solid #e8e0d6", background: "transparent",
+              cursor: refreshing ? "default" : "pointer", color: "#8a7a6a",
+              transition: "all 0.15s", flexShrink: 0,
+            }}
+            onMouseEnter={(e) => { if (!refreshing) { e.currentTarget.style.background = "#f5ede4"; e.currentTarget.style.color = "#7a5640"; }}}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#8a7a6a"; }}
+          >
+            <svg
+              width="15" height="15" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+              style={{ animation: refreshing ? "spin 0.8s linear infinite" : "none" }}
+            >
+              <path d="M23 4v6h-6" />
+              <path d="M1 20v-6h6" />
+              <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+            </svg>
+          </button>
+        )}
 
         <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "5px 10px 5px 5px", background: "#f5ede4", borderRadius: "10px", border: "1px solid #e8e0d6", flexShrink: 0 }}>
           <div style={{ width: "28px", height: "28px", background: "linear-gradient(135deg,#a0785a,#7a5640)", borderRadius: "7px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: "800", color: "#fff" }}>D</div>
