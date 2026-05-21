@@ -1,5 +1,4 @@
-[project]
-id = "dewsznqxagzahtkpriuk"
+project_id = "dewsznqxagzahtkpriuk"
 
 [functions.vagaro-webhook]
 verify_jwt = false
