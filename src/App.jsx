@@ -297,16 +297,29 @@ function deriveStatus(client) {
 
 /** Returns { layer1, layer2 } for a client. Prefer this over deriveStatus() for new code. */
 function clientStatus(client) {
+  // Restricted always wins first (mirrors computeClientStatus priority rule 1)
+  if (client.restrictedStatus === "deactivated") return { layer1: "restricted", layer2: "deactivated" };
+  if (client.restrictedStatus === "flagged")     return { layer1: "restricted", layer2: "flagged" };
+
   if (client.statusOverride) {
+    // Legacy flat keys from before the two-layer system
     const legacyMap = {
-      "active":    { layer1: "active",   layer2: "regular" },
-      "overdue":   { layer1: "lapsed",   layer2: "overdue" },
-      "lapsed":    { layer1: "lapsed",   layer2: "stale"   },
-      "new-lead":  { layer1: "lead",     layer2: "new"     },
-      "follow-up": { layer1: "active",   layer2: "needs-follow-up" },
+      "active":    { layer1: "active",   layer2: "regular"          },
+      "overdue":   { layer1: "lapsed",   layer2: "overdue"          },
+      "lapsed":    { layer1: "lapsed",   layer2: "stale"            },
+      "new-lead":  { layer1: "lead",     layer2: "new"              },
+      "follow-up": { layer1: "active",   layer2: "needs-follow-up"  },
     };
     if (legacyMap[client.statusOverride]) return legacyMap[client.statusOverride];
+
+    // Any valid layer2 key stored directly
+    const cfg2 = LAYER2_CFG[client.statusOverride];
+    if (cfg2) return { layer1: cfg2.layer1, layer2: client.statusOverride };
   }
+
+  // needsFollowUp boolean (kept for backwards compat with direct DB writes)
+  if (client.needsFollowUp) return { layer1: "active", layer2: "needs-follow-up" };
+
   return computeClientStatus(client);
 }
 
@@ -1050,38 +1063,68 @@ function StatusPill({ status, client }) {
   );
 }
 
-function StatusSelector({ client, status, onUpdate }) {
-  const [open, setOpen]           = useState(false);
-  const [flagNote, setFlagNote]   = useState("");
+// All selectable statuses grouped by Layer 1, in display order.
+const STATUS_MENU = [
+  { layer1: "lead", items: [
+    { layer2: "new",                   label: "New"                   },
+    { layer2: "contacted",             label: "Contacted"             },
+    { layer2: "first-session-booked",  label: "First Session Booked"  },
+    { layer2: "first-session-no-show", label: "First Session No-Show" },
+    { layer2: "lost-lead",             label: "Lost Lead"             },
+  ]},
+  { layer1: "active", items: [
+    { layer2: "new-client",      label: "New Client"      },
+    { layer2: "regular",         label: "Regular"         },
+    { layer2: "package-holder",  label: "Package Holder"  },
+    { layer2: "needs-follow-up", label: "Needs Follow Up" },
+  ]},
+  { layer1: "lapsed", items: [
+    { layer2: "overdue-with-package", label: "Overdue + Package"    },
+    { layer2: "overdue",              label: "Overdue"               },
+    { layer2: "stale",                label: "Stale (61–90 days)"   },
+    { layer2: "expired-package",      label: "Expired Package"      },
+  ]},
+  { layer1: "inactive", items: [
+    { layer2: "past-client", label: "Past Client" },
+  ]},
+  { layer1: "restricted", items: [
+    { layer2: "deactivated", label: "Deactivated" },
+    { layer2: "flagged",     label: "Flagged"      },
+  ]},
+];
+
+function StatusSelector({ client, onUpdate }) {
+  const [open, setOpen]               = useState(false);
+  const [flagNote, setFlagNote]       = useState("");
   const [showFlagInput, setShowFlagInput] = useState(false);
 
-  const { layer1, layer2 } = clientStatus(client);
+  const { layer2: activeLayer2 } = clientStatus(client);
   const hasManualOverride = !!client.restrictedStatus || !!client.needsFollowUp || !!client.statusOverride;
-  const l2cfg = LAYER2_CFG[layer2] ?? { label: layer2, bg: "#e8e0d6", color: "#8a7a6a" };
+  const l2cfg = LAYER2_CFG[activeLayer2] ?? { color: "#8a7a6a" };
 
-  const MANUAL_OPTIONS = [
-    { key: "needs-follow-up", label: "Needs Follow Up",
-      desc: "Active client — left without booking next appt",
-      action: () => { onUpdate(client.id, { needsFollowUp: true, restrictedStatus: null, restrictedNote: null }); setOpen(false); } },
-    { key: "deactivated", label: "Deactivate Profile",
-      desc: "Hide from dashboards; suppress all communications",
-      action: () => { onUpdate(client.id, { restrictedStatus: "deactivated", restrictedNote: null, needsFollowUp: false }); setOpen(false); } },
-    { key: "flag-prompt", label: "Flag Profile",
-      desc: "Booking intercept — requires a mandatory note",
-      action: () => setShowFlagInput(true) },
-  ];
+  const close = () => { setOpen(false); setShowFlagInput(false); setFlagNote(""); };
+
+  const applyStatus = (layer2) => {
+    if (layer2 === "flagged") { setShowFlagInput(true); return; }
+    const base = { statusOverride: null, needsFollowUp: false, restrictedStatus: null, restrictedNote: null };
+    if (layer2 === "deactivated") {
+      onUpdate(client.id, { ...base, restrictedStatus: "deactivated" });
+    } else if (layer2 === "needs-follow-up") {
+      onUpdate(client.id, { ...base, statusOverride: "needs-follow-up", needsFollowUp: true });
+    } else {
+      onUpdate(client.id, { ...base, statusOverride: layer2 });
+    }
+    close();
+  };
 
   return (
     <div style={{ position: "relative", display: "inline-flex" }}>
       <button
         onClick={() => { setOpen((v) => !v); setShowFlagInput(false); setFlagNote(""); }}
-        title={hasManualOverride ? "Status manually set — click to change" : "Click to set manual override"}
-        style={{
-          display: "inline-flex", alignItems: "center", gap: "4px",
-          padding: "2px 0", background: "transparent", border: "none", cursor: "pointer",
-        }}
+        title={hasManualOverride ? "Status manually overridden — click to change" : "Click to set status"}
+        style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: "2px 0", background: "transparent", border: "none", cursor: "pointer" }}
       >
-        <StatusPill status={layer2} />
+        <StatusPill status={activeLayer2} />
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={l2cfg.color} strokeWidth="2.5" strokeLinecap="round" style={{ opacity: 0.6, flexShrink: 0 }}>
           <path d="M6 9l6 6 6-6" />
         </svg>
@@ -1091,33 +1134,57 @@ function StatusSelector({ client, status, onUpdate }) {
         <div style={{
           position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 200,
           background: "#fff", border: "1px solid #e8e0d6", borderRadius: "12px",
-          boxShadow: "0 4px 20px rgba(0,0,0,0.13)", padding: "8px", minWidth: "240px",
+          boxShadow: "0 4px 24px rgba(0,0,0,0.14)", padding: "6px",
+          minWidth: "220px", maxHeight: "420px", overflowY: "auto",
         }}>
           {!showFlagInput ? (
             <>
-              <div style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", letterSpacing: "1px", textTransform: "uppercase", padding: "4px 8px 6px" }}>Manual Overrides</div>
-              {MANUAL_OPTIONS.map((opt) => (
-                <button key={opt.key} onClick={opt.action} style={{
-                  display: "flex", flexDirection: "column", alignItems: "flex-start", width: "100%",
-                  padding: "8px 10px", border: "none", borderRadius: "8px",
-                  background: layer2 === opt.key ? "#f5ede4" : "transparent",
-                  cursor: "pointer", textAlign: "left", marginBottom: "2px",
-                }}>
-                  <span style={{ fontSize: "12px", fontWeight: "700", color: opt.key === "flag-prompt" ? "#881337" : opt.key === "deactivated" ? "#9d174d" : "#5b21b6" }}>{opt.label}</span>
-                  <span style={{ fontSize: "10px", color: "#8a7a6a", marginTop: "1px" }}>{opt.desc}</span>
-                </button>
-              ))}
+              {STATUS_MENU.map(({ layer1, items }) => {
+                const l1cfg = LAYER1_CFG[layer1] ?? { label: layer1, color: "#8a7a6a" };
+                return (
+                  <div key={layer1}>
+                    <div style={{
+                      fontSize: "9px", fontWeight: "800", letterSpacing: "1.2px",
+                      textTransform: "uppercase", color: l1cfg.color,
+                      padding: "8px 10px 3px", opacity: 0.8,
+                    }}>
+                      {l1cfg.label}
+                    </div>
+                    {items.map(({ layer2, label }) => {
+                      const l2cfg2 = LAYER2_CFG[layer2] ?? {};
+                      const isActive = layer2 === activeLayer2;
+                      return (
+                        <button key={layer2} onClick={() => applyStatus(layer2)} style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                          width: "100%", padding: "6px 10px", border: "none", borderRadius: "7px",
+                          background: isActive ? l2cfg2.bg ?? "#f5ede4" : "transparent",
+                          color: l2cfg2.color ?? "#2e2418",
+                          fontSize: "12px", fontWeight: isActive ? "700" : "500",
+                          cursor: "pointer", textAlign: "left",
+                        }}>
+                          <span style={{ display: "flex", alignItems: "center", gap: "7px" }}>
+                            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: l2cfg2.color ?? "#ccc", flexShrink: 0 }} />
+                            {label}
+                          </span>
+                          {isActive && <span style={{ fontSize: "10px", opacity: 0.5 }}>✓</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
               {hasManualOverride && (
                 <button
-                  onClick={() => { onUpdate(client.id, { restrictedStatus: null, restrictedNote: null, needsFollowUp: false, statusOverride: null }); setOpen(false); }}
+                  onClick={() => { onUpdate(client.id, { statusOverride: null, needsFollowUp: false, restrictedStatus: null, restrictedNote: null }); close(); }}
                   style={{
-                    display: "flex", alignItems: "center", gap: "6px", width: "100%",
-                    padding: "7px 10px", border: "none", borderRadius: "8px", borderTop: "1px solid #e8e0d6",
+                    display: "flex", alignItems: "center", width: "100%",
+                    marginTop: "4px", padding: "7px 10px", border: "none",
+                    borderTop: "1px solid #f0e8de", borderRadius: "0 0 8px 8px",
                     background: "transparent", color: "#8a7a6a",
-                    fontSize: "11px", fontWeight: "600", cursor: "pointer", marginTop: "4px",
+                    fontSize: "11px", fontWeight: "600", cursor: "pointer",
                   }}
                 >
-                  Reset to auto-detect
+                  ↺ Reset to auto-detect
                 </button>
               )}
             </>
@@ -1135,8 +1202,8 @@ function StatusSelector({ client, status, onUpdate }) {
                 <button
                   disabled={!flagNote.trim()}
                   onClick={() => {
-                    onUpdate(client.id, { restrictedStatus: "flagged", restrictedNote: flagNote.trim(), needsFollowUp: false });
-                    setOpen(false); setShowFlagInput(false); setFlagNote("");
+                    onUpdate(client.id, { statusOverride: null, needsFollowUp: false, restrictedStatus: "flagged", restrictedNote: flagNote.trim() });
+                    close();
                   }}
                   style={{ ...S.sm("danger"), flex: 1, justifyContent: "center", opacity: flagNote.trim() ? 1 : 0.5 }}
                 >
@@ -1148,7 +1215,7 @@ function StatusSelector({ client, status, onUpdate }) {
           )}
         </div>
       )}
-      {open && <div style={{ position: "fixed", inset: 0, zIndex: 199 }} onClick={() => { setOpen(false); setShowFlagInput(false); setFlagNote(""); }} />}
+      {open && <div style={{ position: "fixed", inset: 0, zIndex: 199 }} onClick={close} />}
     </div>
   );
 }
@@ -2170,7 +2237,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "5px" }}>
             <h2 style={{ margin: 0, fontSize: "19px", fontWeight: "800", color: "#1a120b" }}>{fullName(client)}</h2>
-            <StatusSelector client={client} status={status} onUpdate={onUpdate} />
+            <StatusSelector client={client} onUpdate={onUpdate} />
             {isBirthday && <span>🎂</span>}
             {client.waitlisted && <span style={{ fontSize: "10px", fontWeight: "700", color: "#1d5fa8", background: "#dbeafe", padding: "2px 8px", borderRadius: "100px" }}>Waitlisted</span>}
             {client.vagaroSynced === false && (
