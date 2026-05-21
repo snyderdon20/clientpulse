@@ -3630,6 +3630,13 @@ function parseMoney(v) {
 function parseVagaroDate(v) {
   if (!v || !v.trim()) return null;
   const s = v.trim();
+  // "May 21, 2026 - 8:24 AM" (Vagaro CSV export format)
+  const longMatch = s.match(/^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})/);
+  if (longMatch) {
+    const months = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
+    const m = months[longMatch[1].toLowerCase().slice(0, 3)];
+    if (m) return `${longMatch[3]}-${String(m).padStart(2,"0")}-${longMatch[2].padStart(2,"0")}`;
+  }
   // M/D/YYYY or MM/DD/YYYY
   const slashParts = s.split("/");
   if (slashParts.length === 3) {
