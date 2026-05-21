@@ -2579,9 +2579,11 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
           <p style={{ padding: "20px 16px", fontSize: "13px", color: "#b0a090" }}>No clients match.</p>
         )}
         {filtered.map((cl) => {
-          const { layer2: st } = clientStatus(cl);
+          const { layer1: sl1, layer2: sl2 } = clientStatus(cl);
           const isSel = selected?.id === cl.id;
           const ds = daysSince(lastCompletedDate(cl));
+          const l1cfg = LAYER1_CFG[sl1] ?? { color: "#8a7a6a" };
+          const l2cfg = LAYER2_CFG[sl2] ?? { label: sl2, color: "#8a7a6a" };
           return (
             <button
               key={cl.id}
@@ -2599,17 +2601,17 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
             >
               <Avatar client={cl} size={34} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, marginBottom: "2px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "3px" }}>
+                  <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: l1cfg.color, flexShrink: 0 }} />
                   <span style={{
                     fontSize: "13px", fontWeight: "700", color: "#2e2418",
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                   }}>
                     {fullName(cl)}
                   </span>
-                  <StatusPill status={st} />
                 </div>
-                <div style={{ fontSize: "11px", color: "#b0a090" }}>
-                  {ds !== null ? `Last visit ${ds}d ago` : "No visits yet"}
+                <div style={{ fontSize: "11px", color: l2cfg.color, fontWeight: "600", paddingLeft: "13px" }}>
+                  {l2cfg.label}{ds !== null ? <span style={{ color: "#b0a090", fontWeight: "400" }}> · {ds}d ago</span> : null}
                 </div>
               </div>
             </button>
