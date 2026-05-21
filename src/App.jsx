@@ -3688,8 +3688,10 @@ function parseVagaroTransactionCSV(text) {
       firstName = parts.slice(0, -1).join(" ");
       lastName  = parts[parts.length - 1] || "";
     }
+    const checkoutDateRaw = get(c, COL.checkoutDate);
     return {
-      checkoutDate:  parseVagaroDate(get(c, COL.checkoutDate)),
+      checkoutDate:     parseVagaroDate(checkoutDateRaw),
+      checkoutDateRaw,
       checkedOutBy:  get(c, COL.checkedOutBy),
       transactionId: get(c, COL.transactionId),
       customerRaw,
@@ -3826,6 +3828,11 @@ function TransactionCSVImport({ supabaseUrl, supabaseAnonKey }) {
           <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 8 }}>
             Preview — first 3 rows of {rows.length}:
           </div>
+          {rows[0]?.checkoutDateRaw === "" && (
+            <div style={{ background: "#fff7ed", borderRadius: 8, padding: "8px 12px", fontSize: "11px", color: "#92400e", marginBottom: 8 }}>
+              ⚠️ Date column not detected. Raw first-col sample: "{rows[0]?.checkoutDateRaw ?? "n/a"}"
+            </div>
+          )}
           <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #e8e0d6", marginBottom: 12 }}>
             {rows.slice(0, 3).map((r, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 12px",
@@ -3835,7 +3842,9 @@ function TransactionCSVImport({ supabaseUrl, supabaseAnonKey }) {
                 <span style={{ color: "#0f7a4a", fontWeight: "700" }}>
                   ${(r.cc + r.cash + r.check + r.gcRedeem + r.pkg + r.mbsp + r.bank + r.vpl + r.other).toFixed(2)}
                 </span>
-                <span style={{ color: "#8a7a6a" }}>{r.checkoutDate || "—"}</span>
+                <span style={{ color: r.checkoutDate ? "#065f46" : "#dc2626", fontWeight: r.checkoutDate ? "400" : "700" }}>
+                  {r.checkoutDate || (r.checkoutDateRaw ? `raw: ${r.checkoutDateRaw}` : "⚠️ no date col")}
+                </span>
               </div>
             ))}
           </div>
