@@ -3734,7 +3734,7 @@ function TransactionCSVImport({ supabaseUrl, supabaseAnonKey }) {
   );
 }
 
-
+function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, vagaroRegion, setVagaroRegion, webhookLog, templates, onSaveTemplate, gmailClientId, setGmailClientId, supabaseUrl, setSupabaseUrl, supabaseAnonKey, setSupabaseAnonKey, usingDB, dbError, onAddClient, onFindDuplicates }) {
   const [activeTab, setActiveTab] = useState("database");
   const [showSecret, setShowSecret] = useState(false);
   const [testResult, setTestResult] = useState(null);
