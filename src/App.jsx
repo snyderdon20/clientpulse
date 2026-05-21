@@ -5652,6 +5652,42 @@ function App() {
       .finally(() => setRefreshing(false));
   }, [usingDB, supabaseUrl, supabaseAnonKey, refreshing]);
 
+  // Realtime: pick up clients inserted by the Vagaro webhook without a page refresh
+  useEffect(() => {
+    if (!usingDB || !supabaseUrl || !supabaseAnonKey) return;
+    const sb = getSB(supabaseUrl, supabaseAnonKey);
+    if (!sb) return;
+
+    const channel = sb
+      .channel("vagaro-client-sync")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "clients" },
+        (payload) => {
+          const newRow = payload.new;
+          setClients((cs) => {
+            if (cs.some((c) => c.id === newRow.id)) return cs;
+            return [{ ...rowToClient(newRow) }, ...cs];
+          });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "clients" },
+        (payload) => {
+          const updated = payload.new;
+          setClients((cs) =>
+            cs.map((c) =>
+              c.id === updated.id ? { ...c, ...rowToClient(updated) } : c
+            )
+          );
+        }
+      )
+      .subscribe();
+
+    return () => { sb.removeChannel(channel); };
+  }, [usingDB, supabaseUrl, supabaseAnonKey]);
+
   const searchResults = useMemo(() => {
     if (!globalSearch.trim()) return [];
     const q = globalSearch.toLowerCase();
