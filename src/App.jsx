@@ -3572,8 +3572,17 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
 
   const deleteStaff = async (id) => {
     try {
-      const { error: err } = await sb().from("staff").delete().eq("id", id);
-      if (err) throw err;
+      const res = await fetch(`${supabaseUrl.replace(/\/$/, "")}/functions/v1/staff-delete`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": supabaseAnonKey,
+          "Authorization": `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({ userId: id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Delete failed");
       setStaffList((s) => s.filter((m) => m.id !== id));
       setConfirmDeleteId(null);
     } catch (e) { setError(e.message); }
