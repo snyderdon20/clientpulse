@@ -3645,10 +3645,11 @@ function parseVagaroDate(v) {
 }
 
 function parseVagaroTransactionCSV(text) {
-  // Strip Excel BOM and normalize line endings
-  const lines = text.replace(/^﻿/, "").split(/\r?\n/).filter(l => l.trim());
+  // Strip Excel BOM (U+FEFF) and normalize line endings
+  const clean = text.replace(/^\uFEFF/, "");
+  const lines = clean.split(/\r?\n/).filter(l => l.trim());
   if (lines.length < 2) return [];
-  const headers = parseCSVLine(lines[0]).map(h => h.trim().replace(/^﻿/, ""));
+  const headers = parseCSVLine(lines[0]).map(h => h.replace(/^\uFEFF/, "").trim());
   const idx = (name) => headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
 
   const COL = {
