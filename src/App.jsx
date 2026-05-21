@@ -1733,10 +1733,28 @@ const HIST_FILTERS = [
   { key: "client",      label: "Profile"        },
 ];
 
-function HistoryFeed({ history, onLog, onNote }) {
+function HistoryFeed({ history, transactions = [], onLog, onNote }) {
   const [filter, setFilter] = useState("all");
   const sorted = [...history].sort((a, b) => b.ts - a.ts);
-  const shown  = sorted.filter((e) => filter === "all" || e.type.startsWith(filter));
+  const shown  = sorted.filter((e) => filter === "all" || (filter !== "payment" && e.type.startsWith(filter)));
+
+  const txTotal = (t) =>
+    (+t.cc_amount||0) + (+t.cash_amount||0) + (+t.check_amount||0) + (+t.ach_amount||0)
+    + (+t.package_redemption||0) + (+t.gc_redemption||0) + (+t.bank_account_amount||0)
+    + (+t.vagaro_pay_later_amount||0) + (+t.other_amount||0);
+
+  const txMethodLabel = (t) => {
+    const parts = [];
+    if (+t.cc_amount > 0)               parts.push(`CC $${(+t.cc_amount).toFixed(2)}`);
+    if (+t.cash_amount > 0)             parts.push(`Cash $${(+t.cash_amount).toFixed(2)}`);
+    if (+t.check_amount > 0)            parts.push(`Check $${(+t.check_amount).toFixed(2)}`);
+    if (+t.package_redemption > 0)      parts.push(`Pkg $${(+t.package_redemption).toFixed(2)}`);
+    if (+t.gc_redemption > 0)           parts.push(`GC $${(+t.gc_redemption).toFixed(2)}`);
+    if (+t.vagaro_pay_later_amount > 0) parts.push(`VPL $${(+t.vagaro_pay_later_amount).toFixed(2)}`);
+    if (+t.bank_account_amount > 0)     parts.push(`Bank $${(+t.bank_account_amount).toFixed(2)}`);
+    if (+t.other_amount > 0)            parts.push(`Other $${(+t.other_amount).toFixed(2)}`);
+    return parts.join(" · ") || "—";
+  };
 
   return (
     <div>
@@ -1762,7 +1780,7 @@ function HistoryFeed({ history, onLog, onNote }) {
         </div>
       </div>
 
-      {shown.length === 0 && (
+      {shown.length === 0 && filter !== "payment" && (
         <p style={{ margin: 0, fontSize: "13px", color: "#b0a090" }}>
           No events in this category yet.
         </p>
@@ -1809,16 +1827,83 @@ function HistoryFeed({ history, onLog, onNote }) {
           );
         })}
       </div>
+
+      {/* Transaction records in Payments tab */}
+      {filter === "payment" && (
+        <div>
+          {transactions.length === 0 && shown.length === 0 && (
+            <p style={{ margin: 0, fontSize: "13px", color: "#b0a090" }}>No payment records yet.</p>
+          )}
+          {transactions.length > 0 && (
+            <>
+              {shown.length > 0 && <div style={{ borderTop: "1px solid #f0e8de", margin: "4px 0 12px" }} />}
+              <div style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 8 }}>
+                Vagaro Transactions
+              </div>
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {transactions.map((t, i) => {
+                  const total = txTotal(t);
+                  const dateStr = t.transaction_date
+                    ? new Date(t.transaction_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                    : "—";
+                  const tipAmt = +t.tip || 0;
+                  return (
+                    <div key={t.id} style={{
+                      display: "flex", gap: 12, padding: "11px 0",
+                      borderBottom: i < transactions.length - 1 ? "1px solid #f0e8de" : "none",
+                    }}>
+                      <div style={{ width: 34, height: 34, borderRadius: "50%", background: "#d1fae5",
+                        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0, marginTop: 1 }}>
+                        💳
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 2 }}>
+                          <span style={{ fontSize: "13px", fontWeight: "700", color: "#2e2418" }}>
+                            {t.item_sold || t.purchase_type || "Transaction"}
+                          </span>
+                          <span style={{ fontSize: "14px", fontWeight: "800", color: "#065f46", whiteSpace: "nowrap" }}>
+                            ${total.toFixed(2)}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: "11px", color: "#8a7a6a", marginBottom: 3 }}>
+                          {[t.purchase_type, t.service_category, dateStr].filter(Boolean).join(" · ")}
+                        </div>
+                        <div style={{ fontSize: "10px", color: "#b0a090" }}>
+                          {txMethodLabel(t)}{tipAmt > 0 ? ` · Tip $${tipAmt.toFixed(2)}` : ""}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {filter !== "payment" && shown.length === 0 && (
+        <p style={{ margin: 0, fontSize: "13px", color: "#b0a090" }}>No events in this category yet.</p>
+      )}
     </div>
   );
 }
 
 
 // ─── CLIENT DETAIL ────────────────────────────────────────────────────────────
-function ClientDetail({ client, onUpdate, templates, allClients, onBack }) {
-  const [showLog, setShowLog] = useState(false);
+function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabaseUrl, supabaseAnonKey, usingDB }) {
+  const [showLog,      setShowLog]      = useState(false);
+  const [showEdit,     setShowEdit]     = useState(false);
+  const [transactions, setTransactions] = useState([]);
 
-  const [showEdit, setShowEdit] = useState(false);
+  useEffect(() => {
+    if (!usingDB || !supabaseUrl || !supabaseAnonKey || !client.id) return;
+    getSB(supabaseUrl, supabaseAnonKey)
+      .from("transactions")
+      .select("*")
+      .eq("client_id", client.id)
+      .order("transaction_date", { ascending: false })
+      .then(({ data }) => { if (data) setTransactions(data); });
+  }, [client.id, usingDB, supabaseUrl, supabaseAnonKey]);
 
   const initInfoForm = () => ({
     firstName:          client.firstName          || "",
@@ -2155,6 +2240,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack }) {
         </div>
         <HistoryFeed
           history={client.history || []}
+          transactions={transactions}
           onLog={() => setShowLog({ channel: "Text/SMS", category: "Rebooking Outreach" })}
           onNote={() => setShowLog({ noteMode: true })}
         />
@@ -4193,7 +4279,7 @@ function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, va
 }
 
 // ─── MOBILE CLIENT SHELL ──────────────────────────────────────────────────────
-function MobileClientShell({ clients, selected, setSelected, filter, setFilter, search, setSearch, tagFilter, setTagFilter, updateClient, templates, onAddClient }) {
+function MobileClientShell({ clients, selected, setSelected, filter, setFilter, search, setSearch, tagFilter, setTagFilter, updateClient, templates, onAddClient, supabaseUrl, supabaseAnonKey, usingDB }) {
   const isMobile = useIsMobile();
   const showDetail = isMobile && selected;
   const showList = !isMobile || !selected;
@@ -4225,6 +4311,9 @@ function MobileClientShell({ clients, selected, setSelected, filter, setFilter, 
               templates={templates}
               allClients={clients}
               onBack={isMobile ? () => setSelected(null) : null}
+              supabaseUrl={supabaseUrl}
+              supabaseAnonKey={supabaseAnonKey}
+              usingDB={usingDB}
             />
           ) : (
             <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px", color: "#b0a090" }}>
@@ -5464,6 +5553,9 @@ function App() {
             updateClient={updateClient}
             templates={templates}
             onAddClient={addClient}
+            supabaseUrl={supabaseUrl}
+            supabaseAnonKey={supabaseAnonKey}
+            usingDB={usingDB}
           />
         )}
       </main>
