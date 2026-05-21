@@ -3299,8 +3299,7 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
     if (!inviteEmail.trim() || !inviteName.trim()) return;
     setInviting(true); setInviteMsg(null); setError(null);
     try {
-      // Create auth user with a temp password — they'll reset via email
-      const res = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
+      const res = await fetch(`${supabaseUrl.replace(/\/$/, "")}/functions/v1/staff-invite`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -3309,35 +3308,15 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
         },
         body: JSON.stringify({
           email: inviteEmail.trim(),
-          password: Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2) + "Aa1!",
-          email_confirm: true,
-          user_metadata: { full_name: inviteName.trim() },
+          full_name: inviteName.trim(),
+          role: inviteRole,
         }),
       });
       const data = await res.json();
-
-      if (!res.ok) {
-        // Anon key can't create admin users — use invite link approach instead
-        // Send magic link / password reset so they can set their own password
-        const { error: linkErr } = await sb().auth.resetPasswordForEmail(inviteEmail.trim(), {
-          redirectTo: window.location.origin,
-        });
-        if (linkErr) throw new Error("Could not send invite. Make sure the email is correct.");
-        setInviteMsg(`Invite sent to ${inviteEmail.trim()} — they'll receive a link to set their password and can then log in.`);
-        // Note: staff row will be created when they first log in
-      } else {
-        // User created — add staff row
-        const { error: staffErr } = await sb().from("staff").upsert({
-          id: data.id,
-          full_name: inviteName.trim(),
-          role: inviteRole,
-          active: true,
-        });
-        if (staffErr) throw staffErr;
-        setInviteMsg(`✓ ${inviteName.trim()} added. A password reset email has been sent to ${inviteEmail.trim()}.`);
-        loadStaff();
-      }
+      if (!res.ok) throw new Error(data.error || "Failed to send invite");
+      setInviteMsg(`Invite sent to ${inviteEmail.trim()} — they'll receive an email with a link to join.`);
       setInviteEmail(""); setInviteName(""); setInviteRole("staff");
+      loadStaff();
     } catch (e) {
       setError(e.message || "Failed to invite staff member");
     } finally {
@@ -3401,7 +3380,8 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
                   {member.full_name || "Unnamed"}
                 </div>
                 <div style={{ fontSize: "11px", color: "#8a7a6a", marginTop: 1 }}>
-                  {member.active ? "Active" : "Deactivated"}
+                  {member.email ? member.email : (member.active ? "Active" : "Deactivated")}
+                  {member.email && !member.active && " · Deactivated"}
                 </div>
               </div>
               <select
@@ -3451,7 +3431,7 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
             </div>
           )}
           <div style={{ fontSize: "11px", color: "#8a7a6a", marginBottom: 12, background: "#f5f0e8", padding: "8px 12px", borderRadius: 8 }}>
-            They'll receive an email with a link to set their password. Once they log in, their account will be active.
+            They'll receive an invitation email with a sign-in link. Once they click it, they can set their password and log in.
           </div>
           <button style={{ ...S.btn("primary"), opacity: (inviteEmail.trim() && inviteName.trim()) ? 1 : 0.5 }}
             onClick={handleInvite} disabled={inviting || !inviteEmail.trim() || !inviteName.trim()}>
