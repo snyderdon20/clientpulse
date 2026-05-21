@@ -3487,8 +3487,16 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
   const saveEdit = async () => {
     if (!editingId) return;
     try {
-      const { error: err } = await sb().from("staff").update({ full_name: editDraft.full_name, email: editDraft.email }).eq("id", editingId);
-      if (err) throw err;
+      // Try saving both fields; if email column doesn't exist, fall back to name only
+      const payload = { full_name: editDraft.full_name, email: editDraft.email };
+      let { error: err } = await sb().from("staff").update(payload).eq("id", editingId);
+      if (err && err.message && err.message.includes("email")) {
+        const { error: err2 } = await sb().from("staff").update({ full_name: editDraft.full_name }).eq("id", editingId);
+        if (err2) throw err2;
+        setError("Name saved. Email column missing — run the staff migration SQL in your Supabase dashboard to enable email editing.");
+      } else if (err) {
+        throw err;
+      }
       setStaffList((s) => s.map((m) => m.id === editingId ? { ...m, ...editDraft } : m));
       setEditingId(null);
     } catch (e) { setError(e.message); }
