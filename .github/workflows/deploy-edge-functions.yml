@@ -26,3 +26,8 @@ jobs:
         run: supabase functions deploy vagaro-sync --project-ref dewsznqxagzahtkpriuk --no-verify-jwt
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Deploy merge-clients
+        run: supabase functions deploy merge-clients --project-ref dewsznqxagzahtkpriuk --no-verify-jwt
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
