@@ -3870,25 +3870,9 @@ create policy "Allow all" on tasks for all using (true);`}
         </div>
         {webhookSecret && (
           <div style={{ fontSize: "12px", color: "#8a7a6a", background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: 10, padding: "10px 14px", marginBottom: 16, lineHeight: 1.6 }}>
-            After setting this secret, add it as a Supabase Edge Function secret:<br />
-            <code style={{ fontFamily: "monospace", fontSize: "11px", color: "#7a5640", display: "block", marginTop: 6 }}>
-              supabase secrets set VAGARO_WEBHOOK_SECRET="{webhookSecret}"
-            </code>
-            Then enter the same value in Vagaro when creating the webhook (Header: <code style={{ fontFamily: "monospace" }}>x-webhook-secret</code>).
+            Enter this value in Vagaro when creating the webhook (Header: <code style={{ fontFamily: "monospace" }}>x-webhook-secret</code>).
           </div>
         )}
-
-        {/* Deploy instructions */}
-        <div style={{ background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: 10, padding: "14px 16px", fontSize: "12px", lineHeight: 1.7, color: "#2e2418" }}>
-          <div style={{ fontWeight: "700", marginBottom: 6, color: "#7a5640" }}>One-time deploy (run in your terminal)</div>
-          <code style={{ fontFamily: "monospace", fontSize: "11px", display: "block", whiteSpace: "pre", color: "#1a120b", lineHeight: 2 }}>{`npm install -g supabase
-supabase login
-# Edit supabase/config.toml — set your project_id
-supabase functions deploy vagaro-webhook`}</code>
-          <div style={{ marginTop: 8, color: "#8a7a6a" }}>
-            Your project ID is in Supabase → Project Settings → General → Reference ID.
-          </div>
-        </div>
 
         {/* Events handled */}
         <div style={{ marginTop: 16 }}>
