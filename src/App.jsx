@@ -5072,6 +5072,8 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
   // Live monthly revenue from transactions
   const [liveData,      setLiveData]      = useState(null);
   const [liveLoading,   setLiveLoading]   = useState(false);
+  // Realtime tick — incremented on any transaction change to trigger re-fetches
+  const [txTick,        setTxTick]        = useState(0);
 
   useEffect(() => { setTimeout(() => setAnimated(true), 120); }, []);
   useEffect(() => { setAnimated(false); setTimeout(() => setAnimated(true), 120); }, [weekOf, selYear, selMonth]);
@@ -5170,7 +5172,6 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
   }, [usingDB, supabaseUrl, supabaseAnonKey, selYear, selMonth, txTick]);
 
   // Realtime: re-fetch revenue + session counts when any transaction changes
-  const [txTick, setTxTick] = useState(0);
   useEffect(() => {
     if (!usingDB || !supabaseUrl || !supabaseAnonKey) return;
     const sb = getSB(supabaseUrl, supabaseAnonKey);
