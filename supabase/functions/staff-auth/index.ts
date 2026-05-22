@@ -44,7 +44,7 @@ Deno.serve(async (req: Request) => {
   if (action === "create") {
     const full_name = str(body.full_name).trim();
     const email     = str(body.email).trim().toLowerCase();
-    const role      = str(body.role || "staff");
+    const roles: string[] = Array.isArray(body.roles) ? body.roles as string[] : ["therapist"];
     const password  = str(body.password);
     if (!full_name || !email || !password) return json({ error: "full_name, email, and password are required" }, 400);
 
@@ -53,7 +53,7 @@ Deno.serve(async (req: Request) => {
 
     const password_hash = await bcrypt.hash(password, 10);
     const { data: inserted, error: insertErr } = await supabase
-      .from("staff").insert({ id: crypto.randomUUID(), full_name, email, role, password_hash, active: true }).select("*").single();
+      .from("staff").insert({ id: crypto.randomUUID(), full_name, email, roles, password_hash, active: true }).select("*").single();
     if (insertErr) return json({ error: insertErr.message }, 400);
 
     const { password_hash: _omit, ...safeStaff } = inserted;

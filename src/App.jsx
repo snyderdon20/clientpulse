@@ -3713,7 +3713,7 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
 
   // Create staff state
   const [showCreate,   setShowCreate]  = useState(false);
-  const [createDraft,  setCreateDraft] = useState({ full_name: "", email: "", role: "therapist", password: "" });
+  const [createDraft,  setCreateDraft] = useState({ full_name: "", email: "", roles: ["therapist"], password: "" });
   const [creating,     setCreating]    = useState(false);
   const [createError,  setCreateError] = useState(null);
 
@@ -3801,13 +3801,13 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
           action: "create",
           full_name: createDraft.full_name.trim(),
           email: createDraft.email.trim(),
-          role: createDraft.role,
+          roles: createDraft.roles,
           password: createDraft.password,
         }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Failed to create staff member");
-      setCreateDraft({ full_name: "", email: "", role: "therapist", password: "" });
+      setCreateDraft({ full_name: "", email: "", roles: ["therapist"], password: "" });
       setShowCreate(false);
       loadStaff();
     } catch (e) {
@@ -3842,13 +3842,6 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
     }
   };
 
-  const updateRole = async (id, role) => {
-    try {
-      await sb().from("staff").update({ role }).eq("id", id);
-      setStaffList((s) => s.map((m) => m.id === id ? { ...m, role } : m));
-    } catch (e) { setError(e.message); }
-  };
-
   const toggleActive = async (id, active) => {
     try {
       await sb().from("staff").update({ active: !active }).eq("id", id);
@@ -3863,6 +3856,8 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
       const payload = {
         full_name: editDraft.full_name,
         email: editDraft.email,
+        roles: editDraft.roles || [],
+        role: (editDraft.roles || []).find(r => r !== 'admin') || editDraft.roles?.[0] || 'therapist',
         vagaro_provider_id:   editDraft.vagaro_provider_id   || null,
         sales_display_role:   editDraft.sales_display_role   || null,
         sales_session_low:    Number(editDraft.sales_session_low)  || 10,
@@ -3944,15 +3939,18 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
                     {member.email && !member.active && " · Deactivated"}
                   </div>
                 </div>
-                <select
-                  value={member.role || "therapist"}
-                  onChange={(e) => updateRole(member.id, e.target.value)}
-                  disabled={!member.active}
-                  style={{ fontSize: "11px", fontWeight: "700", color: ROLE_COLORS[member.role]?.color || "#1d5fa8", background: ROLE_COLORS[member.role]?.bg || "#dbeafe", border: "none", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
-                  {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-                </select>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                  {(member.roles?.length ? member.roles : (member.role ? [member.role] : [])).map((rv) => {
+                    const rs = ROLE_COLORS[rv] || { bg: "#f3f4f6", color: "#374151" };
+                    return (
+                      <span key={rv} style={{ fontSize: "10px", fontWeight: "700", color: rs.color, background: rs.bg, borderRadius: 5, padding: "2px 7px" }}>
+                        {ROLE_LABEL[rv] || rv}
+                      </span>
+                    );
+                  })}
+                </div>
                 <button
-                  onClick={() => { if (editingId === member.id) { setEditingId(null); } else { setEditingId(member.id); setEditDraft({ full_name: member.full_name || "", email: member.email || "", vagaro_provider_id: member.vagaro_provider_id || "", sales_display_role: member.sales_display_role || "", sales_session_low: member.sales_session_low ?? 10, sales_session_high: member.sales_session_high ?? 15, sales_rebook_goal: member.sales_rebook_goal ?? "", sales_red_light_goal: member.sales_red_light_goal ?? "", sales_color: member.sales_color || "#a0785a", show_on_sales: member.show_on_sales ?? true }); } }}
+                  onClick={() => { if (editingId === member.id) { setEditingId(null); } else { setEditingId(member.id); setEditDraft({ full_name: member.full_name || "", email: member.email || "", roles: member.roles || (member.role ? [member.role] : []), vagaro_provider_id: member.vagaro_provider_id || "", sales_display_role: member.sales_display_role || "", sales_session_low: member.sales_session_low ?? 10, sales_session_high: member.sales_session_high ?? 15, sales_rebook_goal: member.sales_rebook_goal ?? "", sales_red_light_goal: member.sales_red_light_goal ?? "", sales_color: member.sales_color || "#a0785a", show_on_sales: member.show_on_sales ?? true }); } }}
                   style={{ fontSize: "11px", fontWeight: "700", color: editingId === member.id ? "#8a7a6a" : "#6b5244", background: editingId === member.id ? "#f0e8de" : "#f5ede4", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
                   {editingId === member.id ? "Cancel" : "Edit"}
                 </button>
@@ -3990,6 +3988,28 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
                           style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e0d6", fontSize: "13px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
                       </div>
                     ))}
+                  </div>
+                  {/* Roles */}
+                  <div style={{ background: "#faf8f5", borderRadius: 10, padding: "12px 14px", marginBottom: 12, border: "1px solid #e8e0d6" }}>
+                    <div style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 10 }}>Roles</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+                      {STAFF_ROLES.map((r) => {
+                        const checked = (editDraft.roles || []).includes(r.value);
+                        return (
+                          <label key={r.value} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => setEditDraft((d) => {
+                                const cur = d.roles || [];
+                                return { ...d, roles: checked ? cur.filter(v => v !== r.value) : [...cur, r.value] };
+                              })}
+                              style={{ width: 15, height: 15, accentColor: r.color, cursor: "pointer" }} />
+                            <span style={{ fontSize: "12px", fontWeight: "600", color: "#2e2418" }}>{r.label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
                   {/* Sales dashboard goals */}
                   <div style={{ background: "#faf8f5", borderRadius: 10, padding: "12px 14px", marginBottom: 12, border: "1px solid #e8e0d6" }}>
@@ -4114,10 +4134,25 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
             </div>
           </div>
           <div style={{ marginBottom: 10 }}>
-            <label style={S.lbl}>Role</label>
-            <select value={createDraft.role} onChange={(e) => setCreateDraft((d) => ({ ...d, role: e.target.value }))} style={S.inp}>
-              {STAFF_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-            </select>
+            <label style={S.lbl}>Roles</label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 4 }}>
+              {STAFF_ROLES.map((r) => {
+                const checked = (createDraft.roles || []).includes(r.value);
+                return (
+                  <label key={r.value} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => setCreateDraft((d) => {
+                        const cur = d.roles || [];
+                        return { ...d, roles: checked ? cur.filter(v => v !== r.value) : [...cur, r.value] };
+                      })}
+                      style={{ width: 15, height: 15, accentColor: r.color, cursor: "pointer" }} />
+                    <span style={{ fontSize: "12px", fontWeight: "600", color: "#2e2418" }}>{r.label}</span>
+                  </label>
+                );
+              })}
+            </div>
           </div>
           <div style={{ marginBottom: 14 }}>
             <label style={S.lbl}>Password</label>
@@ -5133,7 +5168,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
     if (!usingDB || !supabaseUrl || !supabaseAnonKey) { setSalesStaff([]); return; }
     getSB(supabaseUrl, supabaseAnonKey)
       .from("staff")
-      .select("id,full_name,role,vagaro_provider_id,sales_display_role,sales_session_low,sales_session_high,sales_rebook_goal,sales_red_light_goal,sales_color,show_on_sales")
+      .select("id,full_name,role,roles,vagaro_provider_id,sales_display_role,sales_session_low,sales_session_high,sales_rebook_goal,sales_red_light_goal,sales_color,show_on_sales")
       .eq("active", true)
       .eq("show_on_sales", true)
       .order("created_at")
@@ -5556,7 +5591,8 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
             const sessLow    = staff.sales_session_low  ?? 10;
             const sessHigh   = staff.sales_session_high ?? 15;
             const rebookGoal = staff.sales_rebook_goal  ?? null;
-            const hasRLT     = staff.role === "therapist_rlt";
+            const staffRoles  = staff.roles?.length ? staff.roles : (staff.role ? [staff.role] : []);
+            const hasRLT      = staffRoles.includes("therapist_rlt");
             const redGoal    = staff.sales_red_light_goal ?? null;
             const wg         = weeklyGoals[staff.id] || { sessions: 0, rebooked: 0, red_light: 0 };
             const sessions   = getStaffSessions(staff);
@@ -5569,8 +5605,10 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
             const rangeLabel  = sessLow === sessHigh ? `${sessLow}` : `${sessLow}–${sessHigh}`;
             const atSessGoal  = sessions >= sessLow;
             const atRebook    = rebookGoal && rebookP >= rebookGoal;
-            const isOwner     = staff.role === "owner";
-            const displayRole = staff.sales_display_role || ROLE_LABEL[staff.role] || staff.role || "";
+            const isOwner     = staffRoles.includes("owner");
+            const displayRole = staff.sales_display_role
+              || staffRoles.filter(r => r !== "admin").map(r => ROLE_LABEL[r] || r).join(" / ")
+              || "";
             const firstName   = (staff.full_name || "Staff").split(" ")[0];
 
             return (
@@ -6450,7 +6488,10 @@ function App() {
                 {auth.staff?.full_name?.split(" ")[0] || "Staff"}
               </div>
               <div style={{ fontSize: "9px", color: "#a0785a", fontWeight: "700", textTransform: "uppercase", letterSpacing: "1px", marginTop: "1px" }}>
-                {ROLE_LABEL[auth.staff?.role] || auth.staff?.role || "Staff"}
+                {(auth.staff?.roles?.length
+                  ? auth.staff.roles.map(r => ROLE_LABEL[r] || r).join(" / ")
+                  : ROLE_LABEL[auth.staff?.role] || auth.staff?.role || "Staff"
+                )}
               </div>
             </div>
             {auth.user && (
