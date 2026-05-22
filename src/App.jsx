@@ -4229,11 +4229,7 @@ function VagaroSyncCard({ supabaseUrl, supabaseAnonKey }) {
             <>⚠️ {result.error}</>
           ) : (<>
             <strong>✓ Sync complete</strong><br />
-            {result.matched} of {result.total} Vagaro customers linked to ClientPulse profiles.<br />
-            {result.unmatched > 0 && <>
-              {result.unmatched} unmatched (not in ClientPulse or different name).
-              {result.unmatchedSample?.length > 0 && <> First few: {result.unmatchedSample.join(", ")}.</>}
-            </>}
+            {result.matched} linked to existing profiles.{result.created > 0 && <> {result.created} new clients created from Vagaro.</>}
           </>)}
         </div>
       )}

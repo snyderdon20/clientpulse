@@ -61,6 +61,13 @@ interface VagaroCustomer {
   customerLastName: string;
   email?: string;
   mobilePhone?: string;
+  dayPhone?: string;
+  streetAddress?: string;
+  city?: string;
+  regionCode?: string;
+  postalCode?: string;
+  birthday?: string;
+  createdDate?: string;
 }
 
 async function fetchCustomer(
@@ -197,8 +204,7 @@ serve(async (req: Request) => {
   // For each Vagaro customerId, fetch customer details and try to match
   let matched        = 0;
   let alreadyLinked  = 0;
-  let unmatched      = 0;
-  const unmatchedSample: string[] = [];
+  let created        = 0;
 
   for (const customerId of customerIds) {
     // Skip if already linked — client was synced via webhook
@@ -254,8 +260,39 @@ serve(async (req: Request) => {
       nameMap.delete(key);
       matched++;
     } else {
-      unmatched++;
-      if (unmatchedSample.length < 20) unmatchedSample.push(`${firstName} ${lastName}`);
+      // No existing client found — create one from the Vagaro data
+      if (!firstName && !lastName) continue;
+
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Denver" });
+      const orNull = (v: string | undefined) => v?.trim() || null;
+
+      const { data: inserted, error: insErr } = await supabase
+        .from("clients").insert({
+          vagaro_id:      customerId,
+          vagaro_synced:  true,
+          first_name:     firstName,
+          last_name:      lastName,
+          email:          orNull(vc.email),
+          phone:          orNull(vc.mobilePhone) ?? orNull(vc.dayPhone),
+          address:        orNull(vc.streetAddress),
+          city:           orNull(vc.city),
+          state:          orNull(vc.regionCode),
+          zip:            orNull(vc.postalCode),
+          birthday:       orNull(vc.birthday),
+          customer_since: orNull(vc.createdDate?.split("T")[0]) ?? today,
+          avg_visit_interval_days: 30,
+          waitlisted: false,
+          tags: [],
+          golden_nuggets: [],
+        }).select("id").single();
+
+      if (insErr) {
+        console.error(`Failed to create client ${firstName} ${lastName}:`, insErr.message);
+        continue;
+      }
+
+      await linkPendingAppointments(supabase, customerId, inserted.id);
+      created++;
     }
   }
 
@@ -264,11 +301,7 @@ serve(async (req: Request) => {
     scanned:       customerIds.size,
     alreadyLinked,
     matched,
-    unmatched,
-    unmatchedSample,
-    note: unmatched > 0
-      ? "These customers have no name/email/phone match in ClientPulse. They may use a different name or have not been imported yet."
-      : undefined,
+    created,
   });
 });
 
