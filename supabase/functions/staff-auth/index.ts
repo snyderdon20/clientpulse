@@ -52,8 +52,9 @@ Deno.serve(async (req: Request) => {
     if (existing && existing.length > 0) return json({ error: "A staff member with that email already exists" }, 400);
 
     const password_hash = await bcrypt.hash(password, 10);
+    const role = roles.find((r: string) => r !== "admin") || roles[0] || "therapist";
     const { data: inserted, error: insertErr } = await supabase
-      .from("staff").insert({ id: crypto.randomUUID(), full_name, email, roles, password_hash, active: true }).select("*").single();
+      .from("staff").insert({ id: crypto.randomUUID(), full_name, email, role, roles, password_hash, active: true }).select("*").single();
     if (insertErr) return json({ error: insertErr.message }, 400);
 
     const { password_hash: _omit, ...safeStaff } = inserted;
