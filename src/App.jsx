@@ -3688,6 +3688,16 @@ function TemplatesPage({ templates, onSave, embedded = false }) {
 
 // ─── SETTINGS PAGE ────────────────────────────────────────────────────────────
 // ─── STAFF MANAGER ────────────────────────────────────────────────────────────
+const STAFF_ROLES = [
+  { value: "admin",         label: "Admin",               bg: "#fee2e2", color: "#991b1b" },
+  { value: "owner",         label: "Owner",               bg: "#fdf4e7", color: "#a0785a" },
+  { value: "front_desk",    label: "Front Desk Staff",    bg: "#f0fdf4", color: "#166534" },
+  { value: "therapist",     label: "Therapist",           bg: "#dbeafe", color: "#1d5fa8" },
+  { value: "therapist_rlt", label: "Therapist with RLT",  bg: "#f3e8ff", color: "#6b21a8" },
+];
+const ROLE_LABEL  = Object.fromEntries(STAFF_ROLES.map((r) => [r.value, r.label]));
+const ROLE_STYLE  = Object.fromEntries(STAFF_ROLES.map((r) => [r.value, { bg: r.bg, color: r.color }]));
+
 const STAFF_AUTH_URL = "https://dewsznqxagzahtkpriuk.supabase.co/functions/v1/staff-auth";
 const STAFF_AUTH_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRld3N6bnF4YWd6YWh0a3ByaXVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMDQ5MTcsImV4cCI6MjA5NDc4MDkxN30.PdVejzd-Mi3utM9xF7s2i3AU7UeBgNBE71eDFhjmteo";
 
@@ -3703,7 +3713,7 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
 
   // Create staff state
   const [showCreate,   setShowCreate]  = useState(false);
-  const [createDraft,  setCreateDraft] = useState({ full_name: "", email: "", role: "staff", password: "" });
+  const [createDraft,  setCreateDraft] = useState({ full_name: "", email: "", role: "therapist", password: "" });
   const [creating,     setCreating]    = useState(false);
   const [createError,  setCreateError] = useState(null);
 
@@ -3797,7 +3807,7 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Failed to create staff member");
-      setCreateDraft({ full_name: "", email: "", role: "staff", password: "" });
+      setCreateDraft({ full_name: "", email: "", role: "therapist", password: "" });
       setShowCreate(false);
       loadStaff();
     } catch (e) {
@@ -3887,8 +3897,8 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
     } catch (e) { setError(e.message); }
   };
 
-  const ROLES = ["owner", "admin", "manager", "staff"];
-  const ROLE_COLORS = { owner: { bg: "#fdf4e7", color: "#a0785a" }, admin: { bg: "#fee2e2", color: "#991b1b" }, manager: { bg: "#fef3c7", color: "#92400e" }, staff: { bg: "#dbeafe", color: "#1d5fa8" } };
+  const ROLES = STAFF_ROLES;
+  const ROLE_COLORS = ROLE_STYLE;
 
   return (
     <div>
@@ -3935,11 +3945,11 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
                   </div>
                 </div>
                 <select
-                  value={member.role || "staff"}
+                  value={member.role || "therapist"}
                   onChange={(e) => updateRole(member.id, e.target.value)}
                   disabled={!member.active}
                   style={{ fontSize: "11px", fontWeight: "700", color: ROLE_COLORS[member.role]?.color || "#1d5fa8", background: ROLE_COLORS[member.role]?.bg || "#dbeafe", border: "none", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
-                  {ROLES.map((r) => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
+                  {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
                 <button
                   onClick={() => { if (editingId === member.id) { setEditingId(null); } else { setEditingId(member.id); setEditDraft({ full_name: member.full_name || "", email: member.email || "", vagaro_provider_id: member.vagaro_provider_id || "", sales_display_role: member.sales_display_role || "", sales_session_low: member.sales_session_low ?? 10, sales_session_high: member.sales_session_high ?? 15, sales_rebook_goal: member.sales_rebook_goal ?? "", sales_red_light_goal: member.sales_red_light_goal ?? "", sales_color: member.sales_color || "#a0785a", show_on_sales: member.show_on_sales ?? true }); } }}
@@ -4106,9 +4116,7 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
           <div style={{ marginBottom: 10 }}>
             <label style={S.lbl}>Role</label>
             <select value={createDraft.role} onChange={(e) => setCreateDraft((d) => ({ ...d, role: e.target.value }))} style={S.inp}>
-              <option value="staff">Staff — can log communications, view clients</option>
-              <option value="manager">Manager — can edit clients, manage outreach</option>
-              <option value="admin">Admin — full access including settings</option>
+              {STAFF_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
             </select>
           </div>
           <div style={{ marginBottom: 14 }}>
@@ -5548,6 +5556,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
             const sessLow    = staff.sales_session_low  ?? 10;
             const sessHigh   = staff.sales_session_high ?? 15;
             const rebookGoal = staff.sales_rebook_goal  ?? null;
+            const hasRLT     = staff.role === "therapist_rlt";
             const redGoal    = staff.sales_red_light_goal ?? null;
             const wg         = weeklyGoals[staff.id] || { sessions: 0, rebooked: 0, red_light: 0 };
             const sessions   = getStaffSessions(staff);
@@ -5561,7 +5570,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
             const atSessGoal  = sessions >= sessLow;
             const atRebook    = rebookGoal && rebookP >= rebookGoal;
             const isOwner     = staff.role === "owner";
-            const displayRole = staff.sales_display_role || (isOwner ? "Owner" : staff.role) || "";
+            const displayRole = staff.sales_display_role || ROLE_LABEL[staff.role] || staff.role || "";
             const firstName   = (staff.full_name || "Staff").split(" ")[0];
 
             return (
@@ -5606,19 +5615,19 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
                   )}
                 </div>
 
-                {/* Red light */}
-                {redGoal && (
+                {/* Red light — always visible for therapist_rlt, otherwise only when goal is set */}
+                {(hasRLT || redGoal) && (
                   <div style={{ marginBottom: 12, padding: "10px 12px", background: "#dcf5ec", borderRadius: 10, border: "1px solid #86efac" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
                       <span style={{ fontSize: "11px", color: "#0f7a4a", fontWeight: "600" }}>💡 Red Light Sessions</span>
                       <span style={{ fontSize: "11px", fontWeight: "700", color: "#0f7a4a" }}>
-                        {wg.red_light} / {redGoal}{wg.red_light >= redGoal ? " ✓" : ""}
+                        {redGoal ? `${wg.red_light} / ${redGoal}${wg.red_light >= redGoal ? " ✓" : ""}` : `${wg.red_light} this week`}
                       </span>
                     </div>
-                    <SalesBar value={animated ? (redLightP||0) : 0} color="#0f7a4a" bg="#a7f3d0" h={6} />
+                    {redGoal && <SalesBar value={animated ? (redLightP||0) : 0} color="#0f7a4a" bg="#a7f3d0" h={6} />}
                     <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
                       <SalesNumInput value={wg.red_light||0} onChange={v => updateWeeklyGoal(staff.id, "red_light", v)} color="#0f7a4a" />
-                      <span style={{ fontSize: "10px", color: "#8a7a6a" }}>red light this week</span>
+                      <span style={{ fontSize: "10px", color: "#8a7a6a" }}>red light sessions</span>
                     </div>
                   </div>
                 )}
@@ -6441,7 +6450,7 @@ function App() {
                 {auth.staff?.full_name?.split(" ")[0] || "Staff"}
               </div>
               <div style={{ fontSize: "9px", color: "#a0785a", fontWeight: "700", textTransform: "uppercase", letterSpacing: "1px", marginTop: "1px" }}>
-                {auth.staff?.role || "staff"}
+                {ROLE_LABEL[auth.staff?.role] || auth.staff?.role || "Staff"}
               </div>
             </div>
             {auth.user && (
