@@ -53,7 +53,7 @@ Deno.serve(async (req: Request) => {
 
     const password_hash = await bcrypt.hash(password, 10);
     const { data: inserted, error: insertErr } = await supabase
-      .from("staff").insert({ full_name, email, role, password_hash, active: true }).select("*").single();
+      .from("staff").insert({ id: crypto.randomUUID(), full_name, email, role, password_hash, active: true }).select("*").single();
     if (insertErr) return json({ error: insertErr.message }, 400);
 
     const { password_hash: _omit, ...safeStaff } = inserted;
