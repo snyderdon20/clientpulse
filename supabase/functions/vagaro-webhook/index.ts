@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
       const state: string = data.State ?? data.state ?? "";
       const zip: string = data.Zip ?? data.zip ?? "";
 
-      const today = new Date().toISOString().split("T")[0];
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Denver" });
 
       const { data: inserted, error } = await supabase
         .from("clients")

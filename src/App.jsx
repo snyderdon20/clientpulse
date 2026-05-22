@@ -223,7 +223,8 @@ const DEFAULT_TEMPLATES = {
 };
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
-const TODAY = new Date().toISOString().split("T")[0];
+const TZ = "America/Denver";
+const TODAY = new Date().toLocaleDateString("en-CA", { timeZone: TZ }); // en-CA → YYYY-MM-DD
 const uid = () => crypto.randomUUID();
 const fullName = (c) => `${c.firstName} ${c.lastName}`;
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -242,10 +243,12 @@ const fmtTime = (t) => {
 
 const fmtStamp = (ts) => {
   const d = new Date(typeof ts === "number" ? ts : ts);
-  const mo = MONTHS[d.getMonth()];
-  const h = d.getHours();
-  const m = String(d.getMinutes()).padStart(2, "0");
-  return `${mo} ${d.getDate()}, ${d.getFullYear()} · ${h % 12 || 12}:${m} ${h >= 12 ? "PM" : "AM"}`;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: TZ, month: "short", day: "numeric", year: "numeric",
+    hour: "numeric", minute: "2-digit", hour12: true,
+  }).formatToParts(d);
+  const get = (t) => parts.find((p) => p.type === t)?.value ?? "";
+  return `${get("month")} ${get("day")}, ${get("year")} · ${get("hour")}:${get("minute")} ${get("dayPeriod")}`;
 };
 
 const nowMs = () => Date.now();
@@ -3058,7 +3061,7 @@ function OutreachComposer({ client, triggerId, templates, onLog, onClose, staffN
         ? `${tpl?.label} sent via SMS: "${editedSms.slice(0, 80)}${editedSms.length > 80 ? "…" : ""}"`
         : `${tpl?.label} sent via Gmail — Subject: "${editedSubject}"`,
       date: TODAY,
-      timestamp: new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }),
+      timestamp: new Date().toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit", hour12: true }),
       logTime: Date.now(),
       createdBy: staffName,
     });
@@ -4216,7 +4219,7 @@ function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, va
 
   const fmtWebhookTS = (iso) =>
     new Date(iso).toLocaleString("en-US", {
-      month: "short", day: "numeric",
+      timeZone: TZ, month: "short", day: "numeric",
       hour: "numeric", minute: "2-digit", hour12: true,
     });
 
