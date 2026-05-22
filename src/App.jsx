@@ -6271,7 +6271,7 @@ function App() {
           const updated = payload.new;
           setClients((cs) =>
             cs.map((c) =>
-              c.id === updated.id ? { ...c, ...rowToClient(updated) } : c
+              c.id === updated.id ? { ...c, ...rowToClient(updated), appointments: c.appointments, history: c.history } : c
             )
           );
         }
