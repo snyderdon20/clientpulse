@@ -3688,22 +3688,29 @@ function TemplatesPage({ templates, onSave, embedded = false }) {
 
 // ─── SETTINGS PAGE ────────────────────────────────────────────────────────────
 // ─── STAFF MANAGER ────────────────────────────────────────────────────────────
+const STAFF_AUTH_URL = "https://dewsznqxagzahtkpriuk.supabase.co/functions/v1/staff-auth";
+const STAFF_AUTH_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRld3N6bnF4YWd6YWh0a3ByaXVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMDQ5MTcsImV4cCI6MjA5NDc4MDkxN30.PdVejzd-Mi3utM9xF7s2i3AU7UeBgNBE71eDFhjmteo";
+
 function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
   const [staffList, setStaffList]   = useState([]);
   const [loading,   setLoading]     = useState(false);
-  const [showInvite,setShowInvite]  = useState(false);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteName,  setInviteName]  = useState("");
-  const [inviteRole,  setInviteRole]  = useState("staff");
-  const [inviting,  setInviting]    = useState(false);
-  const [inviteMsg, setInviteMsg]   = useState(null);
   const [error,     setError]       = useState(null);
-  const [resetSent, setResetSent]       = useState({});
   const [editingId, setEditingId]       = useState(null);
   const [editDraft, setEditDraft]       = useState({});
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [providerHints, setProviderHints]   = useState(null);  // null=idle, []=loading done
   const [loadingHints,  setLoadingHints]    = useState(false);
+
+  // Create staff state
+  const [showCreate,   setShowCreate]  = useState(false);
+  const [createDraft,  setCreateDraft] = useState({ full_name: "", email: "", role: "staff", password: "" });
+  const [creating,     setCreating]    = useState(false);
+  const [createError,  setCreateError] = useState(null);
+
+  // Inline password reset state (keyed by staff_id)
+  const [resetDraft,   setResetDraft]  = useState({});
+  const [resetSaving,  setResetSaving] = useState({});
+  const [resetSaved,   setResetSaved]  = useState({});
 
   const sb = () => getSB(supabaseUrl, supabaseAnonKey);
 
@@ -3769,32 +3776,59 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
 
   useEffect(() => { loadStaff(); }, [usingDB]);
 
-  const handleInvite = async () => {
-    if (!inviteEmail.trim() || !inviteName.trim()) return;
-    setInviting(true); setInviteMsg(null); setError(null);
+  const handleCreate = async () => {
+    if (!createDraft.full_name.trim() || !createDraft.email.trim() || !createDraft.password.trim()) return;
+    setCreating(true); setCreateError(null);
     try {
-      const res = await fetch(`${supabaseUrl.replace(/\/$/, "")}/functions/v1/staff-invite`, {
+      const res = await fetch(STAFF_AUTH_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "apikey": supabaseAnonKey,
-          "Authorization": `Bearer ${supabaseAnonKey}`,
+          "apikey": STAFF_AUTH_ANON_KEY,
+          "Authorization": `Bearer ${STAFF_AUTH_ANON_KEY}`,
         },
         body: JSON.stringify({
-          email: inviteEmail.trim(),
-          full_name: inviteName.trim(),
-          role: inviteRole,
+          action: "create",
+          full_name: createDraft.full_name.trim(),
+          email: createDraft.email.trim(),
+          role: createDraft.role,
+          password: createDraft.password,
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to send invite");
-      setInviteMsg(`Invite sent to ${inviteEmail.trim()} — they'll receive an email with a link to join.`);
-      setInviteEmail(""); setInviteName(""); setInviteRole("staff");
+      if (!res.ok || !data.ok) throw new Error(data.error || "Failed to create staff member");
+      setCreateDraft({ full_name: "", email: "", role: "staff", password: "" });
+      setShowCreate(false);
       loadStaff();
     } catch (e) {
-      setError(e.message || "Failed to invite staff member");
+      setCreateError(e.message || "Failed to create staff member");
     } finally {
-      setInviting(false);
+      setCreating(false);
+    }
+  };
+
+  const handleSetPassword = async (staffId, password) => {
+    if (!password) return;
+    setResetSaving((s) => ({ ...s, [staffId]: true }));
+    try {
+      const res = await fetch(STAFF_AUTH_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": STAFF_AUTH_ANON_KEY,
+          "Authorization": `Bearer ${STAFF_AUTH_ANON_KEY}`,
+        },
+        body: JSON.stringify({ action: "set-password", staff_id: staffId, password }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Failed to set password");
+      setResetDraft((d) => { const n = { ...d }; delete n[staffId]; return n; });
+      setResetSaved((s) => ({ ...s, [staffId]: true }));
+      setTimeout(() => setResetSaved((s) => { const n = { ...s }; delete n[staffId]; return n; }), 2000);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setResetSaving((s) => { const n = { ...s }; delete n[staffId]; return n; });
     }
   };
 
@@ -3812,15 +3846,6 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
     } catch (e) { setError(e.message); }
   };
 
-  const sendReset = async (id, email) => {
-    if (!email) return;
-    try {
-      const { error: err } = await sb().auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
-      if (err) throw err;
-      setResetSent((s) => ({ ...s, [id]: true }));
-      setTimeout(() => setResetSent((s) => { const n = { ...s }; delete n[id]; return n; }), 4000);
-    } catch (e) { setError(e.message); }
-  };
 
   const saveEdit = async () => {
     if (!editingId) return;
@@ -3884,15 +3909,15 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
       <div style={{ ...S.card, marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
           <label style={{ ...S.lbl, marginBottom: 0 }}>Staff members</label>
-          <button style={S.sm("primary")} onClick={() => setShowInvite((s) => !s)}>
-            {showInvite ? "Cancel" : "+ Invite staff"}
+          <button style={S.sm("primary")} onClick={() => setShowCreate((s) => !s)}>
+            {showCreate ? "Cancel" : "+ Add staff"}
           </button>
         </div>
 
         {loading ? (
           <div style={{ fontSize: "13px", color: "#b0a090" }}>Loading…</div>
         ) : staffList.length === 0 ? (
-          <div style={{ fontSize: "13px", color: "#b0a090" }}>No staff found. Invite your first team member below.</div>
+          <div style={{ fontSize: "13px", color: "#b0a090" }}>No staff found. Add your first team member below.</div>
         ) : (
           staffList.map((member) => (
             <React.Fragment key={member.id}>
@@ -3921,13 +3946,6 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
                   style={{ fontSize: "11px", fontWeight: "700", color: editingId === member.id ? "#8a7a6a" : "#6b5244", background: editingId === member.id ? "#f0e8de" : "#f5ede4", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
                   {editingId === member.id ? "Cancel" : "Edit"}
                 </button>
-                {member.email && member.active && (
-                  <button
-                    onClick={() => sendReset(member.id, member.email)}
-                    style={{ fontSize: "11px", fontWeight: "700", color: resetSent[member.id] ? "#065f46" : "#6b5244", background: resetSent[member.id] ? "#d1fae5" : "#f5ede4", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", whiteSpace: "nowrap" }}>
-                    {resetSent[member.id] ? "Sent!" : "Reset pw"}
-                  </button>
-                )}
                 <button
                   onClick={() => toggleActive(member.id, member.active)}
                   style={{ fontSize: "11px", fontWeight: "700", color: member.active ? "#dc2626" : "#065f46", background: member.active ? "#fee2e2" : "#d1fae5", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
@@ -4040,6 +4058,28 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
                     style={{ fontSize: "12px", fontWeight: "700", color: "#fff", background: "linear-gradient(135deg,#a0785a,#7a5640)", border: "none", borderRadius: 8, padding: "7px 18px", cursor: editDraft.full_name.trim() ? "pointer" : "not-allowed", opacity: editDraft.full_name.trim() ? 1 : 0.5, fontFamily: "'DM Sans',sans-serif" }}>
                     Save changes
                   </button>
+                  {/* Set password section */}
+                  <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid #e8e0d6" }}>
+                    <label style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", display: "block", marginBottom: 6 }}>Set Password</label>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <input
+                        type="password"
+                        value={resetDraft[member.id] || ""}
+                        onChange={(e) => setResetDraft((d) => ({ ...d, [member.id]: e.target.value }))}
+                        placeholder="New password"
+                        style={{ padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e0d6", fontSize: "12px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box", width: 200 }} />
+                      <button
+                        type="button"
+                        disabled={!resetDraft[member.id] || resetSaving[member.id]}
+                        onClick={() => handleSetPassword(member.id, resetDraft[member.id])}
+                        style={{ fontSize: "12px", fontWeight: "700", color: "#fff", background: "linear-gradient(135deg,#a0785a,#7a5640)", border: "none", borderRadius: 8, padding: "7px 14px", cursor: (resetDraft[member.id] && !resetSaving[member.id]) ? "pointer" : "not-allowed", opacity: (resetDraft[member.id] && !resetSaving[member.id]) ? 1 : 0.5, fontFamily: "'DM Sans',sans-serif", whiteSpace: "nowrap" }}>
+                        {resetSaving[member.id] ? "Saving…" : "Update password"}
+                      </button>
+                      {resetSaved[member.id] && (
+                        <span style={{ fontSize: "12px", color: "#065f46", fontWeight: "700" }}>Saved</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
             </React.Fragment>
@@ -4047,41 +4087,43 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
         )}
       </div>
 
-      {/* Invite form */}
-      {showInvite && (
+      {/* Create staff form */}
+      {showCreate && (
         <div style={{ ...S.card, marginBottom: 14, border: "1px solid #e8d5c0", background: "#fdf9f5" }}>
-          <label style={S.lbl}>Invite a staff member</label>
+          <label style={S.lbl}>Add a staff member</label>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
             <div>
               <label style={S.lbl}>Full name</label>
-              <input value={inviteName} onChange={(e) => setInviteName(e.target.value)}
+              <input value={createDraft.full_name} onChange={(e) => setCreateDraft((d) => ({ ...d, full_name: e.target.value }))}
                 placeholder="Jane Smith" style={S.inp} />
             </div>
             <div>
               <label style={S.lbl}>Email</label>
-              <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)}
+              <input type="email" value={createDraft.email} onChange={(e) => setCreateDraft((d) => ({ ...d, email: e.target.value }))}
                 placeholder="jane@rctmassage.com" style={S.inp} />
             </div>
           </div>
-          <div style={{ marginBottom: 14 }}>
+          <div style={{ marginBottom: 10 }}>
             <label style={S.lbl}>Role</label>
-            <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} style={S.inp}>
+            <select value={createDraft.role} onChange={(e) => setCreateDraft((d) => ({ ...d, role: e.target.value }))} style={S.inp}>
               <option value="staff">Staff — can log communications, view clients</option>
               <option value="manager">Manager — can edit clients, manage outreach</option>
               <option value="admin">Admin — full access including settings</option>
             </select>
           </div>
-          {inviteMsg && (
-            <div style={{ fontSize: "12px", color: "#065f46", background: "#d1fae5", padding: "8px 12px", borderRadius: 8, marginBottom: 10 }}>
-              {inviteMsg}
+          <div style={{ marginBottom: 14 }}>
+            <label style={S.lbl}>Password</label>
+            <input type="password" value={createDraft.password} onChange={(e) => setCreateDraft((d) => ({ ...d, password: e.target.value }))}
+              placeholder="Set a password for this staff member" style={S.inp} />
+          </div>
+          {createError && (
+            <div style={{ fontSize: "12px", color: "#dc2626", background: "#fee2e2", padding: "8px 12px", borderRadius: 8, marginBottom: 10 }}>
+              {createError}
             </div>
           )}
-          <div style={{ fontSize: "11px", color: "#8a7a6a", marginBottom: 12, background: "#f5f0e8", padding: "8px 12px", borderRadius: 8 }}>
-            They'll receive an invitation email with a sign-in link. Once they click it, they can set their password and log in.
-          </div>
-          <button style={{ ...S.btn("primary"), opacity: (inviteEmail.trim() && inviteName.trim()) ? 1 : 0.5 }}
-            onClick={handleInvite} disabled={inviting || !inviteEmail.trim() || !inviteName.trim()}>
-            {inviting ? "Sending invite…" : "Send invite"}
+          <button style={{ ...S.btn("primary"), opacity: (createDraft.full_name.trim() && createDraft.email.trim() && createDraft.password.trim()) ? 1 : 0.5 }}
+            onClick={handleCreate} disabled={creating || !createDraft.full_name.trim() || !createDraft.email.trim() || !createDraft.password.trim()}>
+            {creating ? "Creating…" : "Create staff"}
           </button>
         </div>
       )}
@@ -6185,10 +6227,8 @@ function App() {
       return (
         <LoginScreen
           onLogin={auth.signIn}
-          onForgotPassword={auth.resetPassword}
           error={auth.error}
           loading={auth.loading}
-          noSupabase={false}
         />
       );
     }
