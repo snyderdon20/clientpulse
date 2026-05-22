@@ -4883,7 +4883,7 @@ function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, va
 }
 
 // ─── MOBILE CLIENT SHELL ──────────────────────────────────────────────────────
-function MobileClientShell({ clients, selected, setSelected, filter, setFilter, search, setSearch, tagFilter, setTagFilter, updateClient, templates, onAddClient, supabaseUrl, supabaseAnonKey, usingDB }) {
+function MobileClientShell({ clients, selected, setSelected, filter, setFilter, search, setSearch, tagFilter, setTagFilter, updateClient, templates, onAddClient, supabaseUrl, supabaseAnonKey, usingDB, staffName = "Staff" }) {
   const isMobile = useIsMobile();
   const showDetail = isMobile && selected;
   const showList = !isMobile || !selected;
@@ -4903,7 +4903,7 @@ function MobileClientShell({ clients, selected, setSelected, filter, setFilter, 
           setTagFilter={setTagFilter}
           fullWidth={isMobile}
           onAddClient={onAddClient}
-          staffName={auth.staff?.full_name || "Staff"}
+          staffName={staffName}
         />
       )}
       {(!isMobile || showDetail) && (
@@ -4919,7 +4919,7 @@ function MobileClientShell({ clients, selected, setSelected, filter, setFilter, 
               supabaseUrl={supabaseUrl}
               supabaseAnonKey={supabaseAnonKey}
               usingDB={usingDB}
-              staffName={auth.staff?.full_name || "Staff"}
+              staffName={staffName}
             />
           ) : (
             <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px", color: "#b0a090" }}>
@@ -6296,6 +6296,7 @@ function App() {
             supabaseUrl={supabaseUrl}
             supabaseAnonKey={supabaseAnonKey}
             usingDB={usingDB}
+            staffName={auth.staff?.full_name || "Staff"}
           />
         )}
       </main>
