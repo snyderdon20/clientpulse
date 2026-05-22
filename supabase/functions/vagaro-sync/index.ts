@@ -195,11 +195,17 @@ serve(async (req: Request) => {
   }
 
   // For each Vagaro customerId, fetch customer details and try to match
-  let matched   = 0;
-  let unmatched = 0;
+  let matched        = 0;
+  let alreadyLinked  = 0;
+  let unmatched      = 0;
   const unmatchedSample: string[] = [];
 
   for (const customerId of customerIds) {
+    // Skip if already linked — client was synced via webhook
+    const { data: alreadyDone } = await supabase
+      .from("clients").select("id").eq("vagaro_id", customerId).maybeSingle();
+    if (alreadyDone) { alreadyLinked++; continue; }
+
     const vc = await fetchCustomer(region, accessToken, businessId, customerId);
     if (!vc) continue;
 
@@ -207,40 +213,33 @@ serve(async (req: Request) => {
     const lastName  = str(vc.customerLastName).trim();
     const key = `${firstName.toLowerCase()} ${lastName.toLowerCase()}`.trim();
 
-    // 1. In-memory name map (fast path)
+    // 1. In-memory name map (fast path — only unlinked clients)
     let cp = nameMap.get(key) ?? null;
 
-    // 2. Database name match (handles whitespace differences in stored names)
+    // 2. Database name match
     if (!cp && (firstName || lastName)) {
       const { data: dbMatch } = await supabase
-        .from("clients")
-        .select("id")
-        .ilike("first_name", firstName)
-        .ilike("last_name", lastName)
-        .is("vagaro_id", null)
-        .maybeSingle();
+        .from("clients").select("id")
+        .ilike("first_name", firstName).ilike("last_name", lastName)
+        .is("vagaro_id", null).maybeSingle();
       if (dbMatch) cp = dbMatch as { id: string };
     }
 
     // 3. Email match
     if (!cp && vc.email?.trim()) {
       const { data: emailMatch } = await supabase
-        .from("clients")
-        .select("id")
+        .from("clients").select("id")
         .ilike("email", vc.email.trim())
-        .is("vagaro_id", null)
-        .maybeSingle();
+        .is("vagaro_id", null).maybeSingle();
       if (emailMatch) cp = emailMatch as { id: string };
     }
 
     // 4. Phone match
     if (!cp && vc.mobilePhone?.trim()) {
       const { data: phoneMatch } = await supabase
-        .from("clients")
-        .select("id")
+        .from("clients").select("id")
         .ilike("phone", vc.mobilePhone.trim())
-        .is("vagaro_id", null)
-        .maybeSingle();
+        .is("vagaro_id", null).maybeSingle();
       if (phoneMatch) cp = phoneMatch as { id: string };
     }
 
@@ -251,9 +250,7 @@ serve(async (req: Request) => {
         updated_at:    new Date().toISOString(),
       }).eq("id", cp.id);
 
-      // Retroactively link any unlinked appointments in webhook_log
       await linkPendingAppointments(supabase, customerId, cp.id);
-
       nameMap.delete(key);
       matched++;
     } else {
@@ -264,12 +261,13 @@ serve(async (req: Request) => {
 
   return json({
     success: true,
-    scanned: customerIds.size,
+    scanned:       customerIds.size,
+    alreadyLinked,
     matched,
     unmatched,
     unmatchedSample,
     note: unmatched > 0
-      ? "Unmatched customers have no corresponding client in ClientPulse (name mismatch or not yet imported)."
+      ? "These customers have no name/email/phone match in ClientPulse. They may use a different name or have not been imported yet."
       : undefined,
   });
 });
