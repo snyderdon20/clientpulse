@@ -3751,7 +3751,7 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB, currentUserRoles 
       };
 
       for (const row of txRows || []) {
-        add(row.vagaro_service_provider_id, row.created_by || null);
+        add(row.vagaro_service_provider_id, null);
       }
 
       for (const wh of whRows || []) {
@@ -4062,8 +4062,7 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB, currentUserRoles 
                                 onMouseOver={(e) => e.currentTarget.style.background = "#faf8f5"}
                                 onMouseOut={(e) => e.currentTarget.style.background = "none"}
                               >
-                                <span style={{ fontWeight: "700", color: "#a0785a" }}>{ph.id}</span>
-                                {ph.name && <span style={{ color: "#6a5a4a", marginLeft: 8 }}>— {ph.name}</span>}
+                                <span style={{ fontWeight: "700", color: "#2e2418" }}>{ph.name || ph.id}</span>
                               </button>
                             ))}
                             <button type="button" onClick={() => setProviderHints(null)}
@@ -5296,7 +5295,18 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
 
   // Helper: get session count for a staff member (auto from transactions if provider ID exists, else manual)
   const getStaffSessions = (staff) => {
-    if (staff.vagaro_provider_id) return sessionCounts[staff.vagaro_provider_id] || 0;
+    if (staff.vagaro_provider_id) {
+      const byId = sessionCounts[staff.vagaro_provider_id];
+      if (byId !== undefined) return byId;
+    }
+    // Fallback: CSV-imported transactions store the provider's display name in
+    // vagaro_service_provider_id rather than an encoded ID, so try matching by
+    // staff full name when the stored provider ID doesn't match directly.
+    if (staff.full_name) {
+      const target = staff.full_name.toLowerCase().trim();
+      const entry = Object.entries(sessionCounts).find(([k]) => k.toLowerCase().trim() === target);
+      if (entry) return entry[1];
+    }
     return weeklyGoals[staff.id]?.sessions || 0;
   };
 
