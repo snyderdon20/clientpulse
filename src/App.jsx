@@ -5070,7 +5070,7 @@ function SettingsPage({ webhookLog, templates, onSaveTemplate, gmailClientId, se
 }
 
 // ─── MOBILE CLIENT SHELL ──────────────────────────────────────────────────────
-function MobileClientShell({ clients, selected, setSelected, filter, setFilter, search, setSearch, tagFilter, setTagFilter, updateClient, templates, onAddClient, supabaseUrl, supabaseAnonKey, usingDB, staffName = "Staff" }) {
+function MobileClientShell({ clients, selected, setSelected, filter, setFilter, search, setSearch, tagFilter, setTagFilter, updateClient, templates, onAddClient, supabaseUrl, supabaseAnonKey, usingDB, staffName = "Staff", onSaveTask }) {
   const isMobile = useIsMobile();
   const showDetail = isMobile && selected;
   const showList = !isMobile || !selected;
@@ -5107,7 +5107,7 @@ function MobileClientShell({ clients, selected, setSelected, filter, setFilter, 
               supabaseAnonKey={supabaseAnonKey}
               usingDB={usingDB}
               staffName={staffName}
-              onSaveTask={handleSaveTask}
+              onSaveTask={onSaveTask}
             />
           ) : (
             <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px", color: "#b0a090" }}>
@@ -6616,6 +6616,7 @@ function App() {
             supabaseAnonKey={supabaseAnonKey}
             usingDB={usingDB}
             staffName={auth.staff?.full_name || "Staff"}
+            onSaveTask={handleSaveTask}
           />
         )}
       </main>
