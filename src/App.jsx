@@ -4419,9 +4419,8 @@ function TransactionCSVImport({ supabaseUrl, supabaseAnonKey }) {
   );
 }
 
-function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, vagaroRegion, setVagaroRegion, webhookLog, templates, onSaveTemplate, gmailClientId, setGmailClientId, supabaseUrl, setSupabaseUrl, supabaseAnonKey, setSupabaseAnonKey, usingDB, dbError, onAddClient, onFindDuplicates }) {
+function SettingsPage({ webhookLog, templates, onSaveTemplate, gmailClientId, setGmailClientId, supabaseUrl, setSupabaseUrl, supabaseAnonKey, setSupabaseAnonKey, usingDB, dbError, onAddClient, onFindDuplicates }) {
   const [activeTab, setActiveTab] = useState("database");
-  const [showSecret, setShowSecret] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [testing, setTesting] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -4452,7 +4451,7 @@ function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, va
   const testConnection = async () => {
     setTesting(true);
     setTestResult(null);
-    const result = await testVagaroConnection(supabaseUrl, vagaroRegion, clientId, clientSecret);
+    const result = await testVagaroConnection(supabaseUrl);
     setTestResult(result);
     setTesting(false);
   };
@@ -4589,45 +4588,33 @@ function SettingsPage({ clientId, setClientId, clientSecret, setClientSecret, va
       {/* API credentials */}
       <div style={{ ...S.card, marginBottom: "14px" }}>
         <div style={{ fontSize: "14px", fontWeight: "700", color: "#2e2418", marginBottom: 3 }}>Vagaro API credentials</div>
-        <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 16 }}>
-          Find these in Vagaro: <strong>Settings → Developers → APIs &amp; Webhooks</strong>
+        <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 14 }}>
+          Credentials are stored as <strong>Supabase secrets</strong> — not in the browser. Run this command once from your terminal, then click Test Connection to verify.
+          Find your values in Vagaro: <strong>Settings → Developers → APIs &amp; Webhooks</strong>.
         </div>
-        <label style={S.lbl}>Region</label>
-        <input
-          type="text"
-          value={vagaroRegion}
-          onChange={(e) => { setVagaroRegion(e.target.value); localStorage.setItem("cp_vagaro_region", e.target.value); }}
-          placeholder="e.g. us04  (from your Vagaro URL subdomain)"
-          style={{ ...S.inp, fontFamily: "monospace", marginBottom: 12 }}
-        />
-        <label style={S.lbl}>Client ID</label>
-        <input
-          type="text"
-          value={clientId}
-          onChange={(e) => { setClientId(e.target.value); localStorage.setItem("cp_vagaro_client_id", e.target.value); }}
-          placeholder="Your Vagaro Client ID"
-          style={{ ...S.inp, fontFamily: "monospace", marginBottom: 12 }}
-        />
-        <label style={S.lbl}>Client Secret Key</label>
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          <input
-            type={showSecret ? "text" : "password"}
-            value={clientSecret}
-            onChange={(e) => { setClientSecret(e.target.value); localStorage.setItem("cp_vagaro_client_secret_key", e.target.value); }}
-            placeholder="Your Vagaro Client Secret Key"
-            style={{ ...S.inp, fontFamily: "monospace", flex: 1 }}
-          />
-          <button style={S.sm("ghost")} onClick={() => setShowSecret((s) => !s)}>
-            {showSecret ? "Hide" : "Show"}
+        <div style={{ position: "relative", marginBottom: 14 }}>
+          <pre style={{ background: "#1e1e2e", color: "#cdd6f4", borderRadius: 10, padding: "14px 16px", fontSize: "11px", fontFamily: "monospace", lineHeight: 1.7, margin: 0, overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{`supabase secrets set \\
+  VAGARO_CLIENT_ID=your_client_id \\
+  VAGARO_CLIENT_SECRET_KEY=your_secret_key \\
+  VAGARO_REGION=us04 \\
+  --project-ref dewsznqxagzahtkpriuk`}</pre>
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(`supabase secrets set \\\n  VAGARO_CLIENT_ID=your_client_id \\\n  VAGARO_CLIENT_SECRET_KEY=your_secret_key \\\n  VAGARO_REGION=us04 \\\n  --project-ref dewsznqxagzahtkpriuk`).catch(() => {});
+              setTestResult({ ok: null, msg: "Command copied — paste into your terminal and replace the placeholder values." });
+            }}
+            style={{ position: "absolute", top: 10, right: 10, fontSize: "11px", fontWeight: "700", color: "#cdd6f4", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}
+          >
+            Copy
           </button>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <button style={S.btn("ghost")} onClick={testConnection} disabled={testing}>
-            {testing ? "Testing..." : "Test connection"}
+          <button style={S.btn("ghost")} onClick={testConnection} disabled={testing || !supabaseUrl}>
+            {testing ? "Testing…" : "Test connection"}
           </button>
           {testResult && (
-            <span style={{ fontSize: "12px", fontWeight: "600", color: testResult.ok ? "#0f7a4a" : "#991b1b" }}>
-              {testResult.ok ? "✓ Connected" : "✗ Failed"}: {testResult.msg}
+            <span style={{ fontSize: "12px", fontWeight: "600", color: testResult.ok === true ? "#0f7a4a" : testResult.ok === false ? "#991b1b" : "#7a5640" }}>
+              {testResult.ok === true ? "✓ Connected" : testResult.ok === false ? "✗ Failed" : "ℹ"}: {testResult.msg}
             </span>
           )}
         </div>
@@ -5895,9 +5882,6 @@ function App() {
   const [search, setSearch]             = useState("");
   const [globalSearch, setGlobalSearch] = useState("");
   const [showGS, setShowGS]             = useState(false);
-  const [clientId, setClientId]             = useState(() => localStorage.getItem("cp_vagaro_client_id") || "");
-  const [clientSecret, setClientSecret]     = useState(() => localStorage.getItem("cp_vagaro_client_secret_key") || "");
-  const [vagaroRegion, setVagaroRegion]     = useState(() => localStorage.getItem("cp_vagaro_region") || "");
   const [gmailClientId, setGmailClientId] = useState(() => localStorage.getItem("cp_gmail_client_id") || "");
   const [supabaseUrl,     setSupabaseUrl]     = useState(() => "https://dewsznqxagzahtkpriuk.supabase.co");
   const [supabaseAnonKey, setSupabaseAnonKey] = useState(() => "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRld3N6bnF4YWd6YWh0a3ByaXVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMDQ5MTcsImV4cCI6MjA5NDc4MDkxN30.PdVejzd-Mi3utM9xF7s2i3AU7UeBgNBE71eDFhjmteo");
@@ -6252,9 +6236,6 @@ function App() {
         {tab === "sales"     && <SalesDashboard supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} />}
         {tab === "settings"  && (
           <SettingsPage
-            clientId={clientId} setClientId={setClientId}
-            clientSecret={clientSecret} setClientSecret={setClientSecret}
-            vagaroRegion={vagaroRegion} setVagaroRegion={setVagaroRegion}
             webhookLog={WEBHOOK_LOG}
             templates={templates} onSaveTemplate={saveTemplate}
             gmailClientId={gmailClientId} setGmailClientId={(id) => { setGmailClientId(id); }}

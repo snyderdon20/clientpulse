@@ -53,30 +53,19 @@ function extractErrorMsg(err: unknown, fallback = "Unknown error"): string {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Validates Vagaro V2 credentials by asking the edge function to call
- *   POST /{region}/api/v2/merchants/generate-access-token
- * server-side (bypasses the IP allowlist that blocks browser requests).
- *
- * @param supabaseUrl     Your project's Supabase URL.
- * @param region          Your Vagaro region, e.g. "us04".
- * @param clientId        From Vagaro Developer Settings.
- * @param clientSecretKey From Vagaro Developer Settings.
+ * Tests the Vagaro V2 connection using credentials stored as Supabase secrets.
+ * No credentials are sent from the browser — the edge function reads them
+ * from VAGARO_CLIENT_ID, VAGARO_CLIENT_SECRET_KEY, VAGARO_REGION env vars.
  */
 export async function testVagaroConnection(
   supabaseUrl: string,
-  region: string,
-  clientId: string,
-  clientSecretKey: string,
 ): Promise<TestConnectionResult> {
-  if (!supabaseUrl)     return { ok: false, msg: "Supabase URL is not configured." };
-  if (!region)          return { ok: false, msg: "Vagaro region is required (e.g. \"us04\")." };
-  if (!clientId)        return { ok: false, msg: "Client ID is required." };
-  if (!clientSecretKey) return { ok: false, msg: "Client Secret Key is required." };
+  if (!supabaseUrl) return { ok: false, msg: "Supabase URL is not configured." };
 
   try {
     const { data } = await makeEdgeClient(supabaseUrl).post<TestConnectionResult>(
       "/vagaro-sync",
-      { test: true, region, clientId, clientSecretKey },
+      { test: true },
     );
     return { ok: Boolean(data.ok), msg: data.msg ?? (data.ok ? "Connected." : "Failed.") };
   } catch (err) {

@@ -94,23 +94,25 @@ serve(async (req: Request) => {
 
   const reqBody = await req.json().catch(() => ({})) as Record<string, unknown>;
 
-  // ── Test mode: validate credentials from the Settings page ────────────────
+  // ── Test mode: validate credentials stored as Supabase secrets ───────────
   if (reqBody.test === true) {
-    const region          = str(reqBody.region);
-    const clientId        = str(reqBody.clientId);
-    const clientSecretKey = str(reqBody.clientSecretKey);
+    const region          = Deno.env.get("VAGARO_REGION");
+    const clientId        = Deno.env.get("VAGARO_CLIENT_ID");
+    const clientSecretKey = Deno.env.get("VAGARO_CLIENT_SECRET_KEY");
 
     if (!region || !clientId || !clientSecretKey) {
-      return json({ ok: false, msg: "region, clientId, and clientSecretKey are required." });
+      return json({
+        ok: false,
+        msg: "Secrets not set yet. Run: supabase secrets set VAGARO_CLIENT_ID=… VAGARO_CLIENT_SECRET_KEY=… VAGARO_REGION=… --project-ref dewsznqxagzahtkpriuk",
+      });
     }
     try {
       await getAccessToken(region, clientId, clientSecretKey);
       return json({ ok: true, msg: "Credentials verified — Vagaro V2 API connection successful." });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      // Surface friendly messages for common errors
       if (msg.includes("401") || msg.includes("Unauthorized")) {
-        return json({ ok: false, msg: "Invalid credentials — check your Client ID and Client Secret Key." });
+        return json({ ok: false, msg: "Invalid credentials — check your Client ID and Client Secret Key in Supabase secrets." });
       }
       return json({ ok: false, msg: `Connection failed: ${msg}` });
     }
