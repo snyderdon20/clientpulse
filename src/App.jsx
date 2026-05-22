@@ -3761,7 +3761,7 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
     setLoading(true);
     try {
       // Get staff profiles
-      const { data: staffRows, error: sErr } = await sb().from("staff").select("*").order("created_at");
+      const { data: staffRows, error: sErr } = await sb().from("staff").select("*").eq("is_hidden", false).order("created_at");
       if (sErr) throw sErr;
 
       // Get auth users via admin — note: anon key can't list users
@@ -6024,7 +6024,7 @@ function LoginScreen({ onLogin, error, loading }) {
               )}
               <div style={{ marginBottom: 12 }}>
                 <label style={{ fontSize: "11px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Email</label>
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                <input type="text" value={email} onChange={(e) => setEmail(e.target.value)}
                   placeholder="your@email.com" required autoFocus
                   style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #e8e0d6", fontSize: "14px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
               </div>
