@@ -6,6 +6,10 @@ on:
       - main
     paths:
       - 'supabase/functions/**'
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   deploy:
@@ -17,12 +21,27 @@ jobs:
         with:
           version: latest
 
-      - name: Deploy all edge functions
+      - name: Deploy vagaro-webhook (no JWT verification)
         run: |
-          for dir in supabase/functions/*/; do
-            fn=$(basename "$dir")
+          supabase functions deploy vagaro-webhook \
+            --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} \
+            --no-verify-jwt
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Deploy vagaro-sync
+        run: |
+          supabase functions deploy vagaro-sync \
+            --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Deploy remaining functions
+        run: |
+          for fn in merge-clients staff-delete staff-invite; do
             echo "Deploying $fn..."
-            supabase functions deploy "$fn" --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+            supabase functions deploy "$fn" \
+              --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
           done
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
