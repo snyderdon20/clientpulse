@@ -3887,8 +3887,8 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
     } catch (e) { setError(e.message); }
   };
 
-  const ROLES = ["admin", "manager", "staff"];
-  const ROLE_COLORS = { admin: { bg: "#fee2e2", color: "#991b1b" }, manager: { bg: "#fef3c7", color: "#92400e" }, staff: { bg: "#dbeafe", color: "#1d5fa8" } };
+  const ROLES = ["owner", "admin", "manager", "staff"];
+  const ROLE_COLORS = { owner: { bg: "#fdf4e7", color: "#a0785a" }, admin: { bg: "#fee2e2", color: "#991b1b" }, manager: { bg: "#fef3c7", color: "#92400e" }, staff: { bg: "#dbeafe", color: "#1d5fa8" } };
 
   return (
     <div>
@@ -5560,15 +5560,19 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
             const rangeLabel  = sessLow === sessHigh ? `${sessLow}` : `${sessLow}–${sessHigh}`;
             const atSessGoal  = sessions >= sessLow;
             const atRebook    = rebookGoal && rebookP >= rebookGoal;
-            const displayRole = staff.sales_display_role || staff.role || "";
+            const isOwner     = staff.role === "owner";
+            const displayRole = staff.sales_display_role || (isOwner ? "Owner" : staff.role) || "";
             const firstName   = (staff.full_name || "Staff").split(" ")[0];
 
             return (
-              <div key={staff.id} style={{ ...S.card, padding: "20px" }}>
+              <div key={staff.id} style={{ ...S.card, padding: "20px", ...(isOwner ? { border: "2px solid #a0785a" } : {}) }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
                   <div>
-                    <div style={{ fontSize: "16px", fontWeight: "800", color: "#1a120b" }}>{firstName}</div>
-                    {displayRole && <div style={{ fontSize: "10px", color: "#8a7a6a", marginTop: 1 }}>{displayRole}</div>}
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{ fontSize: "16px", fontWeight: "800", color: "#1a120b" }}>{firstName}</div>
+                      {isOwner && <span style={{ fontSize: "10px", fontWeight: "700", color: "#a0785a", background: "#fdf4e7", border: "1px solid #e8d8c4", borderRadius: 6, padding: "1px 6px" }}>Owner</span>}
+                    </div>
+                    {displayRole && !isOwner && <div style={{ fontSize: "10px", color: "#8a7a6a", marginTop: 1 }}>{displayRole}</div>}
                   </div>
                   <Ring value={animated ? sessP : 0} size={64} stroke={6} color={color} bg="#e8e0d6">
                     <div style={{ textAlign: "center" }}>
