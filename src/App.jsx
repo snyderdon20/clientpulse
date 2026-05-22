@@ -364,14 +364,15 @@ const CHAN_TYPE = {
   "Email": "comm.email",
   "Mail": "comm.mail",
   "In-Person": "comm.inperson",
+  "System": "comm.system",
 };
 
 // ─── CHANNELS / CATEGORIES / OUTCOMES ────────────────────────────────────────
 const CHANNELS = ["Phone", "Text/SMS", "Email", "Mail", "In-Person"];
 
 const CHANNEL_CATEGORIES = {
-  "Phone":     ["Rebooking Outreach","Post-Visit Follow-Up","No-Show Follow-Up","New Inquiry","Complaint / Concern","General"],
-  "Text/SMS":  ["Appointment Reminder","Rebooking Outreach","Post-Visit Follow-Up","Birthday / Special Offer","Promotional Offer","General"],
+  "Phone":     ["Rebooking Outreach","Post-Visit Follow-Up","No-Show Follow-Up","New Inquiry","Red Light Therapy","Complaint / Concern","General"],
+  "Text/SMS":  ["Appointment Reminder","Rebooking Outreach","Post-Visit Follow-Up","Birthday / Special Offer","Promotional Offer","Red Light Therapy","Prenatal Package","General"],
   "Email":     ["Appointment Reminder","Rebooking Outreach","Post-Visit Follow-Up","Birthday / Special Offer","Promotional Offer","Newsletter","General"],
   "Mail":      ["Birthday / Special Offer","Promotional Offer","Thank You Card","General"],
   "In-Person": ["Check-In","Post-Visit Chat","Concern Raised","General"],
@@ -1412,12 +1413,15 @@ function LogModal({ client, templates, onClose, onSave, preset, staffName = "Sta
   };
 
   const handleSave = () => {
-    if (!notes.trim()) return;
+    const notesRequired = noteMode || channel !== "In-Person";
+    if (notesRequired && !notes.trim()) return;
     if (noteMode) {
       onSave(mkEvent("notes.updated", notes, { by: staff }));
     } else {
-      const type = CHAN_TYPE[channel] || "comm.phone";
-      const detail = `${category} · Outcome: ${outcome} · Note: ${notes}`;
+      const type = CHAN_TYPE[channel] || "comm.other";
+      const detail = notes.trim()
+        ? `${category} · Outcome: ${outcome} · Note: ${notes}`
+        : `${category} · Outcome: ${outcome}`;
       onSave(mkEvent(type, detail, { by: staff }));
     }
   };
@@ -1606,7 +1610,7 @@ function LogModal({ client, templates, onClose, onSave, preset, staffName = "Sta
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button style={S.btn("ghost")} onClick={onClose}>Cancel</button>
           {!gmailSent && (
-            <button style={{ ...S.btn("primary"), opacity: notes.trim() ? 1 : 0.5 }} onClick={handleSave}>
+            <button style={{ ...S.btn("primary"), opacity: (channel === "In-Person" || notes.trim()) ? 1 : 0.5 }} onClick={handleSave}>
               {channel === "Email" && gmail.isConnected ? "Log only" : "Save log"}
             </button>
           )}
@@ -5889,7 +5893,8 @@ async function dbUpdateClient(url, key, id, updates) {
   if (Object.keys(m).length > 0) { const { error } = await sb.from('clients').update(m).eq('id', id); if (error) throw error; }
   if (updates.history?.length > 0) {
     const e = updates.history[updates.history.length - 1];
-    await sb.from('history').insert({ id: e.id||uid(), client_id: id, type: e.type, detail: e.detail, by: e.by||'System', ts: e.ts||Date.now(), source: 'manual', direction: e.type.startsWith('comm.') ? 'outbound' : 'internal' }).catch(console.warn);
+    const direction = e.type === 'comm.inperson' ? 'in-person' : e.type.startsWith('comm.') ? 'outbound' : 'internal';
+    await sb.from('history').insert({ id: e.id||uid(), client_id: id, type: e.type, detail: e.detail, by: e.by||'System', ts: e.ts||Date.now(), source: 'manual', direction }).catch(console.warn);
   }
 }
 
