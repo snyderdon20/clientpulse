@@ -1,11 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// Actual Vagaro webhook envelope (confirmed from live traffic):
+// Confirmed Vagaro webhook envelope (from live traffic):
 // {
-//   Id, Type: "customer", Action: "created"|"updated",
-//   payload: { customerId, customerFirstName, customerLastName, email,
-//              mobilePhone, dayPhone, nightPhone, streetAddress, city,
-//              regionCode, postalCode, createdDate, ... },
+//   Id, Type: "customer"|"appointment"|"transaction",
+//   Action: "created"|"updated"|"cancelled"|...,
+//   payload: { ... },
 //   CreatedDate
 // }
 
@@ -16,111 +15,218 @@ const CORS = {
 
 const str = (v: unknown): string => (v != null ? String(v) : "");
 const orNull = (v: unknown) => str(v) || null;
+const num = (v: unknown) => (v != null && v !== "" ? Number(v) : null);
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+
+  let body: Record<string, unknown>;
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
-
-    const body = await req.json();
-
-    // Derive event key from Type+Action (real format) with fallback to legacy Event field
-    const type   = str(body.Type   ?? body.type   ?? "");
-    const action = str(body.Action ?? body.action ?? "");
-    const event  = type && action ? `${type}.${action}` : str(body.Event ?? body.event ?? "");
-
-    // Payload is lowercase "payload" in real Vagaro; legacy used "Data"
-    const data: Record<string, unknown> = (body.payload ?? body.Payload ?? body.Data ?? body.data ?? {}) as Record<string, unknown>;
-
-    if (event === "customer.created") {
-      const vagaro_id = orNull(data.customerId ?? data.CustomerId);
-      if (!vagaro_id) {
-        return json({ error: "Missing customerId" }, 400);
-      }
-
-      // Idempotency — ignore if we already have this customer
-      const { data: existing } = await supabase
-        .from("clients").select("id").eq("vagaro_id", vagaro_id).maybeSingle();
-      if (existing) return json({ status: "already_exists", id: existing.id });
-
-      const firstName = str(data.customerFirstName ?? data.FirstName ?? data.firstName);
-      const lastName  = str(data.customerLastName  ?? data.LastName  ?? data.lastName);
-      if (!firstName && !lastName) return json({ error: "Missing customer name" }, 400);
-
-      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Denver" });
-
-      const { data: inserted, error } = await supabase.from("clients").insert({
-        vagaro_id,
-        vagaro_synced: true,
-        first_name:   firstName,
-        last_name:    lastName,
-        email:        orNull(data.email        ?? data.Email),
-        phone:        orNull(data.mobilePhone  ?? data.MobilePhone ?? data.dayPhone ?? data.Phone),
-        birthday:     orNull(data.birthday     ?? data.Birthday),
-        address:      orNull(data.streetAddress ?? data.Address1   ?? data.address),
-        city:         orNull(data.city         ?? data.City),
-        state:        orNull(data.regionCode   ?? data.State       ?? data.state),
-        zip:          orNull(data.postalCode   ?? data.Zip         ?? data.zip),
-        customer_since: orNull(data.createdDate?.toString().split("T")[0]) ?? today,
-        avg_visit_interval_days: 30,
-        waitlisted: false,
-        tags: [],
-        golden_nuggets: [],
-      }).select("id").single();
-
-      if (error) throw error;
-
-      await supabase.from("history").insert({
-        client_id: inserted.id,
-        type: "client.created",
-        detail: "New customer created in Vagaro — synced automatically",
-        by: "Vagaro",
-        ts: Date.now(),
-        source: "vagaro",
-        direction: "internal",
-      });
-
-      return json({ status: "created", id: inserted.id });
-    }
-
-    if (event === "customer.updated") {
-      const vagaro_id = orNull(data.customerId ?? data.CustomerId);
-      if (!vagaro_id) return json({ error: "Missing customerId" }, 400);
-
-      const updates: Record<string, unknown> = {};
-      const maybe = (col: string, ...vals: unknown[]) => {
-        const v = vals.find((x) => x != null && str(x) !== "");
-        if (v !== undefined) updates[col] = str(v);
-      };
-
-      maybe("first_name", data.customerFirstName, data.FirstName);
-      maybe("last_name",  data.customerLastName,  data.LastName);
-      maybe("email",      data.email,  data.Email);
-      maybe("phone",      data.mobilePhone, data.MobilePhone, data.dayPhone);
-      maybe("address",    data.streetAddress, data.Address1);
-      maybe("city",       data.city,  data.City);
-      maybe("state",      data.regionCode, data.State);
-      maybe("zip",        data.postalCode, data.Zip);
-
-      if (Object.keys(updates).length > 0) {
-        const { error } = await supabase.from("clients").update(updates).eq("vagaro_id", vagaro_id);
-        if (error) throw error;
-      }
-
-      return json({ status: "updated" });
-    }
-
-    return json({ status: "ignored", event });
-
-  } catch (err) {
-    console.error("vagaro-webhook error:", err);
-    return json({ error: String(err) }, 500);
+    body = await req.json();
+  } catch {
+    return json({ error: "Invalid JSON" }, 400);
   }
+
+  const type   = str(body.Type   ?? body.type   ?? "");
+  const action = str(body.Action ?? body.action ?? "");
+  const event  = type && action ? `${type}.${action}` : str(body.Event ?? body.event ?? "unknown");
+  const data   = (body.payload ?? body.Payload ?? body.Data ?? body.data ?? {}) as Record<string, unknown>;
+
+  // Log every received webhook immediately — this feeds the Settings log
+  // and gives vagaro-sync the customerId values it needs for matching.
+  await supabase.from("webhook_log").insert({
+    source: "vagaro",
+    event_type: event,
+    payload: body,
+  }).then(({ error }) => {
+    if (error) console.error("webhook_log insert:", error.message);
+  });
+
+  try {
+    if (type === "customer") {
+      await handleCustomer(supabase, event, data);
+    } else if (type === "appointment") {
+      await handleAppointment(supabase, event, data);
+    }
+    // transaction and other types: logged above, no further action needed yet
+  } catch (err) {
+    console.error(`Error processing ${event}:`, err);
+    // Update the log row with the error so it shows in Settings
+    await supabase.from("webhook_log")
+      .update({ error: String(err) })
+      .eq("source", "vagaro")
+      .eq("event_type", event)
+      .order("received_at", { ascending: false })
+      .limit(1);
+  }
+
+  return json({ received: true, event });
 });
+
+// ─── Customer handler ─────────────────────────────────────────────────────────
+
+async function handleCustomer(
+  sb: ReturnType<typeof createClient>,
+  event: string,
+  data: Record<string, unknown>,
+) {
+  const vagaro_id = orNull(data.customerId ?? data.CustomerId);
+  if (!vagaro_id) return;
+
+  if (event === "customer.created") {
+    const { data: existing } = await sb
+      .from("clients").select("id").eq("vagaro_id", vagaro_id).maybeSingle();
+    if (existing) return; // idempotent
+
+    const firstName = str(data.customerFirstName ?? data.FirstName ?? data.firstName);
+    const lastName  = str(data.customerLastName  ?? data.LastName  ?? data.lastName);
+    if (!firstName && !lastName) return;
+
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Denver" });
+
+    const { data: inserted, error } = await sb.from("clients").insert({
+      vagaro_id,
+      vagaro_synced: true,
+      first_name:   firstName,
+      last_name:    lastName,
+      email:        orNull(data.email        ?? data.Email),
+      phone:        orNull(data.mobilePhone  ?? data.MobilePhone ?? data.dayPhone ?? data.Phone),
+      birthday:     orNull(data.birthday     ?? data.Birthday),
+      address:      orNull(data.streetAddress ?? data.Address1  ?? data.address),
+      city:         orNull(data.city         ?? data.City),
+      state:        orNull(data.regionCode   ?? data.State      ?? data.state),
+      zip:          orNull(data.postalCode   ?? data.Zip        ?? data.zip),
+      customer_since: orNull(data.createdDate?.toString().split("T")[0]) ?? today,
+      avg_visit_interval_days: 30,
+      waitlisted: false,
+      tags: [],
+      golden_nuggets: [],
+    }).select("id").single();
+
+    if (error) throw error;
+
+    await sb.from("history").insert({
+      client_id: inserted.id,
+      type: "client.created",
+      detail: "New customer created in Vagaro — synced automatically",
+      by: "Vagaro",
+      ts: Date.now(),
+      source: "vagaro",
+      direction: "internal",
+    });
+
+  } else if (event === "customer.updated") {
+    const updates: Record<string, unknown> = {};
+    const maybe = (col: string, ...vals: unknown[]) => {
+      const v = vals.find((x) => x != null && str(x) !== "");
+      if (v !== undefined) updates[col] = str(v);
+    };
+    maybe("first_name", data.customerFirstName, data.FirstName);
+    maybe("last_name",  data.customerLastName,  data.LastName);
+    maybe("email",      data.email,  data.Email);
+    maybe("phone",      data.mobilePhone, data.MobilePhone, data.dayPhone);
+    maybe("address",    data.streetAddress, data.Address1);
+    maybe("city",       data.city,  data.City);
+    maybe("state",      data.regionCode, data.State);
+    maybe("zip",        data.postalCode, data.Zip);
+
+    if (Object.keys(updates).length > 0) {
+      const { error } = await sb.from("clients").update(updates).eq("vagaro_id", vagaro_id);
+      if (error) throw error;
+    }
+  }
+}
+
+// ─── Appointment handler ──────────────────────────────────────────────────────
+
+async function handleAppointment(
+  sb: ReturnType<typeof createClient>,
+  event: string,
+  data: Record<string, unknown>,
+) {
+  const vagaro_customer_id = orNull(data.customerId ?? data.CustomerId);
+  const vagaro_appt_id     = orNull(data.appointmentId ?? data.AppointmentId ?? data.Id);
+  if (!vagaro_customer_id) return;
+
+  // Resolve client by vagaro_id
+  const { data: client } = await sb
+    .from("clients").select("id").eq("vagaro_id", vagaro_customer_id).maybeSingle();
+  if (!client) return; // Customer not yet in ClientPulse — sync will catch them later
+
+  // Parse date/time from startDateTime or separate fields
+  const startRaw = str(data.startDateTime ?? data.StartDateTime ?? data.startDate ?? data.StartDate ?? "");
+  const apptDate = startRaw ? startRaw.split("T")[0] : null;
+  const apptTime = startRaw?.includes("T") ? startRaw.split("T")[1]?.slice(0, 5) : orNull(data.startTime ?? data.StartTime);
+
+  const statusMap: Record<string, string> = {
+    confirmed: "scheduled", pending: "scheduled",
+    "checked in": "checked-in", checkedin: "checked-in",
+    completed: "completed", cancelled: "cancelled", canceled: "cancelled",
+    "no show": "no-show", noshow: "no-show",
+  };
+  const rawStatus = str(data.status ?? data.Status ?? "").toLowerCase();
+  const status = statusMap[rawStatus] ??
+    (event === "appointment.cancelled" ? "cancelled" :
+     event === "appointment.completed" ? "completed" :
+     event === "appointment.checkedin" ? "checked-in" : "scheduled");
+
+  const service   = orNull(data.serviceName    ?? data.ServiceName   ?? data.service);
+  const therapist = orNull(data.providerName   ?? data.ProviderName  ?? data.serviceProviderName ?? data.therapist);
+  const duration  = num(data.duration ?? data.Duration);
+
+  // Upsert appointment so re-deliveries are idempotent
+  if (apptDate && vagaro_appt_id) {
+    const { error } = await sb.from("appointments").upsert({
+      vagaro_appt_id,
+      client_id: client.id,
+      date:      apptDate,
+      time:      apptTime ?? null,
+      service:   service  ?? "Appointment",
+      duration:  duration ?? null,
+      therapist: therapist ?? null,
+      status,
+    }, { onConflict: "vagaro_appt_id" });
+    if (error) console.error("appointment upsert:", error.message);
+  }
+
+  // Log to client history
+  const histType: Record<string, string> = {
+    "appointment.created":   "appt.scheduled",
+    "appointment.updated":   "appt.rescheduled",
+    "appointment.cancelled": "appt.cancelled",
+    "appointment.completed": "appt.completed",
+    "appointment.checkedin": "appt.checkin",
+    "appointment.noshow":    "appt.noshow",
+  };
+  const detail = [
+    event.replace("appointment.", "").replace(/^\w/, (c) => c.toUpperCase()),
+    service,
+    apptDate ? new Date(apptDate + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null,
+    apptTime ? formatTime(apptTime) : null,
+  ].filter(Boolean).join(" · ");
+
+  await sb.from("history").insert({
+    client_id: client.id,
+    type: histType[event] ?? "appt.scheduled",
+    detail,
+    by: "Vagaro",
+    ts: Date.now(),
+    source: "vagaro",
+    direction: "internal",
+  });
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatTime(t: string): string {
+  const [h, m] = t.split(":").map(Number);
+  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}`;
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
