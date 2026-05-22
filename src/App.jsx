@@ -3702,8 +3702,52 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
   const [editingId, setEditingId]       = useState(null);
   const [editDraft, setEditDraft]       = useState({});
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [providerHints, setProviderHints]   = useState(null);  // null=idle, []=loading done
+  const [loadingHints,  setLoadingHints]    = useState(false);
 
   const sb = () => getSB(supabaseUrl, supabaseAnonKey);
+
+  const discoverProviders = async () => {
+    setLoadingHints(true);
+    try {
+      const client = sb();
+      // distinct provider IDs from transactions
+      const { data: txRows } = await client
+        .from("transactions")
+        .select("vagaro_service_provider_id")
+        .not("vagaro_service_provider_id", "is", null);
+
+      // appointment webhooks — payloads often carry provider name
+      const { data: whRows } = await client
+        .from("webhook_log")
+        .select("event_type,payload")
+        .like("event_type", "appointment%")
+        .limit(500);
+
+      const map = {};
+      for (const row of txRows || []) {
+        const id = row.vagaro_service_provider_id;
+        if (id) map[id] = map[id] || { id, names: new Set() };
+      }
+      for (const wh of whRows || []) {
+        const raw = wh.payload;
+        const p   = raw?.payload ?? raw?.Payload ?? raw?.data ?? raw ?? {};
+        const id  = p?.serviceProviderId ?? p?.ServiceProviderId ?? p?.providerId ?? p?.ProviderId;
+        const nm  = p?.providerName ?? p?.ProviderName ?? p?.serviceProviderName ?? p?.ServiceProviderName;
+        if (id) {
+          map[id] = map[id] || { id, names: new Set() };
+          if (nm) map[id].names.add(nm);
+        }
+      }
+      setProviderHints(
+        Object.values(map).map((p) => ({ id: p.id, name: [...p.names][0] || null }))
+      );
+    } catch (e) {
+      setProviderHints([]);
+    } finally {
+      setLoadingHints(false);
+    }
+  };
 
   const loadStaff = async () => {
     if (!usingDB) return;
@@ -3923,11 +3967,41 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
                   <div style={{ background: "#faf8f5", borderRadius: 10, padding: "12px 14px", marginBottom: 12, border: "1px solid #e8e0d6" }}>
                     <div style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 10 }}>Sales Dashboard</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-                      <div>
+                      <div style={{ position: "relative" }}>
                         <label style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", display: "block", marginBottom: 4 }}>Vagaro Provider ID</label>
-                        <input value={editDraft.vagaro_provider_id} onChange={(e) => setEditDraft((d) => ({ ...d, vagaro_provider_id: e.target.value }))}
-                          placeholder="e.g. sp_abc123"
-                          style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e0d6", fontSize: "12px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <input value={editDraft.vagaro_provider_id} onChange={(e) => setEditDraft((d) => ({ ...d, vagaro_provider_id: e.target.value }))}
+                            placeholder="e.g. sp_abc123"
+                            style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e0d6", fontSize: "12px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+                          <button type="button" onClick={discoverProviders} disabled={loadingHints}
+                            title="Find provider IDs from your webhook & transaction data"
+                            style={{ padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e0d6", background: "#f5f0eb", fontSize: "11px", fontWeight: "700", color: "#a0785a", cursor: loadingHints ? "wait" : "pointer", whiteSpace: "nowrap", fontFamily: "'DM Sans',sans-serif" }}>
+                            {loadingHints ? "…" : "Lookup"}
+                          </button>
+                        </div>
+                        {providerHints && providerHints.length === 0 && (
+                          <div style={{ fontSize: "11px", color: "#a0785a", marginTop: 4 }}>No provider IDs found in your data yet.</div>
+                        )}
+                        {providerHints && providerHints.length > 0 && (
+                          <div style={{ position: "absolute", zIndex: 50, top: "100%", left: 0, right: 0, background: "#fff", border: "1.5px solid #e8e0d6", borderRadius: 8, marginTop: 2, boxShadow: "0 4px 16px rgba(0,0,0,0.10)", overflow: "hidden" }}>
+                            <div style={{ padding: "6px 10px", fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", borderBottom: "1px solid #f0ebe4" }}>Select to fill</div>
+                            {providerHints.map((ph) => (
+                              <button key={ph.id} type="button"
+                                onClick={() => { setEditDraft((d) => ({ ...d, vagaro_provider_id: ph.id })); setProviderHints(null); }}
+                                style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", cursor: "pointer", fontSize: "12px", fontFamily: "'DM Sans',sans-serif", color: "#2e2418", borderBottom: "1px solid #f5f0eb" }}
+                                onMouseOver={(e) => e.currentTarget.style.background = "#faf8f5"}
+                                onMouseOut={(e) => e.currentTarget.style.background = "none"}
+                              >
+                                <span style={{ fontWeight: "700", color: "#a0785a" }}>{ph.id}</span>
+                                {ph.name && <span style={{ color: "#6a5a4a", marginLeft: 8 }}>— {ph.name}</span>}
+                              </button>
+                            ))}
+                            <button type="button" onClick={() => setProviderHints(null)}
+                              style={{ display: "block", width: "100%", textAlign: "center", padding: "6px", background: "none", border: "none", cursor: "pointer", fontSize: "11px", color: "#a0785a", fontFamily: "'DM Sans',sans-serif" }}>
+                              Dismiss
+                            </button>
+                          </div>
+                        )}
                       </div>
                       <div>
                         <label style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", display: "block", marginBottom: 4 }}>Display Role</label>
