@@ -72,19 +72,21 @@ Deno.serve(async (req) => {
 
 async function handleCustomer(
   sb: ReturnType<typeof createClient>,
-  event: string,
+  _event: string,
   data: Record<string, unknown>,
 ) {
   const vagaro_id = orNull(data.customerId ?? data.CustomerId);
   if (!vagaro_id) return;
 
-  if (event === "customer.created") {
-    const { data: existing } = await sb
-      .from("clients").select("id").eq("vagaro_id", vagaro_id).maybeSingle();
-    if (existing) return; // idempotent
+  const firstName = str(data.customerFirstName ?? data.FirstName ?? data.firstName);
+  const lastName  = str(data.customerLastName  ?? data.LastName  ?? data.lastName);
 
-    const firstName = str(data.customerFirstName ?? data.FirstName ?? data.firstName);
-    const lastName  = str(data.customerLastName  ?? data.LastName  ?? data.lastName);
+  // Check whether this client already exists
+  const { data: existing } = await sb
+    .from("clients").select("id").eq("vagaro_id", vagaro_id).maybeSingle();
+
+  if (!existing) {
+    // ── Create ────────────────────────────────────────────────────────────────
     if (!firstName && !lastName) return;
 
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Denver" });
@@ -120,7 +122,10 @@ async function handleCustomer(
       direction: "internal",
     });
 
-  } else if (event === "customer.updated") {
+  } else {
+    // ── Update ────────────────────────────────────────────────────────────────
+    // Only overwrite fields that are present and non-empty in the payload so we
+    // don't blank out data that Vagaro sent as an empty string.
     const updates: Record<string, unknown> = {};
     const maybe = (col: string, ...vals: unknown[]) => {
       const v = vals.find((x) => x != null && str(x) !== "");
