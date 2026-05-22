@@ -3771,7 +3771,7 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB, currentUserRoles 
 
       setProviderHints(
         Object.values(map)
-          .filter(p => p.id && !p.id.includes(' '))
+          .filter(p => p.id)
           .map((p) => ({ id: p.id, name: [...p.names].filter(Boolean)[0] || null }))
           .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
       );
@@ -5295,7 +5295,18 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
 
   // Helper: get session count for a staff member (auto from transactions if provider ID exists, else manual)
   const getStaffSessions = (staff) => {
-    if (staff.vagaro_provider_id) return sessionCounts[staff.vagaro_provider_id] || 0;
+    if (staff.vagaro_provider_id) {
+      const byId = sessionCounts[staff.vagaro_provider_id];
+      if (byId !== undefined) return byId;
+    }
+    // Fallback: CSV-imported transactions store the provider's display name in
+    // vagaro_service_provider_id rather than an encoded ID, so try matching by
+    // staff full name when the stored provider ID doesn't match directly.
+    if (staff.full_name) {
+      const target = staff.full_name.toLowerCase().trim();
+      const entry = Object.entries(sessionCounts).find(([k]) => k.toLowerCase().trim() === target);
+      if (entry) return entry[1];
+    }
     return weeklyGoals[staff.id]?.sessions || 0;
   };
 
