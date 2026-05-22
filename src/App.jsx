@@ -1899,7 +1899,7 @@ const HIST_FILTERS = [
   { key: "client",      label: "Profile"        },
 ];
 
-function HistoryFeed({ history, transactions = [], onLog, onNote }) {
+function HistoryFeed({ history, transactions = [], onLog, onNote, onLogTx }) {
   const [filter, setFilter] = useState("all");
   const sorted = [...history].sort((a, b) => b.ts - a.ts);
   const shown  = sorted.filter((e) => filter === "all" || (filter !== "payment" && e.type.startsWith(filter)));
@@ -1997,6 +1997,9 @@ function HistoryFeed({ history, transactions = [], onLog, onNote }) {
       {/* Transaction records in Payments tab */}
       {filter === "payment" && (
         <div>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+            <button onClick={onLogTx} style={{ fontSize: "11px", fontWeight: "700", color: "#7a5640", background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: "8px", padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>+ Log Transaction</button>
+          </div>
           {transactions.length === 0 && shown.length === 0 && (
             <p style={{ margin: 0, fontSize: "13px", color: "#b0a090" }}>No payment records yet.</p>
           )}
@@ -2004,7 +2007,7 @@ function HistoryFeed({ history, transactions = [], onLog, onNote }) {
             <>
               {shown.length > 0 && <div style={{ borderTop: "1px solid #f0e8de", margin: "4px 0 12px" }} />}
               <div style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 8 }}>
-                Vagaro Transactions
+                Transactions
               </div>
               <div style={{ display: "flex", flexDirection: "column" }}>
                 {transactions.map((t, i) => {
@@ -2058,11 +2061,215 @@ function HistoryFeed({ history, transactions = [], onLog, onNote }) {
 }
 
 
+// ─── LOG APPOINTMENT MODAL ───────────────────────────────────────────────────
+const APPT_STATUSES = [
+  { value: "scheduled",  label: "Scheduled"  },
+  { value: "checked-in", label: "Checked In" },
+  { value: "completed",  label: "Completed"  },
+  { value: "cancelled",  label: "Cancelled"  },
+  { value: "no-show",    label: "No-Show"    },
+];
+const APPT_DURATIONS = [15, 30, 45, 60, 75, 90, 105, 120];
+
+function LogAppointmentModal({ clientName, onSave, onClose }) {
+  const [form, setForm] = useState({
+    date: TODAY, time: "10:00", service: "", duration: 60,
+    therapist: "", status: "completed",
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const handleSave = async () => {
+    if (!form.service.trim()) return;
+    setSaving(true);
+    await onSave({ ...form, duration: +form.duration, id: uid() });
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(46,36,24,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 600, padding: 16 }}>
+      <div style={{ background: "#fff", borderRadius: 20, padding: "28px 28px 24px", width: "100%", maxWidth: 440, boxShadow: "0 8px 40px rgba(46,36,24,0.18)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "#1a120b" }}>Log Appointment</div>
+            <div style={{ fontSize: 12, color: "#8a7a6a", marginTop: 2 }}>{clientName}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#8a7a6a", lineHeight: 1 }}>×</button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 14px", marginBottom: 14 }}>
+          <div>
+            <label style={S.lbl}>Date</label>
+            <input type="date" value={form.date} onChange={(e) => set("date", e.target.value)} style={S.inp} />
+          </div>
+          <div>
+            <label style={S.lbl}>Time</label>
+            <input type="time" value={form.time} onChange={(e) => set("time", e.target.value)} style={S.inp} />
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={S.lbl}>Service</label>
+          <input value={form.service} onChange={(e) => set("service", e.target.value)} placeholder="e.g. Swedish Massage" style={S.inp} />
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 14px", marginBottom: 14 }}>
+          <div>
+            <label style={S.lbl}>Duration</label>
+            <select value={form.duration} onChange={(e) => set("duration", e.target.value)} style={S.inp}>
+              {APPT_DURATIONS.map((d) => <option key={d} value={d}>{d} min</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={S.lbl}>Status</label>
+            <select value={form.status} onChange={(e) => set("status", e.target.value)} style={S.inp}>
+              {APPT_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 22 }}>
+          <label style={S.lbl}>Service Provider</label>
+          <input value={form.therapist} onChange={(e) => set("therapist", e.target.value)} placeholder="Provider name" style={S.inp} />
+        </div>
+
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button onClick={onClose} style={S.btn("ghost")}>Cancel</button>
+          <button onClick={handleSave} disabled={!form.service.trim() || saving} style={S.btn("primary")}>{saving ? "Saving…" : "Save Appointment"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── LOG TRANSACTION MODAL ────────────────────────────────────────────────────
+const PURCHASE_TYPES = ["Service", "Product", "Gift Card", "Package", "Membership", "Other"];
+const CC_TYPES = ["Visa", "Mastercard", "Amex", "Discover", "Other"];
+const TX_METHODS = [
+  { key: "cc_amount",          label: "Credit Card" },
+  { key: "cash_amount",        label: "Cash"        },
+  { key: "check_amount",       label: "Check"       },
+  { key: "gc_redemption",      label: "Gift Card"   },
+  { key: "package_redemption", label: "Package"     },
+  { key: "other_amount",       label: "Other"       },
+];
+
+function LogTransactionModal({ clientName, onSave, onClose }) {
+  const [form, setForm] = useState({
+    transaction_date: TODAY, item_sold: "", purchase_type: "Service",
+    service_category: "", cc_amount: "", cc_type: "Visa",
+    cash_amount: "", check_amount: "", gc_redemption: "",
+    package_redemption: "", other_amount: "", tax: "", tip: "", discount: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const total = TX_METHODS.reduce((s, m) => s + (+form[m.key] || 0), 0);
+
+  const handleSave = async () => {
+    if (!form.item_sold.trim() || total <= 0) return;
+    setSaving(true);
+    const num = (v) => +v || 0;
+    await onSave({
+      ...form, id: uid(),
+      transaction_date: form.transaction_date + "T12:00:00",
+      cc_amount: num(form.cc_amount), cash_amount: num(form.cash_amount),
+      check_amount: num(form.check_amount), gc_redemption: num(form.gc_redemption),
+      package_redemption: num(form.package_redemption), other_amount: num(form.other_amount),
+      tax: num(form.tax), tip: num(form.tip), discount: num(form.discount),
+    });
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(46,36,24,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 600, padding: 16 }}>
+      <div style={{ background: "#fff", borderRadius: 20, padding: "28px 28px 24px", width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 8px 40px rgba(46,36,24,0.18)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "#1a120b" }}>Log Transaction</div>
+            <div style={{ fontSize: 12, color: "#8a7a6a", marginTop: 2 }}>{clientName}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#8a7a6a", lineHeight: 1 }}>×</button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 14px", marginBottom: 14 }}>
+          <div>
+            <label style={S.lbl}>Date</label>
+            <input type="date" value={form.transaction_date} onChange={(e) => set("transaction_date", e.target.value)} style={S.inp} />
+          </div>
+          <div>
+            <label style={S.lbl}>Purchase Type</label>
+            <select value={form.purchase_type} onChange={(e) => set("purchase_type", e.target.value)} style={S.inp}>
+              {PURCHASE_TYPES.map((p) => <option key={p}>{p}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={S.lbl}>Item / Service Sold</label>
+          <input value={form.item_sold} onChange={(e) => set("item_sold", e.target.value)} placeholder="e.g. Hot Stone 75 min" style={S.inp} />
+        </div>
+
+        <div style={{ marginBottom: 18 }}>
+          <label style={S.lbl}>Service Category</label>
+          <input value={form.service_category} onChange={(e) => set("service_category", e.target.value)} placeholder="e.g. Massage, Facial" style={S.inp} />
+        </div>
+
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#2e2418", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.8px" }}>Payment</div>
+        <div style={{ border: "1px solid #e8e0d6", borderRadius: 12, overflow: "hidden", marginBottom: 14 }}>
+          {TX_METHODS.map((m, i) => (
+            <div key={m.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderBottom: i < TX_METHODS.length - 1 ? "1px solid #f0e8de" : "none", background: +form[m.key] > 0 ? "#faf8f5" : "#fff" }}>
+              <span style={{ fontSize: 12, color: "#7a6a5a", fontWeight: 600, width: 90, flexShrink: 0 }}>{m.label}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
+                <span style={{ fontSize: 13, color: "#8a7a6a" }}>$</span>
+                <input
+                  type="number" min="0" step="0.01"
+                  value={form[m.key]}
+                  onChange={(e) => set(m.key, e.target.value)}
+                  placeholder="0.00"
+                  style={{ ...S.inp, marginBottom: 0, width: "100%", padding: "5px 8px", fontSize: 13 }}
+                />
+              </div>
+              {m.key === "cc_amount" && +form.cc_amount > 0 && (
+                <select value={form.cc_type} onChange={(e) => set("cc_type", e.target.value)} style={{ ...S.inp, marginBottom: 0, padding: "5px 8px", fontSize: 12, width: 110 }}>
+                  {CC_TYPES.map((c) => <option key={c}>{c}</option>)}
+                </select>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px 14px", marginBottom: 20 }}>
+          {[{ k: "tax", label: "Tax" }, { k: "tip", label: "Tip" }, { k: "discount", label: "Discount" }].map(({ k, label }) => (
+            <div key={k}>
+              <label style={S.lbl}>{label}</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ fontSize: 13, color: "#8a7a6a" }}>$</span>
+                <input type="number" min="0" step="0.01" value={form[k]} onChange={(e) => set(k, e.target.value)} placeholder="0.00" style={{ ...S.inp, marginBottom: 0, padding: "5px 8px", fontSize: 13 }} />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: "#1a120b" }}>Total: <span style={{ color: "#065f46" }}>${total.toFixed(2)}</span></div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={onClose} style={S.btn("ghost")}>Cancel</button>
+            <button onClick={handleSave} disabled={!form.item_sold.trim() || total <= 0 || saving} style={S.btn("primary")}>{saving ? "Saving…" : "Save Transaction"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── CLIENT DETAIL ────────────────────────────────────────────────────────────
 function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabaseUrl, supabaseAnonKey, usingDB, staffName = "Staff" }) {
   const [showLog,      setShowLog]      = useState(false);
   const [showEdit,     setShowEdit]     = useState(false);
   const [transactions, setTransactions] = useState([]);
+  const [showLogAppt,  setShowLogAppt]  = useState(false);
+  const [showLogTx,    setShowLogTx]    = useState(false);
 
   useEffect(() => {
     if (!usingDB || !supabaseUrl || !supabaseAnonKey || !client.id) return;
@@ -2116,6 +2323,25 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
 
   const appendHistory = (event) => {
     onUpdate(client.id, { history: [...(client.history || []), event] });
+  };
+
+  const handleSaveAppointment = async (appt) => {
+    if (usingDB) await dbSaveAppointment(supabaseUrl, supabaseAnonKey, client.id, appt).catch(console.warn);
+    onUpdate(client.id, { appointments: [...(client.appointments || []), appt] });
+    appendHistory(mkEvent("appt.scheduled",
+      `Appointment manually logged: ${appt.service} · ${fmtDate(appt.date)}${appt.time ? " at " + fmtTime(appt.time) : ""} · ${appt.duration} min · ${APPT_STATUSES.find(s => s.value === appt.status)?.label ?? appt.status}`,
+      { by: staffName }));
+    setShowLogAppt(false);
+  };
+
+  const handleSaveTransaction = async (tx) => {
+    if (usingDB) await dbSaveTransaction(supabaseUrl, supabaseAnonKey, client.id, tx).catch(console.warn);
+    setTransactions((ts) => [tx, ...ts]);
+    const txTotalAmt = TX_METHODS.reduce((s, m) => s + (+tx[m.key] || 0), 0);
+    appendHistory(mkEvent("payment.received",
+      `Transaction manually logged: ${tx.item_sold} · $${txTotalAmt.toFixed(2)}${+tx.tip > 0 ? ` + $${(+tx.tip).toFixed(2)} tip` : ""}`,
+      { by: staffName }));
+    setShowLogTx(false);
   };
 
   const addNugget = (nugget) => {
@@ -2186,6 +2412,12 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
       {showLog && (
         <LogModal client={client} templates={templates} preset={typeof showLog === "object" ? showLog : undefined}
           onClose={() => setShowLog(false)} onSave={addCommunication} staffName={staffName} />
+      )}
+      {showLogAppt && (
+        <LogAppointmentModal clientName={fullName(client)} onSave={handleSaveAppointment} onClose={() => setShowLogAppt(false)} />
+      )}
+      {showLogTx && (
+        <LogTransactionModal clientName={fullName(client)} onSave={handleSaveTransaction} onClose={() => setShowLogTx(false)} />
       )}
 
       {showEdit && (
@@ -2431,7 +2663,10 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
       <div style={{ ...S.card, marginBottom: "14px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
           <label style={{ ...S.lbl, marginBottom: 0 }}>Upcoming appointments</label>
-          <VagaroTag />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button onClick={() => setShowLogAppt(true)} style={{ fontSize: "11px", fontWeight: "700", color: "#7a5640", background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: "8px", padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>+ Log</button>
+            <VagaroTag />
+          </div>
         </div>
         {upcoming.length === 0
           ? <p style={{ margin: 0, fontSize: "13px", color: "#b0a090" }}>No upcoming appointments. Booking is managed in Vagaro.</p>
@@ -2462,6 +2697,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
           transactions={transactions}
           onLog={() => setShowLog({ channel: "Text/SMS", category: "Rebooking Outreach" })}
           onNote={() => setShowLog({ noteMode: true })}
+          onLogTx={() => setShowLogTx(true)}
         />
       </div>
     </div>
@@ -5379,6 +5615,39 @@ async function dbSaveTask(url, key, task) {
 async function dbDeleteTask(url, key, id) {
   const sb = getSB(url, key); if (!sb) return;
   const { error } = await sb.from('tasks').delete().eq('id', id); if (error) throw error;
+}
+
+async function dbSaveAppointment(url, key, clientId, appt) {
+  const sb = getSB(url, key); if (!sb) return;
+  const { error } = await sb.from('appointments').insert({
+    id: appt.id, client_id: clientId,
+    date: appt.date, time: appt.time || null, service: appt.service,
+    duration: appt.duration || null, therapist: appt.therapist || null, status: appt.status,
+  });
+  if (error) throw error;
+}
+
+async function dbSaveTransaction(url, key, clientId, tx) {
+  const sb = getSB(url, key); if (!sb) return;
+  const { error } = await sb.from('transactions').insert({
+    id: tx.id, client_id: clientId,
+    transaction_date: tx.transaction_date,
+    item_sold: tx.item_sold || null,
+    purchase_type: tx.purchase_type || null,
+    service_category: tx.service_category || null,
+    cc_amount: tx.cc_amount || 0,
+    cc_type: tx.cc_type || null,
+    cash_amount: tx.cash_amount || 0,
+    check_amount: tx.check_amount || 0,
+    gc_redemption: tx.gc_redemption || 0,
+    package_redemption: tx.package_redemption || 0,
+    other_amount: tx.other_amount || 0,
+    tax: tx.tax || 0,
+    tip: tx.tip || 0,
+    discount: tx.discount || 0,
+    created_by: tx.created_by || null,
+  });
+  if (error) throw error;
 }
 
 async function dbMergeClients(url, _key, primaryId, duplicateId) {
