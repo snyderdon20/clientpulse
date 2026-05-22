@@ -1360,9 +1360,10 @@ const CATEGORY_TEMPLATES = {
   "Referral Reward":          ["referral"],
 };
 
-function LogModal({ client, templates, onClose, onSave, preset, staffName = "Staff" }) {
+function LogModal({ client, templates, onClose, onSave, preset, staffName = "Staff", onSaveTask, allClients = [] }) {
   // ALL hooks at the top — no exceptions
   const gmail = useGmail(getGmailClientId());
+  const [showTaskModal, setShowTaskModal] = useState(false);
   const initChannel  = preset?.channel  || "Text/SMS";
   const initCategory = preset?.category && (CHANNEL_CATEGORIES[preset.channel] || []).includes(preset.category)
     ? preset.category
@@ -1479,6 +1480,7 @@ function LogModal({ client, templates, onClose, onSave, preset, staffName = "Sta
   }
 
   return (
+    <>
     <div style={{ position: "fixed", inset: 0, background: "rgba(46,36,24,0.4)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 400 }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="cp-modal" style={{ ...S.card, width: 480, maxWidth: "100vw", maxHeight: "92vh", overflowY: "auto", animation: "fadeUp 0.15s ease", borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
@@ -1607,16 +1609,34 @@ function LogModal({ client, templates, onClose, onSave, preset, staffName = "Sta
           </div>
         )}
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button style={S.btn("ghost")} onClick={onClose}>Cancel</button>
-          {!gmailSent && (
-            <button style={{ ...S.btn("primary"), opacity: (channel === "In-Person" || notes.trim()) ? 1 : 0.5 }} onClick={handleSave}>
-              {channel === "Email" && gmail.isConnected ? "Log only" : "Save log"}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          {onSaveTask && (
+            <button style={{ ...S.btn("ghost"), fontSize: "12px", color: "#7a5640", borderColor: "#e8d5c0" }}
+              onClick={() => setShowTaskModal(true)}>
+              + Task
             </button>
           )}
+          <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+            <button style={S.btn("ghost")} onClick={onClose}>Cancel</button>
+            {!gmailSent && (
+              <button style={{ ...S.btn("primary"), opacity: (channel === "In-Person" || notes.trim()) ? 1 : 0.5 }} onClick={handleSave}>
+                {channel === "Email" && gmail.isConnected ? "Log only" : "Save log"}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
+    {showTaskModal && onSaveTask && (
+      <TaskModal
+        clients={allClients}
+        task={{ clientId: client.id, createdBy: staffName }}
+        onSave={(t) => { onSaveTask(t); setShowTaskModal(false); }}
+        onClose={() => setShowTaskModal(false)}
+        staffName={staffName}
+      />
+    )}
+    </>
   );
 }
 
@@ -2236,7 +2256,7 @@ function LogTransactionModal({ clientName, onSave, onClose }) {
 }
 
 // ─── CLIENT DETAIL ────────────────────────────────────────────────────────────
-function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabaseUrl, supabaseAnonKey, usingDB, staffName = "Staff" }) {
+function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabaseUrl, supabaseAnonKey, usingDB, staffName = "Staff", onSaveTask }) {
   const [showLog,      setShowLog]      = useState(false);
   const [showEdit,     setShowEdit]     = useState(false);
   const [transactions, setTransactions] = useState([]);
@@ -2383,7 +2403,8 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
     <div className="page-pad" style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
       {showLog && (
         <LogModal client={client} templates={templates} preset={typeof showLog === "object" ? showLog : undefined}
-          onClose={() => setShowLog(false)} onSave={addCommunication} staffName={staffName} />
+          onClose={() => setShowLog(false)} onSave={addCommunication} staffName={staffName}
+          onSaveTask={onSaveTask} allClients={allClients} />
       )}
       {showLogAppt && (
         <LogAppointmentModal clientName={fullName(client)} onSave={handleSaveAppointment} onClose={() => setShowLogAppt(false)} />
@@ -5086,6 +5107,7 @@ function MobileClientShell({ clients, selected, setSelected, filter, setFilter, 
               supabaseAnonKey={supabaseAnonKey}
               usingDB={usingDB}
               staffName={staffName}
+              onSaveTask={handleSaveTask}
             />
           ) : (
             <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px", color: "#b0a090" }}>
