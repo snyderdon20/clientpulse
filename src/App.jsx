@@ -5902,6 +5902,8 @@ function useInternalAuth() {
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
+        // Signal to LoginScreen to show the bootstrap form
+        if (data.error && data.error.includes("No password set")) return "no_password";
         setError(data.error || "Invalid email or password");
         return false;
       }
@@ -5930,10 +5932,42 @@ function LoginScreen({ onLogin, error, loading }) {
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
   const [showPw,   setShowPw]   = useState(false);
+  // Bootstrap mode — shown when the account has no password set yet
+  const [bootstrap,    setBootstrap]    = useState(false);
+  const [newPw,        setNewPw]        = useState("");
+  const [confirmPw,    setConfirmPw]    = useState("");
+  const [bootstrapMsg, setBootstrapMsg] = useState(null);
+  const [bootstrapErr, setBootstrapErr] = useState(null);
+  const [bootstrapping,setBootstrapping]= useState(false);
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    await onLogin(email, password);
+    const result = await onLogin(email, password);
+    // If the server says no password is set, offer the bootstrap form
+    if (result === "no_password") setBootstrap(true);
+  };
+
+  const handleBootstrap = async (e) => {
+    e.preventDefault();
+    setBootstrapErr(null);
+    if (newPw.length < 6) { setBootstrapErr("Password must be at least 6 characters"); return; }
+    if (newPw !== confirmPw) { setBootstrapErr("Passwords don't match"); return; }
+    setBootstrapping(true);
+    try {
+      const res = await fetch(STAFF_AUTH_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "apikey": STAFF_AUTH_ANON_KEY, "Authorization": `Bearer ${STAFF_AUTH_ANON_KEY}` },
+        body: JSON.stringify({ action: "bootstrap", email, password: newPw }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed");
+      setBootstrapMsg("Password set! Signing you in…");
+      await onLogin(email, newPw);
+    } catch (err) {
+      setBootstrapErr(err.message);
+    } finally {
+      setBootstrapping(false);
+    }
   };
 
   return (
@@ -5955,36 +5989,63 @@ function LoginScreen({ onLogin, error, loading }) {
 
         {/* Card */}
         <div style={{ background: "#fff", borderRadius: 20, boxShadow: "0 8px 40px rgba(46,36,24,0.12)", padding: 32 }}>
-          <form onSubmit={handleLogin}>
-            <div style={{ fontSize: "17px", fontWeight: "800", color: "#1a120b", marginBottom: 20 }}>Sign in</div>
-            {error && (
-              <div style={{ fontSize: "12px", color: "#dc2626", background: "#fee2e2", padding: "10px 14px", borderRadius: 8, marginBottom: 14 }}>
-                {error}
+          {bootstrap ? (
+            <form onSubmit={handleBootstrap}>
+              <div style={{ fontSize: "17px", fontWeight: "800", color: "#1a120b", marginBottom: 6 }}>Set your password</div>
+              <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 20 }}>No password has been set for <strong>{email}</strong>. Choose one to continue.</div>
+              {bootstrapErr && <div style={{ fontSize: "12px", color: "#dc2626", background: "#fee2e2", padding: "10px 14px", borderRadius: 8, marginBottom: 14 }}>{bootstrapErr}</div>}
+              {bootstrapMsg && <div style={{ fontSize: "12px", color: "#065f46", background: "#d1fae5", padding: "10px 14px", borderRadius: 8, marginBottom: 14 }}>{bootstrapMsg}</div>}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: "11px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>New password</label>
+                <input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} placeholder="At least 6 characters" required autoFocus
+                  style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #e8e0d6", fontSize: "14px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
               </div>
-            )}
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: "11px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                placeholder="your@email.com" required autoFocus
-                style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #e8e0d6", fontSize: "14px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
-            </div>
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ fontSize: "11px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Password</label>
-              <div style={{ position: "relative" }}>
-                <input type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••" required
-                  style={{ width: "100%", padding: "12px 44px 12px 14px", borderRadius: 10, border: "1.5px solid #e8e0d6", fontSize: "14px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
-                <button type="button" onClick={() => setShowPw((s) => !s)}
-                  style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#8a7a6a", fontSize: "13px" }}>
-                  {showPw ? "Hide" : "Show"}
-                </button>
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ fontSize: "11px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Confirm password</label>
+                <input type="password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} placeholder="••••••••" required
+                  style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #e8e0d6", fontSize: "14px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
               </div>
-            </div>
-            <button type="submit" disabled={loading}
-              style={{ width: "100%", padding: "13px", borderRadius: 12, background: "linear-gradient(135deg,#a0785a,#7a5640)", color: "#fff", border: "none", fontSize: "14px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer", fontFamily: "'DM Sans',sans-serif", opacity: loading ? 0.7 : 1 }}>
-              {loading ? "Signing in…" : "Sign in"}
-            </button>
-          </form>
+              <button type="submit" disabled={bootstrapping}
+                style={{ width: "100%", padding: "13px", borderRadius: 12, background: "linear-gradient(135deg,#a0785a,#7a5640)", color: "#fff", border: "none", fontSize: "14px", fontWeight: "700", cursor: bootstrapping ? "not-allowed" : "pointer", fontFamily: "'DM Sans',sans-serif", opacity: bootstrapping ? 0.7 : 1 }}>
+                {bootstrapping ? "Setting password…" : "Set password & sign in"}
+              </button>
+              <button type="button" onClick={() => setBootstrap(false)}
+                style={{ width: "100%", marginTop: 10, padding: "10px", borderRadius: 12, background: "none", color: "#8a7a6a", border: "none", fontSize: "13px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                Back to sign in
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleLogin}>
+              <div style={{ fontSize: "17px", fontWeight: "800", color: "#1a120b", marginBottom: 20 }}>Sign in</div>
+              {error && (
+                <div style={{ fontSize: "12px", color: "#dc2626", background: "#fee2e2", padding: "10px 14px", borderRadius: 8, marginBottom: 14 }}>
+                  {error}
+                </div>
+              )}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: "11px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Email</label>
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                  placeholder="your@email.com" required autoFocus
+                  style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #e8e0d6", fontSize: "14px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ fontSize: "11px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Password</label>
+                <div style={{ position: "relative" }}>
+                  <input type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••" required
+                    style={{ width: "100%", padding: "12px 44px 12px 14px", borderRadius: 10, border: "1.5px solid #e8e0d6", fontSize: "14px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+                  <button type="button" onClick={() => setShowPw((s) => !s)}
+                    style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#8a7a6a", fontSize: "13px" }}>
+                    {showPw ? "Hide" : "Show"}
+                  </button>
+                </div>
+              </div>
+              <button type="submit" disabled={loading}
+                style={{ width: "100%", padding: "13px", borderRadius: 12, background: "linear-gradient(135deg,#a0785a,#7a5640)", color: "#fff", border: "none", fontSize: "14px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer", fontFamily: "'DM Sans',sans-serif", opacity: loading ? 0.7 : 1 }}>
+                {loading ? "Signing in…" : "Sign in"}
+              </button>
+            </form>
+          )}
         </div>
 
         <div style={{ textAlign: "center", marginTop: 20, fontSize: "11px", color: "#b0a090" }}>

@@ -131,6 +131,32 @@ serve(async (req: Request) => {
     return json({ ok: true });
   }
 
+  // ── BOOTSTRAP ─────────────────────────────────────────────────────────────
+  // Sets the initial password for a staff member who has no password yet.
+  // Refused if password_hash is already set — prevents unauthorized resets.
+  if (action === "bootstrap") {
+    const email    = str(body.email).trim().toLowerCase();
+    const password = str(body.password);
+
+    if (!email || !password) {
+      return json({ error: "email and password are required" }, 400);
+    }
+
+    const { data: rows } = await supabase
+      .from("staff")
+      .select("id, password_hash, active")
+      .ilike("email", email)
+      .limit(1);
+
+    const staff = rows?.[0];
+    if (!staff || !staff.active) return json({ error: "No active staff account found for that email" }, 404);
+    if (staff.password_hash)    return json({ error: "Password already set — use login instead" }, 403);
+
+    const password_hash = await bcrypt.hash(password);
+    await supabase.from("staff").update({ password_hash }).eq("id", staff.id);
+    return json({ ok: true });
+  }
+
   return json({ error: "Unknown action" }, 400);
 });
 
