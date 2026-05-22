@@ -5824,82 +5824,74 @@ async function dbMergeClients(url, _key, primaryId, duplicateId) {
   return data.merged;
 }
 
-// ─── SUPABASE AUTH HOOK ───────────────────────────────────────────────────────
-function useSupabaseAuth(url, key) {
+// ─── INTERNAL AUTH HOOK ───────────────────────────────────────────────────────
+const INTERNAL_AUTH_URL = "https://dewsznqxagzahtkpriuk.supabase.co";
+const INTERNAL_AUTH_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRld3N6bnF4YWd6YWh0a3ByaXVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMDQ5MTcsImV4cCI6MjA5NDc4MDkxN30.PdVejzd-Mi3utM9xF7s2i3AU7UeBgNBE71eDFhjmteo";
+
+function useInternalAuth() {
   const [user,    setUser]    = useState(null);
   const [staff,   setStaff]   = useState(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(null);
 
   useEffect(() => {
-    if (!url || !key) { setLoading(false); return; }
-    const sb = getSB(url, key);
-    if (!sb) { setLoading(false); return; }
-    let unsub;
-    sb.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setUser(session.user);
-        sb.from('staff').select('*').eq('id', session.user.id).single()
-          .then(({ data }) => setStaff(data || { role:'staff', full_name:'Staff' }))
-          .catch(() => setStaff({ role:'staff', full_name:'Staff' }))
-          .finally(() => setLoading(false));
-      } else { setLoading(false); }
-    }).catch(() => setLoading(false));
-
-    const { data } = sb.auth.onAuthStateChange((_e, session) => {
-      if (session?.user) {
-        setUser(session.user);
-        sb.from('staff').select('*').eq('id', session.user.id).single()
-          .then(({ data: d }) => setStaff(d || { role:'staff', full_name:'Staff' }))
-          .catch(() => setStaff({ role:'staff', full_name:'Staff' }))
-          .finally(() => setLoading(false));
-      } else { setUser(null); setStaff(null); setLoading(false); }
-    });
-    unsub = data.subscription;
-    return () => unsub?.unsubscribe();
-  }, [url, key]);
+    try {
+      const raw = localStorage.getItem("clientpulse_session");
+      if (raw) {
+        const session = JSON.parse(raw);
+        setUser(session);
+        setStaff(session);
+      }
+    } catch (_) {}
+    setLoading(false);
+  }, []);
 
   const signIn = async (email, password) => {
     setError(null);
-    const sb = getSB(url, key); if (!sb) { setError('Database not configured'); return false; }
-    const { error: err } = await sb.auth.signInWithPassword({ email, password });
-    if (err) { setError(err.message); return false; }
-    return true;
+    try {
+      const res = await fetch(`${INTERNAL_AUTH_URL}/functions/v1/staff-auth`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": INTERNAL_AUTH_ANON_KEY,
+          "Authorization": `Bearer ${INTERNAL_AUTH_ANON_KEY}`,
+        },
+        body: JSON.stringify({ action: "login", email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setError(data.error || "Invalid email or password");
+        return false;
+      }
+      localStorage.setItem("clientpulse_session", JSON.stringify(data.staff));
+      setUser(data.staff);
+      setStaff(data.staff);
+      return true;
+    } catch (e) {
+      setError(e.message || "Login failed");
+      return false;
+    }
   };
 
-  const signOut = async () => {
-    const sb = getSB(url, key); if (sb) await sb.auth.signOut();
-    setUser(null); setStaff(null);
+  const signOut = () => {
+    localStorage.removeItem("clientpulse_session");
+    setUser(null);
+    setStaff(null);
   };
 
-  const resetPassword = async (email) => {
-    const sb = getSB(url, key); if (!sb) return false;
-    const { error: err } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
-    if (err) { setError(err.message); return false; }
-    return true;
-  };
-
-  return { user, staff, loading, error, signIn, signOut, resetPassword, setError };
+  return { user, staff, loading, error, signIn, signOut, setError };
 }
 
 
 // ─── LOGIN SCREEN ─────────────────────────────────────────────────────────────
-function LoginScreen({ onLogin, error, loading, onForgotPassword, noSupabase }) {
+function LoginScreen({ onLogin, error, loading }) {
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
   const [showPw,   setShowPw]   = useState(false);
-  const [forgot,   setForgot]   = useState(false);
-  const [sentReset, setSentReset] = useState(false);
 
   const handleLogin = async (e) => {
     e.preventDefault();
     await onLogin(email, password);
-  };
-
-  const handleForgot = async (e) => {
-    e.preventDefault();
-    const ok = await onForgotPassword(email);
-    if (ok) setSentReset(true);
   };
 
   return (
@@ -5921,79 +5913,36 @@ function LoginScreen({ onLogin, error, loading, onForgotPassword, noSupabase }) 
 
         {/* Card */}
         <div style={{ background: "#fff", borderRadius: 20, boxShadow: "0 8px 40px rgba(46,36,24,0.12)", padding: 32 }}>
-          {noSupabase ? (
-            <div>
-              <div style={{ fontSize: "14px", fontWeight: "700", color: "#92400e", marginBottom: 8 }}>⚠️ Database not configured</div>
-              <div style={{ fontSize: "13px", color: "#8a7a6a", lineHeight: "1.6" }}>
-                Add your Supabase URL and anon key to enable login. Until then the app runs in demo mode.
+          <form onSubmit={handleLogin}>
+            <div style={{ fontSize: "17px", fontWeight: "800", color: "#1a120b", marginBottom: 20 }}>Sign in</div>
+            {error && (
+              <div style={{ fontSize: "12px", color: "#dc2626", background: "#fee2e2", padding: "10px 14px", borderRadius: 8, marginBottom: 14 }}>
+                {error}
               </div>
-              <button
-                onClick={() => onLogin("demo", "demo")}
-                style={{ width: "100%", marginTop: 20, padding: "13px", borderRadius: 12, background: "linear-gradient(135deg,#a0785a,#7a5640)", color: "#fff", border: "none", fontSize: "14px", fontWeight: "700", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
-                Continue in demo mode
-              </button>
+            )}
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: "11px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Email</label>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                placeholder="your@email.com" required autoFocus
+                style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #e8e0d6", fontSize: "14px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
             </div>
-          ) : forgot ? (
-            <div>
-              <div style={{ fontSize: "17px", fontWeight: "800", color: "#1a120b", marginBottom: 6 }}>Reset password</div>
-              {sentReset ? (
-                <div style={{ fontSize: "13px", color: "#065f46", background: "#d1fae5", padding: "12px 16px", borderRadius: 10, marginBottom: 16 }}>
-                  ✓ Password reset email sent — check your inbox
-                </div>
-              ) : (
-                <form onSubmit={handleForgot}>
-                  <div style={{ fontSize: "13px", color: "#8a7a6a", marginBottom: 16 }}>Enter your email and we'll send a reset link.</div>
-                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                    placeholder="your@email.com" required
-                    style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #e8e0d6", fontSize: "14px", marginBottom: 12, fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
-                  {error && <div style={{ fontSize: "12px", color: "#dc2626", marginBottom: 10 }}>{error}</div>}
-                  <button type="submit"
-                    style={{ width: "100%", padding: "13px", borderRadius: 12, background: "linear-gradient(135deg,#a0785a,#7a5640)", color: "#fff", border: "none", fontSize: "14px", fontWeight: "700", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
-                    Send reset link
-                  </button>
-                </form>
-              )}
-              <button onClick={() => { setForgot(false); setSentReset(false); }}
-                style={{ width: "100%", marginTop: 10, padding: "10px", borderRadius: 10, background: "none", border: "none", fontSize: "13px", color: "#8a7a6a", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
-                ← Back to login
-              </button>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: "11px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Password</label>
+              <div style={{ position: "relative" }}>
+                <input type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••" required
+                  style={{ width: "100%", padding: "12px 44px 12px 14px", borderRadius: 10, border: "1.5px solid #e8e0d6", fontSize: "14px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+                <button type="button" onClick={() => setShowPw((s) => !s)}
+                  style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#8a7a6a", fontSize: "13px" }}>
+                  {showPw ? "Hide" : "Show"}
+                </button>
+              </div>
             </div>
-          ) : (
-            <form onSubmit={handleLogin}>
-              <div style={{ fontSize: "17px", fontWeight: "800", color: "#1a120b", marginBottom: 20 }}>Sign in</div>
-              {error && (
-                <div style={{ fontSize: "12px", color: "#dc2626", background: "#fee2e2", padding: "10px 14px", borderRadius: 8, marginBottom: 14 }}>
-                  {error}
-                </div>
-              )}
-              <div style={{ marginBottom: 12 }}>
-                <label style={{ fontSize: "11px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Email</label>
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                  placeholder="your@email.com" required autoFocus
-                  style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid #e8e0d6", fontSize: "14px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
-              </div>
-              <div style={{ marginBottom: 20 }}>
-                <label style={{ fontSize: "11px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", display: "block", marginBottom: 6 }}>Password</label>
-                <div style={{ position: "relative" }}>
-                  <input type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••" required
-                    style={{ width: "100%", padding: "12px 44px 12px 14px", borderRadius: 10, border: "1.5px solid #e8e0d6", fontSize: "14px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
-                  <button type="button" onClick={() => setShowPw((s) => !s)}
-                    style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#8a7a6a", fontSize: "13px" }}>
-                    {showPw ? "Hide" : "Show"}
-                  </button>
-                </div>
-              </div>
-              <button type="submit" disabled={loading}
-                style={{ width: "100%", padding: "13px", borderRadius: 12, background: "linear-gradient(135deg,#a0785a,#7a5640)", color: "#fff", border: "none", fontSize: "14px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer", fontFamily: "'DM Sans',sans-serif", opacity: loading ? 0.7 : 1 }}>
-                {loading ? "Signing in…" : "Sign in"}
-              </button>
-              <button type="button" onClick={() => setForgot(true)}
-                style={{ width: "100%", marginTop: 10, padding: "10px", borderRadius: 10, background: "none", border: "none", fontSize: "13px", color: "#8a7a6a", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
-                Forgot password?
-              </button>
-            </form>
-          )}
+            <button type="submit" disabled={loading}
+              style={{ width: "100%", padding: "13px", borderRadius: 12, background: "linear-gradient(135deg,#a0785a,#7a5640)", color: "#fff", border: "none", fontSize: "14px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer", fontFamily: "'DM Sans',sans-serif", opacity: loading ? 0.7 : 1 }}>
+              {loading ? "Signing in…" : "Sign in"}
+            </button>
+          </form>
         </div>
 
         <div style={{ textAlign: "center", marginTop: 20, fontSize: "11px", color: "#b0a090" }}>
@@ -6069,7 +6018,7 @@ function App() {
   setGlobalGmailClientId(gmailClientId);
 
   const noSupabase = !supabaseUrl || !supabaseAnonKey;
-  const auth = useSupabaseAuth(supabaseUrl, supabaseAnonKey);
+  const auth = useInternalAuth();
 
   const lapseCount = useMemo(
     () => clients.filter((c) => {
