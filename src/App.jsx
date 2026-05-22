@@ -450,13 +450,7 @@ const apptStatusStyle = (s) =>
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 const INITIAL_CLIENTS = [];
-const WEBHOOK_LOG = [
-  { id: "wh1", event: "appointment.booked",     time: new Date(Date.now() - 3 * 60000).toISOString(),    client: "Sarah Mitchell", detail: "Appointment booked for today at 10:00 AM" },
-  { id: "wh2", event: "appointment.checked_in", time: new Date(Date.now() - 90 * 60000).toISOString(),   client: "Emily Chen",     detail: "Checked in for Swedish Massage" },
-  { id: "wh3", event: "customer.updated",       time: new Date(Date.now() - 3 * 3600000).toISOString(),  client: "Tom Bergstrom",  detail: "Email address updated in Vagaro" },
-  { id: "wh4", event: "customer.created",       time: new Date(Date.now() - 5 * 3600000).toISOString(),  client: "Priya Patel",    detail: "New customer record created in Vagaro" },
-  { id: "wh5", event: "appointment.completed",  time: new Date(Date.now() - 24 * 3600000).toISOString(), client: "Lisa Drummond",  detail: "Hot Stone 75 min completed" },
-];
+const WEBHOOK_LOG = [];
 
 const INITIAL_TASKS = [];
 
@@ -757,12 +751,10 @@ function NewClientModal({ onSave, onClose, staffName = "Staff" }) {
   const handleSave = async () => {
     if (!valid) return;
     setSaving(true);
-    // Small delay to simulate future API call to Vagaro
-    await new Promise((r) => setTimeout(r, 400));
     const newClient = {
       id: uid(),
-      vagaroId: null,          // will be set when Vagaro API creates the record
-      vagaroSynced: false,     // production: POST to Vagaro, set true on success
+      vagaroId: null,
+      vagaroSynced: false,
       firstName: form.firstName.trim(),
       lastName:  form.lastName.trim(),
       phone:     form.phone.trim(),
@@ -782,7 +774,7 @@ function NewClientModal({ onSave, onClose, staffName = "Staff" }) {
       tags: [],
       appointments: [],
       history: [
-        mkEvent("client.created", "Client record created in Client Pulse — pending Vagaro sync", { by: staffName }),
+        mkEvent("client.created", "Client record created in ClientPulse", { by: staffName }),
       ],
       completedAppointmentsCount: 0,
       packageCreditsRemaining: 0,
@@ -807,17 +799,8 @@ function NewClientModal({ onSave, onClose, staffName = "Staff" }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
           <div>
             <div style={{ fontSize: "15px", fontWeight: "800", color: "#1a120b" }}>New client</div>
-            <div style={{ fontSize: "11px", color: "#8a7a6a", marginTop: 2 }}>Added here now · will sync to Vagaro when connected</div>
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: "22px", cursor: "pointer", color: "#8a7a6a", lineHeight: 1 }}>×</button>
-        </div>
-
-        {/* Vagaro sync notice */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "#fef3c7", border: "1px solid #f0d090", borderRadius: 10, marginBottom: 18, marginTop: 10 }}>
-          <span style={{ fontSize: 14 }}>⚠️</span>
-          <span style={{ fontSize: "11px", color: "#92400e", fontWeight: "600" }}>
-            Production mode will automatically create this client in Vagaro via API. For now, they'll exist in Client Pulse only.
-          </span>
         </div>
 
         {/* Name */}
@@ -1259,21 +1242,6 @@ function ApptPill({ status }) {
   );
 }
 
-function VagaroTag() {
-  return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: "4px",
-      padding: "2px 8px", borderRadius: "20px",
-      fontSize: "10px", fontWeight: "700",
-      background: "#e8f4fd", color: "#0c6ebd", flexShrink: 0,
-    }}>
-      <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M12 2L2 7v10l10 5 10-5V7L12 2z" />
-      </svg>
-      Vagaro
-    </span>
-  );
-}
 
 function Avatar({ client, size = 36 }) {
   const palettes = [
@@ -2493,12 +2461,6 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
             <StatusSelector client={client} onUpdate={onUpdate} />
             {isBirthday && <span>🎂</span>}
             {client.waitlisted && <span style={{ fontSize: "10px", fontWeight: "700", color: "#1d5fa8", background: "#dbeafe", padding: "2px 8px", borderRadius: "100px" }}>Waitlisted</span>}
-            {client.vagaroSynced === false && (
-              <span style={{ fontSize: "10px", fontWeight: "700", color: "#92400e", background: "#fef3c7", border: "1px solid #f0d090", padding: "2px 8px", borderRadius: "100px" }}>
-                ⚠️ Not in Vagaro yet
-              </span>
-            )}
-            <VagaroTag />
           </div>
           <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", fontSize: "13px", color: "#7a6a5a", marginBottom: 8 }}>
             <span>{client.email}</span>
@@ -2663,10 +2625,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
       <div style={{ ...S.card, marginBottom: "14px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
           <label style={{ ...S.lbl, marginBottom: 0 }}>Upcoming appointments</label>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button onClick={() => setShowLogAppt(true)} style={{ fontSize: "11px", fontWeight: "700", color: "#7a5640", background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: "8px", padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>+ Log</button>
-            <VagaroTag />
-          </div>
+          <button onClick={() => setShowLogAppt(true)} style={{ fontSize: "11px", fontWeight: "700", color: "#7a5640", background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: "8px", padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>+ Log</button>
         </div>
         {upcoming.length === 0
           ? <p style={{ margin: 0, fontSize: "13px", color: "#b0a090" }}>No upcoming appointments. Booking is managed in Vagaro.</p>
