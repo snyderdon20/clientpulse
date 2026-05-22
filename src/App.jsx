@@ -4584,7 +4584,7 @@ function TransactionCSVImport({ supabaseUrl, supabaseAnonKey }) {
   );
 }
 
-function SettingsPage({ webhookLog, templates, onSaveTemplate, gmailClientId, setGmailClientId, supabaseUrl, setSupabaseUrl, supabaseAnonKey, setSupabaseAnonKey, usingDB, dbError, onAddClient, onFindDuplicates }) {
+function SettingsPage({ webhookLog, templates, onSaveTemplate, gmailClientId, setGmailClientId, supabaseUrl, setSupabaseUrl, supabaseAnonKey, setSupabaseAnonKey, usingDB, dbError, onAddClient, onFindDuplicates, currentUserRoles = [] }) {
   const [activeTab, setActiveTab] = useState("database");
   const [testResult, setTestResult] = useState(null);
   const [testing, setTesting] = useState(false);
@@ -5024,7 +5024,7 @@ function SettingsPage({ webhookLog, templates, onSaveTemplate, gmailClientId, se
       )}
 
       {activeTab === "staff" && (
-        <StaffManager supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} currentUserRoles={auth.staff?.roles || (auth.staff?.role ? [auth.staff.role] : [])} />
+        <StaffManager supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} currentUserRoles={currentUserRoles} />
       )}
 
       {activeTab === "templates" && (
@@ -6533,6 +6533,7 @@ function App() {
             usingDB={usingDB} dbError={dbLoadError}
             onAddClient={addClient}
             onFindDuplicates={() => setShowDuplicates(true)}
+            currentUserRoles={auth.staff?.roles || (auth.staff?.role ? [auth.staff.role] : [])}
           />
         )}
 
