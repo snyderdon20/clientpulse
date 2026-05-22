@@ -5108,7 +5108,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
         }
         setSessionCounts(counts);
       });
-  }, [usingDB, supabaseUrl, supabaseAnonKey, weekOf]);
+  }, [usingDB, supabaseUrl, supabaseAnonKey, weekOf, txTick]);
 
   // Load weekly rebook/red-light goals for selected week
   useEffect(() => {
@@ -5167,7 +5167,22 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
         setLiveData({ totalRevenue, totalTips, byType, packageRevenue, serviceRevenue, count: rows.length, recent: rows.slice(0, 8), rowAmt });
         setLiveLoading(false);
       });
-  }, [usingDB, supabaseUrl, supabaseAnonKey, selYear, selMonth]);
+  }, [usingDB, supabaseUrl, supabaseAnonKey, selYear, selMonth, txTick]);
+
+  // Realtime: re-fetch revenue + session counts when any transaction changes
+  const [txTick, setTxTick] = useState(0);
+  useEffect(() => {
+    if (!usingDB || !supabaseUrl || !supabaseAnonKey) return;
+    const sb = getSB(supabaseUrl, supabaseAnonKey);
+    if (!sb) return;
+    const bump = () => setTxTick((n) => n + 1);
+    const ch = sb
+      .channel("sales-tx-live")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "transactions" }, bump)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "transactions" }, bump)
+      .subscribe();
+    return () => { sb.removeChannel(ch); };
+  }, [usingDB, supabaseUrl, supabaseAnonKey]);
 
   // Helper: get session count for a staff member (auto from transactions if provider ID exists, else manual)
   const getStaffSessions = (staff) => {
