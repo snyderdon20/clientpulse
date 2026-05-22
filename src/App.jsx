@@ -2831,7 +2831,11 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, gap: 12, flexWrap: "wrap" }}>
         <div>
           <h2 style={{ margin: "0 0 2px", fontSize: "21px", fontWeight: "800", color: "#1a120b" }}>
-            {isToday ? "Good morning" : dayLabel}
+            {isToday ? (() => {
+              const h = +new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", hour12: false }).format(new Date());
+              const salutation = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+              return `${salutation}, ${staffName}`;
+            })() : dayLabel}
           </h2>
           <p style={{ margin: 0, fontSize: "13px", color: "#8a7a6a" }}>
             {selDateObj.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
