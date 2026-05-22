@@ -21,27 +21,27 @@ jobs:
         with:
           version: latest
 
-      - name: Deploy vagaro-webhook (no JWT verification)
-        run: |
-          supabase functions deploy vagaro-webhook \
-            --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} \
-            --no-verify-jwt
+      - name: Deploy vagaro-webhook
+        run: supabase functions deploy vagaro-webhook --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} --no-verify-jwt
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
       - name: Deploy vagaro-sync
-        run: |
-          supabase functions deploy vagaro-sync \
-            --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: supabase functions deploy vagaro-sync --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} --no-verify-jwt
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
-      - name: Deploy remaining functions
-        run: |
-          for fn in merge-clients staff-delete staff-invite; do
-            echo "Deploying $fn..."
-            supabase functions deploy "$fn" \
-              --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
-          done
+      - name: Deploy merge-clients
+        run: supabase functions deploy merge-clients --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} --no-verify-jwt
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Deploy staff-delete
+        run: supabase functions deploy staff-delete --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} --no-verify-jwt
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Deploy staff-auth
+        run: supabase functions deploy staff-auth --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} --no-verify-jwt
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
