@@ -50,8 +50,15 @@ Deno.serve(async (req) => {
   try {
     if (type === "customer") {
       await handleCustomer(supabase, event, data);
-    } else if (type === "appointment") {
-      await handleAppointment(supabase, event, data);
+    } else {
+      // For all non-customer events, ensure the customer exists in ClientPulse
+      // before handling — fetches from Vagaro API and creates the client if needed.
+      const cid = orNull(data.customerId ?? data.CustomerId);
+      if (cid) await ensureClient(supabase, cid);
+
+      if (type === "appointment") {
+        await handleAppointment(supabase, event, data);
+      }
     }
     // transaction and other types: logged above, no further action needed yet
   } catch (err) {
@@ -158,10 +165,10 @@ async function handleAppointment(
   const vagaro_appt_id     = orNull(data.appointmentId ?? data.AppointmentId ?? data.Id);
   if (!vagaro_customer_id) return;
 
-  // Resolve client by vagaro_id
+  // Resolve client by vagaro_id (ensureClient already ran in the main handler)
   const { data: client } = await sb
     .from("clients").select("id").eq("vagaro_id", vagaro_customer_id).maybeSingle();
-  if (!client) return; // Customer not yet in ClientPulse — sync will catch them later
+  if (!client) return;
 
   // Parse date/time from startDateTime or separate fields
   const startRaw = str(data.startDateTime ?? data.StartDateTime ?? data.startDate ?? data.StartDate ?? "");
@@ -224,6 +231,115 @@ async function handleAppointment(
     source: "vagaro",
     direction: "internal",
   });
+}
+
+// ─── Auto-create client from Vagaro API ───────────────────────────────────────
+// Called for every non-customer webhook that carries a customerId.
+// If the client is already in ClientPulse this is a fast no-op (one DB read).
+// If not, it fetches customer details from the Vagaro API and either links them
+// to an existing unlinked profile (name/email match) or creates a new one.
+
+async function ensureClient(
+  sb: ReturnType<typeof createClient>,
+  vagaroId: string,
+): Promise<void> {
+  // Fast path — already linked
+  const { data: existing } = await sb
+    .from("clients").select("id").eq("vagaro_id", vagaroId).maybeSingle();
+  if (existing) return;
+
+  // Need Vagaro API credentials
+  const region          = Deno.env.get("VAGARO_REGION");
+  const clientId        = Deno.env.get("VAGARO_CLIENT_ID");
+  const clientSecretKey = Deno.env.get("VAGARO_CLIENT_SECRET_KEY");
+  if (!region || !clientId || !clientSecretKey) return;
+
+  // businessId — pull from the most recent webhook that carried one
+  const { data: logRow } = await sb
+    .from("webhook_log")
+    .select("payload")
+    .eq("source", "vagaro")
+    .not("payload->payload->businessId", "is", null)
+    .order("received_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const businessId = str((logRow?.payload as Record<string, unknown>)?.payload?.businessId ?? "");
+  if (!businessId) return;
+
+  // Get Vagaro access token
+  let accessToken: string;
+  try {
+    const res = await fetch(
+      `https://api.vagaro.com/${region}/api/v2/merchants/generate-access-token`,
+      { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, clientSecretKey, scope: "read access" }) },
+    );
+    if (!res.ok) return;
+    const t = await res.json();
+    accessToken = t?.data?.access_token;
+    if (!accessToken) return;
+  } catch { return; }
+
+  // Fetch customer record
+  let vc: Record<string, unknown> | null = null;
+  try {
+    const res = await fetch(
+      `https://api.vagaro.com/${region}/api/v2/customers`,
+      { method: "POST",
+        headers: { "Content-Type": "application/json", accessToken },
+        body: JSON.stringify({ businessId, customerId: vagaroId }) },
+    );
+    if (res.ok) vc = ((await res.json())?.data as Record<string, unknown>) ?? null;
+  } catch { return; }
+  if (!vc) return;
+
+  const firstName = str(vc.customerFirstName).trim();
+  const lastName  = str(vc.customerLastName).trim();
+  if (!firstName && !lastName) return;
+
+  const vcOrNull = (v: unknown) => str(v).trim() || null;
+
+  // Try to match an existing unlinked profile before creating a new one
+  let existingId: string | null = null;
+
+  const { data: nameMatch } = await sb.from("clients").select("id")
+    .ilike("first_name", firstName).ilike("last_name", lastName)
+    .is("vagaro_id", null).maybeSingle();
+  if (nameMatch) existingId = (nameMatch as { id: string }).id;
+
+  if (!existingId && vcOrNull(vc.email)) {
+    const { data: emailMatch } = await sb.from("clients").select("id")
+      .ilike("email", vcOrNull(vc.email)!)
+      .is("vagaro_id", null).maybeSingle();
+    if (emailMatch) existingId = (emailMatch as { id: string }).id;
+  }
+
+  if (existingId) {
+    await sb.from("clients").update({ vagaro_id: vagaroId, vagaro_synced: true }).eq("id", existingId);
+    return;
+  }
+
+  // No match — create a new client
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Denver" });
+  const { error } = await sb.from("clients").insert({
+    vagaro_id:      vagaroId,
+    vagaro_synced:  true,
+    first_name:     firstName,
+    last_name:      lastName,
+    email:          vcOrNull(vc.email),
+    phone:          vcOrNull(vc.mobilePhone) ?? vcOrNull(vc.dayPhone),
+    address:        vcOrNull(vc.streetAddress),
+    city:           vcOrNull(vc.city),
+    state:          vcOrNull(vc.regionCode),
+    zip:            vcOrNull(vc.postalCode),
+    birthday:       vcOrNull(vc.birthday),
+    customer_since: vcOrNull(str(vc.createdDate).split("T")[0]) ?? today,
+    avg_visit_interval_days: 30,
+    waitlisted: false,
+    tags: [],
+    golden_nuggets: [],
+  });
+  if (error) console.error("ensureClient insert:", error.message);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
