@@ -4063,7 +4063,6 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB, currentUserRoles 
                                 onMouseOut={(e) => e.currentTarget.style.background = "none"}
                               >
                                 <span style={{ fontWeight: "700", color: "#2e2418" }}>{ph.name || ph.id}</span>
-                                {ph.name && <span style={{ color: "#a0785a", marginLeft: 8, fontSize: "11px" }}>{ph.id}</span>}
                               </button>
                             ))}
                             <button type="button" onClick={() => setProviderHints(null)}
