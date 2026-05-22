@@ -3771,7 +3771,7 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB, currentUserRoles 
 
       setProviderHints(
         Object.values(map)
-          .filter(p => p.id)
+          .filter(p => p.id && !p.id.includes(' '))
           .map((p) => ({ id: p.id, name: [...p.names].filter(Boolean)[0] || null }))
           .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
       );
@@ -4062,8 +4062,8 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB, currentUserRoles 
                                 onMouseOver={(e) => e.currentTarget.style.background = "#faf8f5"}
                                 onMouseOut={(e) => e.currentTarget.style.background = "none"}
                               >
-                                <span style={{ fontWeight: "700", color: "#a0785a" }}>{ph.id}</span>
-                                {ph.name && <span style={{ color: "#6a5a4a", marginLeft: 8 }}>— {ph.name}</span>}
+                                <span style={{ fontWeight: "700", color: "#2e2418" }}>{ph.name || ph.id}</span>
+                                {ph.name && <span style={{ color: "#a0785a", marginLeft: 8, fontSize: "11px" }}>{ph.id}</span>}
                               </button>
                             ))}
                             <button type="button" onClick={() => setProviderHints(null)}
