@@ -3701,7 +3701,8 @@ const ROLE_STYLE  = Object.fromEntries(STAFF_ROLES.map((r) => [r.value, { bg: r.
 const STAFF_AUTH_URL = "https://dewsznqxagzahtkpriuk.supabase.co/functions/v1/staff-auth";
 const STAFF_AUTH_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRld3N6bnF4YWd6YWh0a3ByaXVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMDQ5MTcsImV4cCI6MjA5NDc4MDkxN30.PdVejzd-Mi3utM9xF7s2i3AU7UeBgNBE71eDFhjmteo";
 
-function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
+function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB, currentUserRoles = [] }) {
+  const isAdmin = currentUserRoles.includes("admin");
   const [staffList, setStaffList]   = useState([]);
   const [loading,   setLoading]     = useState(false);
   const [error,     setError]       = useState(null);
@@ -3856,8 +3857,10 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
       const payload = {
         full_name: editDraft.full_name,
         email: editDraft.email,
-        roles: editDraft.roles || [],
-        role: (editDraft.roles || []).find(r => r !== 'admin') || editDraft.roles?.[0] || 'therapist',
+        ...(isAdmin ? {
+          roles: editDraft.roles || [],
+          role: (editDraft.roles || []).find(r => r !== 'admin') || editDraft.roles?.[0] || 'therapist',
+        } : {}),
         vagaro_provider_id:   editDraft.vagaro_provider_id   || null,
         sales_display_role:   editDraft.sales_display_role   || null,
         sales_session_low:    Number(editDraft.sales_session_low)  || 10,
@@ -3991,20 +3994,24 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
                   </div>
                   {/* Roles */}
                   <div style={{ background: "#faf8f5", borderRadius: 10, padding: "12px 14px", marginBottom: 12, border: "1px solid #e8e0d6" }}>
-                    <div style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 10 }}>Roles</div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                      <div style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px" }}>Roles</div>
+                      {!isAdmin && <div style={{ fontSize: "10px", color: "#b0a090", fontStyle: "italic" }}>Admin only</div>}
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, opacity: isAdmin ? 1 : 0.5 }}>
                       {STAFF_ROLES.map((r) => {
                         const checked = (editDraft.roles || []).includes(r.value);
                         return (
-                          <label key={r.value} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                          <label key={r.value} style={{ display: "flex", alignItems: "center", gap: 6, cursor: isAdmin ? "pointer" : "not-allowed" }}>
                             <input
                               type="checkbox"
                               checked={checked}
-                              onChange={() => setEditDraft((d) => {
+                              disabled={!isAdmin}
+                              onChange={() => isAdmin && setEditDraft((d) => {
                                 const cur = d.roles || [];
                                 return { ...d, roles: checked ? cur.filter(v => v !== r.value) : [...cur, r.value] };
                               })}
-                              style={{ width: 15, height: 15, accentColor: r.color, cursor: "pointer" }} />
+                              style={{ width: 15, height: 15, accentColor: r.color, cursor: isAdmin ? "pointer" : "not-allowed" }} />
                             <span style={{ fontSize: "12px", fontWeight: "600", color: "#2e2418" }}>{r.label}</span>
                           </label>
                         );
@@ -4133,27 +4140,29 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
                 placeholder="jane@rctmassage.com" style={S.inp} />
             </div>
           </div>
-          <div style={{ marginBottom: 10 }}>
-            <label style={S.lbl}>Roles</label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 4 }}>
-              {STAFF_ROLES.map((r) => {
-                const checked = (createDraft.roles || []).includes(r.value);
-                return (
-                  <label key={r.value} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => setCreateDraft((d) => {
-                        const cur = d.roles || [];
-                        return { ...d, roles: checked ? cur.filter(v => v !== r.value) : [...cur, r.value] };
-                      })}
-                      style={{ width: 15, height: 15, accentColor: r.color, cursor: "pointer" }} />
-                    <span style={{ fontSize: "12px", fontWeight: "600", color: "#2e2418" }}>{r.label}</span>
-                  </label>
-                );
-              })}
+          {isAdmin && (
+            <div style={{ marginBottom: 10 }}>
+              <label style={S.lbl}>Roles</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 4 }}>
+                {STAFF_ROLES.map((r) => {
+                  const checked = (createDraft.roles || []).includes(r.value);
+                  return (
+                    <label key={r.value} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => setCreateDraft((d) => {
+                          const cur = d.roles || [];
+                          return { ...d, roles: checked ? cur.filter(v => v !== r.value) : [...cur, r.value] };
+                        })}
+                        style={{ width: 15, height: 15, accentColor: r.color, cursor: "pointer" }} />
+                      <span style={{ fontSize: "12px", fontWeight: "600", color: "#2e2418" }}>{r.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
           <div style={{ marginBottom: 14 }}>
             <label style={S.lbl}>Password</label>
             <input type="password" value={createDraft.password} onChange={(e) => setCreateDraft((d) => ({ ...d, password: e.target.value }))}
@@ -5015,7 +5024,7 @@ function SettingsPage({ webhookLog, templates, onSaveTemplate, gmailClientId, se
       )}
 
       {activeTab === "staff" && (
-        <StaffManager supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} />
+        <StaffManager supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} currentUserRoles={auth.staff?.roles || (auth.staff?.role ? [auth.staff.role] : [])} />
       )}
 
       {activeTab === "templates" && (
