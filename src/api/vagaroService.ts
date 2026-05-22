@@ -30,11 +30,14 @@ export interface SyncResult {
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
-function makeEdgeClient(supabaseUrl: string): AxiosInstance {
+function makeEdgeClient(supabaseUrl: string, supabaseAnonKey?: string): AxiosInstance {
   return axios.create({
     baseURL: `${supabaseUrl.replace(/\/$/, "")}/functions/v1`,
     timeout: 30_000,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(supabaseAnonKey ? { "Authorization": `Bearer ${supabaseAnonKey}` } : {}),
+    },
   });
 }
 
@@ -59,11 +62,12 @@ function extractErrorMsg(err: unknown, fallback = "Unknown error"): string {
  */
 export async function testVagaroConnection(
   supabaseUrl: string,
+  supabaseAnonKey?: string,
 ): Promise<TestConnectionResult> {
   if (!supabaseUrl) return { ok: false, msg: "Supabase URL is not configured." };
 
   try {
-    const { data } = await makeEdgeClient(supabaseUrl).post<TestConnectionResult>(
+    const { data } = await makeEdgeClient(supabaseUrl, supabaseAnonKey).post<TestConnectionResult>(
       "/vagaro-sync",
       { test: true },
     );
@@ -73,22 +77,15 @@ export async function testVagaroConnection(
   }
 }
 
-/**
- * Triggers a Vagaro → ClientPulse client ID sync via the edge function.
- * The edge function uses webhook_log to find customerIds, then calls the
- * Vagaro V2 Customer API to resolve names and match to local clients.
- *
- * @param supabaseUrl  Your project's Supabase URL.
- * @param businessId   Optional — auto-detected from webhook_log if omitted.
- */
 export async function syncVagaroClients(
   supabaseUrl: string,
+  supabaseAnonKey?: string,
   businessId?: string,
 ): Promise<SyncResult> {
   if (!supabaseUrl) return { error: "Supabase URL is not configured." };
 
   try {
-    const { data } = await makeEdgeClient(supabaseUrl).post<SyncResult>(
+    const { data } = await makeEdgeClient(supabaseUrl, supabaseAnonKey).post<SyncResult>(
       "/vagaro-sync",
       { businessId: businessId ?? "" },
     );

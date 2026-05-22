@@ -4015,7 +4015,7 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
   );
 }
 
-function VagaroSyncCard({ supabaseUrl }) {
+function VagaroSyncCard({ supabaseUrl, supabaseAnonKey }) {
   const [syncing, setSyncing]   = useState(false);
   const [result,  setResult]    = useState(null);
 
@@ -4023,7 +4023,7 @@ function VagaroSyncCard({ supabaseUrl }) {
     if (!supabaseUrl) { setResult({ error: "Connect to Supabase first (Database tab)." }); return; }
     setSyncing(true);
     setResult(null);
-    const data = await syncVagaroClients(supabaseUrl);
+    const data = await syncVagaroClients(supabaseUrl, supabaseAnonKey);
     setResult(data);
     setSyncing(false);
   };
@@ -4448,7 +4448,7 @@ function SettingsPage({ webhookLog, templates, onSaveTemplate, gmailClientId, se
   const testConnection = async () => {
     setTesting(true);
     setTestResult(null);
-    const result = await testVagaroConnection(supabaseUrl);
+    const result = await testVagaroConnection(supabaseUrl, supabaseAnonKey);
     setTestResult(result);
     setTesting(false);
   };
@@ -4618,7 +4618,7 @@ function SettingsPage({ webhookLog, templates, onSaveTemplate, gmailClientId, se
       </div>
 
       {/* Vagaro ID sync */}
-      <VagaroSyncCard supabaseUrl={supabaseUrl} />
+      <VagaroSyncCard supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} />
 
       {/* Webhook receiver */}
       <div style={{ ...S.card, marginBottom: "14px" }}>
