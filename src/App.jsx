@@ -3751,7 +3751,7 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB, currentUserRoles 
       };
 
       for (const row of txRows || []) {
-        add(row.vagaro_service_provider_id, row.created_by || null);
+        add(row.vagaro_service_provider_id, null);
       }
 
       for (const wh of whRows || []) {
