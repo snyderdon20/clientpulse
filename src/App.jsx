@@ -3781,17 +3781,21 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
   const saveEdit = async () => {
     if (!editingId) return;
     try {
-      // Try saving both fields; if email column doesn't exist, fall back to name only
-      const payload = { full_name: editDraft.full_name, email: editDraft.email };
-      let { error: err } = await sb().from("staff").update(payload).eq("id", editingId);
-      if (err && err.message && err.message.includes("email")) {
-        const { error: err2 } = await sb().from("staff").update({ full_name: editDraft.full_name }).eq("id", editingId);
-        if (err2) throw err2;
-        setError("Name saved. Email column missing — run the staff migration SQL in your Supabase dashboard to enable email editing.");
-      } else if (err) {
-        throw err;
-      }
-      setStaffList((s) => s.map((m) => m.id === editingId ? { ...m, ...editDraft } : m));
+      const payload = {
+        full_name: editDraft.full_name,
+        email: editDraft.email,
+        vagaro_provider_id:   editDraft.vagaro_provider_id   || null,
+        sales_display_role:   editDraft.sales_display_role   || null,
+        sales_session_low:    Number(editDraft.sales_session_low)  || 10,
+        sales_session_high:   Number(editDraft.sales_session_high) || 15,
+        sales_rebook_goal:    editDraft.sales_rebook_goal    !== "" ? Number(editDraft.sales_rebook_goal)    : null,
+        sales_red_light_goal: editDraft.sales_red_light_goal !== "" ? Number(editDraft.sales_red_light_goal) : null,
+        sales_color:          editDraft.sales_color || "#a0785a",
+        show_on_sales:        !!editDraft.show_on_sales,
+      };
+      const { error: err } = await sb().from("staff").update(payload).eq("id", editingId);
+      if (err) throw err;
+      setStaffList((s) => s.map((m) => m.id === editingId ? { ...m, ...payload } : m));
       setEditingId(null);
     } catch (e) { setError(e.message); }
   };
@@ -3869,7 +3873,7 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
                   {ROLES.map((r) => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
                 </select>
                 <button
-                  onClick={() => { if (editingId === member.id) { setEditingId(null); } else { setEditingId(member.id); setEditDraft({ full_name: member.full_name || "", email: member.email || "" }); } }}
+                  onClick={() => { if (editingId === member.id) { setEditingId(null); } else { setEditingId(member.id); setEditDraft({ full_name: member.full_name || "", email: member.email || "", vagaro_provider_id: member.vagaro_provider_id || "", sales_display_role: member.sales_display_role || "", sales_session_low: member.sales_session_low ?? 10, sales_session_high: member.sales_session_high ?? 15, sales_rebook_goal: member.sales_rebook_goal ?? "", sales_red_light_goal: member.sales_red_light_goal ?? "", sales_color: member.sales_color || "#a0785a", show_on_sales: member.show_on_sales ?? true }); } }}
                   style={{ fontSize: "11px", fontWeight: "700", color: editingId === member.id ? "#8a7a6a" : "#6b5244", background: editingId === member.id ? "#f0e8de" : "#f5ede4", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
                   {editingId === member.id ? "Cancel" : "Edit"}
                 </button>
@@ -3905,21 +3909,55 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB }) {
               </div>
               {editingId === member.id && (
                 <div style={{ padding: "12px 0 14px 48px", borderBottom: "1px solid #f0e8de" }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-                    <div>
-                      <label style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", display: "block", marginBottom: 4 }}>Full name</label>
-                      <input
-                        value={editDraft.full_name}
-                        onChange={(e) => setEditDraft((d) => ({ ...d, full_name: e.target.value }))}
-                        style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e0d6", fontSize: "13px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+                  {/* Basic info */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+                    {[["Full name","text","full_name"],["Email","email","email"]].map(([lbl,type,key]) => (
+                      <div key={key}>
+                        <label style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", display: "block", marginBottom: 4 }}>{lbl}</label>
+                        <input type={type} value={editDraft[key]} onChange={(e) => setEditDraft((d) => ({ ...d, [key]: e.target.value }))}
+                          style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e0d6", fontSize: "13px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+                      </div>
+                    ))}
+                  </div>
+                  {/* Sales dashboard goals */}
+                  <div style={{ background: "#faf8f5", borderRadius: 10, padding: "12px 14px", marginBottom: 12, border: "1px solid #e8e0d6" }}>
+                    <div style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 10 }}>Sales Dashboard</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                      <div>
+                        <label style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", display: "block", marginBottom: 4 }}>Vagaro Provider ID</label>
+                        <input value={editDraft.vagaro_provider_id} onChange={(e) => setEditDraft((d) => ({ ...d, vagaro_provider_id: e.target.value }))}
+                          placeholder="e.g. sp_abc123"
+                          style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e0d6", fontSize: "12px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", display: "block", marginBottom: 4 }}>Display Role</label>
+                        <input value={editDraft.sales_display_role} onChange={(e) => setEditDraft((d) => ({ ...d, sales_display_role: e.target.value }))}
+                          placeholder="e.g. LMT, Owner / LMT"
+                          style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e0d6", fontSize: "12px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+                      </div>
                     </div>
-                    <div>
-                      <label style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", display: "block", marginBottom: 4 }}>Email</label>
-                      <input
-                        type="email"
-                        value={editDraft.email}
-                        onChange={(e) => setEditDraft((d) => ({ ...d, email: e.target.value }))}
-                        style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e0d6", fontSize: "13px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
+                      {[["Session Low","sales_session_low"],["Session High","sales_session_high"],["Rebook Goal %","sales_rebook_goal"],["Red Light Goal","sales_red_light_goal"]].map(([lbl,key]) => (
+                        <div key={key}>
+                          <label style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", display: "block", marginBottom: 4 }}>{lbl}</label>
+                          <input type="number" min={0} value={editDraft[key]}
+                            onChange={(e) => setEditDraft((d) => ({ ...d, [key]: e.target.value }))}
+                            placeholder="—"
+                            style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e0d6", fontSize: "12px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                      <div>
+                        <label style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", display: "block", marginBottom: 4 }}>Card Color</label>
+                        <input type="color" value={editDraft.sales_color} onChange={(e) => setEditDraft((d) => ({ ...d, sales_color: e.target.value }))}
+                          style={{ width: 44, height: 34, padding: 2, borderRadius: 8, border: "1.5px solid #e8e0d6", cursor: "pointer" }} />
+                      </div>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 14 }}>
+                        <input type="checkbox" checked={!!editDraft.show_on_sales} onChange={(e) => setEditDraft((d) => ({ ...d, show_on_sales: e.target.checked }))}
+                          style={{ width: 16, height: 16, accentColor: "#a0785a", cursor: "pointer" }} />
+                        <span style={{ fontSize: "12px", fontWeight: "600", color: "#2e2418" }}>Show on Sales dashboard</span>
+                      </label>
                     </div>
                   </div>
                   <button
@@ -4887,18 +4925,18 @@ const SALES_GOALS = {
   packageTotal: 10000, ownerPackages: 5000, teamPackages: 5000,
 };
 
-const SALES_THERAPISTS = [
-  { name: "Becky",     color: "#a0785a", rebookGoal: null, sessionLow: 12, sessionHigh: 15, redLightGoal: null, role: "Owner / LMT" },
-  { name: "Maria",     color: "#5b21b6", rebookGoal: 20,   sessionLow: 16, sessionHigh: 16, redLightGoal: null, role: "LMT" },
-  { name: "Angelique", color: "#92400e", rebookGoal: 20,   sessionLow: 12, sessionHigh: 15, redLightGoal: null, role: "LMT" },
-  { name: "Alleiyah",  color: "#1d5fa8", rebookGoal: 17,   sessionLow: 10, sessionHigh: 12, redLightGoal: null, role: "LMT" },
-  { name: "Don",       color: "#0f7a4a", rebookGoal: 17,   sessionLow: 7,  sessionHigh: 9,  redLightGoal: 12,   role: "Studio Coordinator / LMT" },
-];
-
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 function fmtDollar(n) { return "$" + Math.round(n).toLocaleString(); }
 function salPct(a, b) { return b === 0 ? 0 : Math.min((a / b) * 100, 100); }
+function salesWeekStart(date = new Date()) {
+  const d = new Date(date);
+  const day = d.getDay();
+  d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function isoDate(d) { return d.toISOString().slice(0, 10); }
 
 function Ring({ value, size = 110, stroke = 9, color, bg = "#e8e0d6", children }) {
   const r = (size - stroke) / 2;
@@ -4941,41 +4979,92 @@ function SalesNumInput({ value, onChange, color }) {
   );
 }
 
-function salesStorageKey(year, month) { return `rctm_sales_${year}_${month}`; }
-
-function loadSalesData(year, month) {
-  try {
-    const raw = localStorage.getItem(salesStorageKey(year, month));
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return {
-    ownerSales: 0, teamSales: 0, monthlySales: 0,
-    stats: Object.fromEntries(SALES_THERAPISTS.map(t => [t.name, { sessions: 0, rebooked: 0, redLight: 0 }])),
-  };
-}
-
-function saveSalesData(year, month, data) {
-  try { localStorage.setItem(salesStorageKey(year, month), JSON.stringify(data)); } catch {}
-}
-
 function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
   const now = new Date();
   const [selYear,  setSelYear]  = useState(now.getFullYear());
   const [selMonth, setSelMonth] = useState(now.getMonth() + 1);
+  const [weekOf,   setWeekOf]   = useState(() => salesWeekStart());
   const [animated, setAnimated] = useState(false);
   const [showNote, setShowNote] = useState(false);
-  const [data, setData] = useState(() => loadSalesData(now.getFullYear(), now.getMonth() + 1));
-  const [liveData,    setLiveData]    = useState(null);
-  const [liveLoading, setLiveLoading] = useState(false);
 
-  useEffect(() => {
-    setData(loadSalesData(selYear, selMonth));
-    setAnimated(false);
-    setTimeout(() => setAnimated(true), 120);
-  }, [selYear, selMonth]);
+  // Dynamic staff from Supabase
+  const [salesStaff,    setSalesStaff]    = useState([]);
+  // Session counts from transactions keyed by vagaro_provider_id
+  const [sessionCounts, setSessionCounts] = useState({});
+  // Weekly rebook/red-light keyed by staff.id
+  const [weeklyGoals,   setWeeklyGoals]   = useState({});
+  // Package challenge for selected month
+  const [pkgChallenge,  setPkgChallenge]  = useState({ owner_sales: 0, team_sales: 0 });
+  // Live monthly revenue from transactions
+  const [liveData,      setLiveData]      = useState(null);
+  const [liveLoading,   setLiveLoading]   = useState(false);
 
   useEffect(() => { setTimeout(() => setAnimated(true), 120); }, []);
+  useEffect(() => { setAnimated(false); setTimeout(() => setAnimated(true), 120); }, [weekOf, selYear, selMonth]);
 
+  // Load staff flagged show_on_sales
+  useEffect(() => {
+    if (!usingDB || !supabaseUrl || !supabaseAnonKey) { setSalesStaff([]); return; }
+    getSB(supabaseUrl, supabaseAnonKey)
+      .from("staff")
+      .select("id,full_name,role,vagaro_provider_id,sales_display_role,sales_session_low,sales_session_high,sales_rebook_goal,sales_red_light_goal,sales_color,show_on_sales")
+      .eq("active", true)
+      .eq("show_on_sales", true)
+      .order("created_at")
+      .then(({ data }) => setSalesStaff(data || []));
+  }, [usingDB, supabaseUrl, supabaseAnonKey]);
+
+  // Count service transactions per provider for the selected week
+  useEffect(() => {
+    if (!usingDB || !supabaseUrl || !supabaseAnonKey) { setSessionCounts({}); return; }
+    const wEnd = new Date(weekOf);
+    wEnd.setDate(wEnd.getDate() + 7);
+    getSB(supabaseUrl, supabaseAnonKey)
+      .from("transactions")
+      .select("vagaro_service_provider_id,purchase_type")
+      .gte("transaction_date", weekOf.toISOString())
+      .lt("transaction_date",  wEnd.toISOString())
+      .then(({ data: rows }) => {
+        const counts = {};
+        for (const row of rows || []) {
+          const pid = row.vagaro_service_provider_id;
+          if (!pid) continue;
+          const pt = (row.purchase_type || "").toLowerCase();
+          if (pt === "service" || pt === "") counts[pid] = (counts[pid] || 0) + 1;
+        }
+        setSessionCounts(counts);
+      });
+  }, [usingDB, supabaseUrl, supabaseAnonKey, weekOf]);
+
+  // Load weekly rebook/red-light goals for selected week
+  useEffect(() => {
+    if (!usingDB || !supabaseUrl || !supabaseAnonKey) { setWeeklyGoals({}); return; }
+    getSB(supabaseUrl, supabaseAnonKey)
+      .from("weekly_goals")
+      .select("*")
+      .eq("week_start", isoDate(weekOf))
+      .then(({ data: rows }) => {
+        const goals = {};
+        for (const row of rows || []) goals[row.staff_id] = row;
+        setWeeklyGoals(goals);
+      });
+  }, [usingDB, supabaseUrl, supabaseAnonKey, weekOf]);
+
+  // Load package challenge for selected month
+  useEffect(() => {
+    if (!usingDB || !supabaseUrl || !supabaseAnonKey) { setPkgChallenge({ owner_sales: 0, team_sales: 0 }); return; }
+    const ms = `${selYear}-${String(selMonth).padStart(2,"0")}-01`;
+    getSB(supabaseUrl, supabaseAnonKey)
+      .from("package_challenge")
+      .select("*")
+      .eq("month_start", ms)
+      .maybeSingle()
+      .then(({ data }) => setPkgChallenge(data
+        ? { owner_sales: +data.owner_sales||0, team_sales: +data.team_sales||0 }
+        : { owner_sales: 0, team_sales: 0 }));
+  }, [usingDB, supabaseUrl, supabaseAnonKey, selYear, selMonth]);
+
+  // Load live monthly revenue
   useEffect(() => {
     if (!usingDB || !supabaseUrl || !supabaseAnonKey) { setLiveData(null); return; }
     setLiveLoading(true);
@@ -4989,50 +5078,76 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
       .order("transaction_date", { ascending: false })
       .then(({ data: rows }) => {
         if (!rows) { setLiveLoading(false); return; }
-        const totalRevenue = rows.reduce((s, t) =>
-          s + (+t.cc_amount||0) + (+t.cash_amount||0) + (+t.check_amount||0) + (+t.ach_amount||0)
-            + (+t.package_redemption||0) + (+t.gc_redemption||0) + (+t.bank_account_amount||0)
-            + (+t.vagaro_pay_later_amount||0) + (+t.other_amount||0), 0);
-        const totalTips = rows.reduce((s, t) => s + (+t.tip||0), 0);
+        const rowAmt = t => (+t.cc_amount||0) + (+t.cash_amount||0) + (+t.check_amount||0) + (+t.ach_amount||0)
+          + (+t.package_redemption||0) + (+t.gc_redemption||0) + (+t.bank_account_amount||0)
+          + (+t.vagaro_pay_later_amount||0) + (+t.other_amount||0);
+        const totalRevenue = rows.reduce((s, t) => s + rowAmt(t), 0);
+        const totalTips    = rows.reduce((s, t) => s + (+t.tip||0), 0);
         const byType = {};
         for (const t of rows) {
           const pt = t.purchase_type || "Other";
-          const amt = (+t.cc_amount||0) + (+t.cash_amount||0) + (+t.check_amount||0) + (+t.ach_amount||0)
-            + (+t.package_redemption||0) + (+t.gc_redemption||0) + (+t.bank_account_amount||0)
-            + (+t.vagaro_pay_later_amount||0) + (+t.other_amount||0);
-          byType[pt] = (byType[pt] || 0) + amt;
+          byType[pt] = (byType[pt] || 0) + rowAmt(t);
         }
-        const packageRevenue = (byType["Package"] || 0) + (byType["Membership"] || 0);
+        const packageRevenue = (byType["Package"]||0) + (byType["Membership"]||0);
         const serviceRevenue = byType["Service"] || 0;
-        setLiveData({ totalRevenue, totalTips, byType, packageRevenue, serviceRevenue,
-          count: rows.length, recent: rows.slice(0, 8) });
+        setLiveData({ totalRevenue, totalTips, byType, packageRevenue, serviceRevenue, count: rows.length, recent: rows.slice(0, 8), rowAmt });
         setLiveLoading(false);
       });
   }, [usingDB, supabaseUrl, supabaseAnonKey, selYear, selMonth]);
 
-  const updateData = (updates) => {
-    setData(prev => {
-      const next = { ...prev, ...updates };
-      saveSalesData(selYear, selMonth, next);
-      return next;
-    });
+  // Helper: get session count for a staff member (auto from transactions if provider ID exists, else manual)
+  const getStaffSessions = (staff) => {
+    if (staff.vagaro_provider_id) return sessionCounts[staff.vagaro_provider_id] || 0;
+    return weeklyGoals[staff.id]?.sessions || 0;
   };
 
-  const updStat = (name, field, val) => {
-    const next = { ...data.stats, [name]: { ...data.stats[name], [field]: Math.max(0, val) } };
-    updateData({ stats: next });
+  // Persist weekly goal change to Supabase
+  const updateWeeklyGoal = (staffId, field, val) => {
+    const ws = isoDate(weekOf);
+    const cur = weeklyGoals[staffId] || { sessions: 0, rebooked: 0, red_light: 0 };
+    const next = { ...cur, staff_id: staffId, week_start: ws, [field]: Math.max(0, val) };
+    setWeeklyGoals(prev => ({ ...prev, [staffId]: next }));
+    if (usingDB && supabaseUrl && supabaseAnonKey) {
+      getSB(supabaseUrl, supabaseAnonKey)
+        .from("weekly_goals")
+        .upsert({ staff_id: staffId, week_start: ws, sessions: next.sessions||0, rebooked: next.rebooked||0, red_light: next.red_light||0 },
+                 { onConflict: "staff_id,week_start" });
+    }
   };
 
-  const monthName  = MONTH_NAMES[selMonth - 1];
-  const monthLabel = `${monthName} ${selYear}`;
-  const pkgTotal   = data.ownerSales + data.teamSales;
-  const pkgPct     = salPct(pkgTotal,          SALES_GOALS.packageTotal);
-  const ownerPct   = salPct(data.ownerSales,   SALES_GOALS.ownerPackages);
-  const teamPct    = salPct(data.teamSales,    SALES_GOALS.teamPackages);
-  const monthlyPct = salPct(data.monthlySales, SALES_GOALS.monthly);
+  // Persist package challenge change to Supabase
+  const updatePkg = (field, val) => {
+    const next = { ...pkgChallenge, [field]: Math.max(0, val) };
+    setPkgChallenge(next);
+    if (usingDB && supabaseUrl && supabaseAnonKey) {
+      const ms = `${selYear}-${String(selMonth).padStart(2,"0")}-01`;
+      getSB(supabaseUrl, supabaseAnonKey)
+        .from("package_challenge")
+        .upsert({ month_start: ms, owner_sales: next.owner_sales, team_sales: next.team_sales, updated_at: new Date().toISOString() },
+                 { onConflict: "month_start" });
+    }
+  };
+
+  // Derived
+  const monthName    = MONTH_NAMES[selMonth - 1];
+  const monthLabel   = `${monthName} ${selYear}`;
+  const pkgTotal     = pkgChallenge.owner_sales + pkgChallenge.team_sales;
+  const pkgPct       = salPct(pkgTotal,                 SALES_GOALS.packageTotal);
+  const ownerPct     = salPct(pkgChallenge.owner_sales, SALES_GOALS.ownerPackages);
+  const teamPct      = salPct(pkgChallenge.team_sales,  SALES_GOALS.teamPackages);
   const goalUnlocked = ownerPct >= 100 && teamPct >= 100;
-  const totalSessionsWeek = SALES_THERAPISTS.reduce((s, t) => s + (data.stats[t.name]?.sessions || 0), 0);
-  const studioSessionsPct = salPct(totalSessionsWeek, SALES_GOALS.servicesPerWeek);
+  const totalSessionsWeek  = salesStaff.reduce((s, st) => s + getStaffSessions(st), 0);
+  const studioSessionsPct  = salPct(totalSessionsWeek, SALES_GOALS.servicesPerWeek);
+  const monthlyRevenue     = liveData?.totalRevenue ?? 0;
+  const monthlyPct         = salPct(monthlyRevenue, SALES_GOALS.monthly);
+
+  // Week label
+  const weekEnd = new Date(weekOf); weekEnd.setDate(weekEnd.getDate() + 6);
+  const weekLabel = `${weekOf.toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${weekEnd.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}`;
+  const isCurrentWeek = isoDate(weekOf) === isoDate(salesWeekStart());
+
+  const prevWeek = () => setWeekOf(d => { const n = new Date(d); n.setDate(n.getDate()-7); return n; });
+  const nextWeek = () => setWeekOf(d => { const n = new Date(d); n.setDate(n.getDate()+7); return n; });
 
   const yearOpts = [];
   for (let y = 2024; y <= now.getFullYear() + 1; y++) yearOpts.push(y);
@@ -5046,12 +5161,9 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
       {/* Page header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: "22px", fontWeight: "800", color: "#1a120b" }}>
-            Sales &amp; Performance
-          </h1>
+          <h1 style={{ margin: 0, fontSize: "22px", fontWeight: "800", color: "#1a120b" }}>Sales &amp; Performance</h1>
           <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#8a7a6a" }}>{monthLabel}</p>
         </div>
-        {/* Month / year picker */}
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <select value={selMonth} onChange={e => setSelMonth(Number(e.target.value))}
             style={{ ...S.inp, width: "auto", padding: "7px 12px", cursor: "pointer" }}>
@@ -5064,12 +5176,12 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
         </div>
       </div>
 
-      {/* Live Revenue from Vagaro */}
+      {/* Live Revenue */}
       {usingDB && (
         <div style={{ ...S.card, marginBottom: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
             <label style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", letterSpacing: "1.5px", textTransform: "uppercase" }}>
-              Live Revenue — {MONTH_NAMES[selMonth - 1]} {selYear}
+              Live Revenue — {monthLabel}
             </label>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               {liveLoading && <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#a0785a", animation: "pulse 1s infinite" }} />}
@@ -5078,11 +5190,11 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
           </div>
           {liveData ? (
             <>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 14 }}>
                 {[
-                  { l: "Total Revenue", v: fmtDollar(liveData.totalRevenue), c: "#0f7a4a", bg: "#dcf5ec" },
-                  { l: "Services",      v: fmtDollar(liveData.serviceRevenue), c: "#1d5fa8", bg: "#dbeafe" },
-                  { l: "Packages/Mbr", v: fmtDollar(liveData.packageRevenue), c: "#a0785a", bg: "#f5ede4" },
+                  { l: "Total Revenue",  v: fmtDollar(liveData.totalRevenue),  c: "#0f7a4a", bg: "#dcf5ec" },
+                  { l: "Services",       v: fmtDollar(liveData.serviceRevenue), c: "#1d5fa8", bg: "#dbeafe" },
+                  { l: "Packages / Mbr", v: fmtDollar(liveData.packageRevenue), c: "#a0785a", bg: "#f5ede4" },
                 ].map(({ l, v, c, bg }) => (
                   <div key={l} style={{ background: bg, borderRadius: 10, padding: "12px 14px", textAlign: "center" }}>
                     <div style={{ fontSize: "18px", fontWeight: "800", color: c }}>{v}</div>
@@ -5090,24 +5202,33 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
                   </div>
                 ))}
               </div>
+              {/* Monthly goal progress driven by live data */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                  <span style={{ fontSize: "11px", color: "#8a7a6a" }}>Monthly Goal</span>
+                  <span style={{ fontSize: "11px", fontWeight: "700", color: monthlyPct >= 100 ? "#0f7a4a" : "#1a120b" }}>
+                    {fmtDollar(monthlyRevenue)} / {fmtDollar(SALES_GOALS.monthly)}{monthlyPct >= 100 ? " 🎉" : ""}
+                  </span>
+                </div>
+                <SalesBar value={animated ? monthlyPct : 0} color="#0f7a4a" bg="#e8e0d6" h={7} />
+                <div style={{ marginTop: 4, fontSize: "11px", color: "#8a7a6a" }}>
+                  {monthlyPct >= 100 ? "Monthly goal achieved!" : `${fmtDollar(SALES_GOALS.monthly - monthlyRevenue)} remaining`}
+                </div>
+              </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: liveData.recent.length ? 14 : 0 }}>
-                {Object.entries(liveData.byType)
-                  .sort((a, b) => b[1] - a[1])
-                  .map(([type, amt]) => (
-                    <div key={type} style={{ background: "#f5f0ea", borderRadius: 8, padding: "5px 10px", fontSize: "11px", color: "#5a4a3a" }}>
-                      <span style={{ fontWeight: "700" }}>{type}</span>
-                      <span style={{ color: "#8a7a6a", marginLeft: 6 }}>{fmtDollar(amt)}</span>
-                    </div>
-                  ))}
+                {Object.entries(liveData.byType).sort((a,b) => b[1]-a[1]).map(([type, amt]) => (
+                  <div key={type} style={{ background: "#f5f0ea", borderRadius: 8, padding: "5px 10px", fontSize: "11px", color: "#5a4a3a" }}>
+                    <span style={{ fontWeight: "700" }}>{type}</span>
+                    <span style={{ color: "#8a7a6a", marginLeft: 6 }}>{fmtDollar(amt)}</span>
+                  </div>
+                ))}
               </div>
               {liveData.recent.length > 0 && (
                 <div style={{ borderTop: "1px solid #e8e0d6", paddingTop: 12 }}>
                   <div style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 8 }}>Recent Transactions</div>
                   {liveData.recent.map((t, i) => {
-                    const amt = (+t.cc_amount||0) + (+t.cash_amount||0) + (+t.check_amount||0) + (+t.ach_amount||0)
-                      + (+t.package_redemption||0) + (+t.gc_redemption||0) + (+t.bank_account_amount||0)
-                      + (+t.vagaro_pay_later_amount||0) + (+t.other_amount||0);
-                    const dateStr = t.transaction_date ? new Date(t.transaction_date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
+                    const amt = liveData.rowAmt(t);
+                    const dateStr = t.transaction_date ? new Date(t.transaction_date).toLocaleDateString("en-US",{month:"short",day:"numeric"}) : "";
                     return (
                       <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
                         padding: "6px 0", borderBottom: i < liveData.recent.length - 1 ? "1px solid #f0ece6" : "none" }}>
@@ -5133,9 +5254,8 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
       {/* Vagaro reminder */}
       <div style={{ ...S.card, marginBottom: 16, padding: "0", overflow: "hidden" }}>
         <div onClick={() => setShowNote(p => !p)}
-          style={{ padding: "14px 20px", cursor: "pointer", display: "flex",
-            alignItems: "center", justifyContent: "space-between",
-            background: "#fef3c7", borderBottom: showNote ? "1px solid #e8e0d6" : "none" }}>
+          style={{ padding: "14px 20px", cursor: "pointer", display: "flex", alignItems: "center",
+            justifyContent: "space-between", background: "#fef3c7", borderBottom: showNote ? "1px solid #e8e0d6" : "none" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 16 }}>📌</span>
             <div>
@@ -5179,10 +5299,10 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
           <div style={{ flex: 1, minWidth: 180 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 20px", marginBottom: 14 }}>
               {[
-                { l: "Total Raised",   v: fmtDollar(pkgTotal),                                      c: "#1a120b" },
-                { l: "Remaining",      v: fmtDollar(Math.max(0, SALES_GOALS.packageTotal - pkgTotal)), c: "#991b1b" },
-                { l: "Daily Target",   v: fmtDollar(SALES_GOALS.packageTotal / 30),                 c: "#1d5fa8" },
-                { l: "Goal",           v: fmtDollar(SALES_GOALS.packageTotal),                      c: "#0f7a4a" },
+                { l: "Total Raised", v: fmtDollar(pkgTotal),                                         c: "#1a120b" },
+                { l: "Remaining",    v: fmtDollar(Math.max(0, SALES_GOALS.packageTotal - pkgTotal)),  c: "#991b1b" },
+                { l: "Daily Target", v: fmtDollar(SALES_GOALS.packageTotal / 30),                     c: "#1d5fa8" },
+                { l: "Goal",         v: fmtDollar(SALES_GOALS.packageTotal),                          c: "#0f7a4a" },
               ].map(({ l, v, c }) => (
                 <div key={l}>
                   <div style={{ fontSize: "9px", letterSpacing: "0.1em", textTransform: "uppercase", color: "#8a7a6a", marginBottom: 2 }}>{l}</div>
@@ -5193,12 +5313,10 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
             <SalesBar value={animated ? pkgPct : 0} color="#a0785a" bg="#e8e0d6" h={10} />
           </div>
         </div>
-
-        {/* Becky vs Team sub-goals */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           {[
-            { name: "Becky", goal: SALES_GOALS.ownerPackages, val: data.ownerSales, color: "#a0785a", bg: "#f5ede4", key: "ownerSales" },
-            { name: "Team",  goal: SALES_GOALS.teamPackages,  val: data.teamSales,  color: "#1d5fa8", bg: "#dbeafe", key: "teamSales"  },
+            { name: "Owner", goal: SALES_GOALS.ownerPackages, val: pkgChallenge.owner_sales, color: "#a0785a", bg: "#f5ede4", key: "owner_sales" },
+            { name: "Team",  goal: SALES_GOALS.teamPackages,  val: pkgChallenge.team_sales,  color: "#1d5fa8", bg: "#dbeafe", key: "team_sales"  },
           ].map(({ name, goal, val, color, bg, key }) => {
             const p = salPct(val, goal);
             return (
@@ -5216,7 +5334,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
                 <SalesBar value={animated ? p : 0} color={color} bg="#e8e0d6" h={6} />
                 <div style={{ marginTop: 10 }}>
                   <input type="range" min={0} max={goal * 1.2} value={val}
-                    onChange={e => updateData({ [key]: Number(e.target.value) })}
+                    onChange={e => updatePkg(key, Number(e.target.value))}
                     style={{ width: "100%", accentColor: color }} />
                 </div>
                 <div style={{ marginTop: 4, fontSize: "11px", color: "#8a7a6a" }}>
@@ -5228,168 +5346,178 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
         </div>
       </div>
 
-      {/* Studio weekly total + monthly revenue — side by side */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
-        {/* Studio weekly */}
-        <div style={{ ...S.card }}>
-          <label style={slbl}>Studio Total — This Week</label>
-          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 14 }}>
-            <Ring value={animated ? studioSessionsPct : 0} size={72} stroke={7} color="#1d5fa8" bg="#e8e0d6">
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: "14px", fontWeight: "800", color: "#1a120b" }}>{totalSessionsWeek}</div>
-                <div style={{ fontSize: "7px", color: "#8a7a6a" }}>sessions</div>
-              </div>
-            </Ring>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: "22px", fontWeight: "800", color: "#1a120b" }}>
-                {totalSessionsWeek}
-                <span style={{ fontSize: "13px", fontWeight: "400", color: "#8a7a6a" }}> / {SALES_GOALS.servicesPerWeek}</span>
-              </div>
-              <SalesBar value={animated ? studioSessionsPct : 0} color="#1d5fa8" bg="#e8e0d6" h={7} />
-              <div style={{ marginTop: 6, fontSize: "11px", color: "#8a7a6a" }}>
-                {totalSessionsWeek >= SALES_GOALS.servicesPerWeek
-                  ? "🎉 Weekly goal hit!"
-                  : `${SALES_GOALS.servicesPerWeek - totalSessionsWeek} sessions to goal`}
-              </div>
-            </div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
-            {[
-              { l: "Per Day", v: SALES_GOALS.sessionsPerDay, c: "#92400e", bg: "#fef3c7" },
-              { l: "Weekly",  v: SALES_GOALS.servicesPerWeek, c: "#1d5fa8", bg: "#dbeafe" },
-              { l: "Revenue", v: fmtDollar(SALES_GOALS.monthly), c: "#0f7a4a", bg: "#dcf5ec" },
-            ].map(({ l, v, c, bg }) => (
-              <div key={l} style={{ background: bg, borderRadius: 10, padding: "10px 12px", textAlign: "center" }}>
-                <div style={{ fontSize: "16px", fontWeight: "800", color: c }}>{v}</div>
-                <div style={{ fontSize: "9px", color: c, opacity: 0.7, marginTop: 2, textTransform: "uppercase", letterSpacing: "0.06em" }}>{l}</div>
-              </div>
-            ))}
+      {/* Studio weekly total */}
+      <div style={{ ...S.card, marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
+          <label style={{ ...slbl, marginBottom: 0 }}>Studio Total — Weekly Sessions</label>
+          {/* Week picker */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button onClick={prevWeek} style={{ background: "#f5f0ea", border: "none", borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontSize: "14px", color: "#5a4a3a", fontFamily: "'DM Sans',sans-serif" }}>‹</button>
+            <span style={{ fontSize: "12px", fontWeight: "600", color: "#2e2418", whiteSpace: "nowrap" }}>{weekLabel}</span>
+            <button onClick={nextWeek} style={{ background: "#f5f0ea", border: "none", borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontSize: "14px", color: "#5a4a3a", fontFamily: "'DM Sans',sans-serif" }}>›</button>
+            {!isCurrentWeek && (
+              <button onClick={() => setWeekOf(salesWeekStart())}
+                style={{ background: "#a0785a", color: "#fff", border: "none", borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontSize: "11px", fontWeight: "700", fontFamily: "'DM Sans',sans-serif" }}>
+                This week
+              </button>
+            )}
           </div>
         </div>
-
-        {/* Monthly revenue */}
-        <div style={{ ...S.card }}>
-          <label style={slbl}>Monthly Revenue — {monthLabel}</label>
-          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 14 }}>
-            <Ring value={animated ? monthlyPct : 0} size={72} stroke={7} color="#0f7a4a" bg="#e8e0d6">
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: "13px", fontWeight: "800", color: "#0f7a4a" }}>{Math.round(monthlyPct)}%</div>
-              </div>
-            </Ring>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: "22px", fontWeight: "800", color: "#1a120b" }}>
-                {fmtDollar(data.monthlySales)}
-                <span style={{ fontSize: "13px", fontWeight: "400", color: "#8a7a6a" }}> / {fmtDollar(SALES_GOALS.monthly)}</span>
-              </div>
-              <SalesBar value={animated ? monthlyPct : 0} color="#0f7a4a" bg="#e8e0d6" h={7} />
-              <div style={{ marginTop: 6, fontSize: "11px", color: "#8a7a6a" }}>
-                {monthlyPct >= 100 ? "🎉 Monthly goal achieved!" : `${fmtDollar(SALES_GOALS.monthly - data.monthlySales)} remaining`}
-              </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 14 }}>
+          <Ring value={animated ? studioSessionsPct : 0} size={72} stroke={7} color="#1d5fa8" bg="#e8e0d6">
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: "14px", fontWeight: "800", color: "#1a120b" }}>{totalSessionsWeek}</div>
+              <div style={{ fontSize: "7px", color: "#8a7a6a" }}>sessions</div>
+            </div>
+          </Ring>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: "22px", fontWeight: "800", color: "#1a120b" }}>
+              {totalSessionsWeek}
+              <span style={{ fontSize: "13px", fontWeight: "400", color: "#8a7a6a" }}> / {SALES_GOALS.servicesPerWeek}</span>
+            </div>
+            <SalesBar value={animated ? studioSessionsPct : 0} color="#1d5fa8" bg="#e8e0d6" h={7} />
+            <div style={{ marginTop: 6, fontSize: "11px", color: "#8a7a6a" }}>
+              {totalSessionsWeek >= SALES_GOALS.servicesPerWeek
+                ? "🎉 Weekly goal hit!"
+                : `${SALES_GOALS.servicesPerWeek - totalSessionsWeek} sessions to goal`}
             </div>
           </div>
-          <input type="range" min={0} max={SALES_GOALS.monthly * 1.2} value={data.monthlySales}
-            onChange={e => updateData({ monthlySales: Number(e.target.value) })}
-            style={{ width: "100%", accentColor: "#0f7a4a" }} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+          {[
+            { l: "Per Day", v: SALES_GOALS.sessionsPerDay,  c: "#92400e", bg: "#fef3c7" },
+            { l: "Weekly",  v: SALES_GOALS.servicesPerWeek, c: "#1d5fa8", bg: "#dbeafe" },
+            { l: "Revenue", v: fmtDollar(SALES_GOALS.monthly), c: "#0f7a4a", bg: "#dcf5ec" },
+          ].map(({ l, v, c, bg }) => (
+            <div key={l} style={{ background: bg, borderRadius: 10, padding: "10px 12px", textAlign: "center" }}>
+              <div style={{ fontSize: "16px", fontWeight: "800", color: c }}>{v}</div>
+              <div style={{ fontSize: "9px", color: c, opacity: 0.7, marginTop: 2, textTransform: "uppercase", letterSpacing: "0.06em" }}>{l}</div>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* Therapist cards */}
+      {/* Individual staff goal cards */}
       <label style={{ ...slbl, marginBottom: 12 }}>Individual Goals — Weekly Sessions &amp; Rebooking %</label>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 14, marginBottom: 16 }}>
-        {SALES_THERAPISTS.map(t => {
-          const s        = data.stats[t.name] || { sessions: 0, rebooked: 0, redLight: 0 };
-          const midGoal  = (t.sessionLow + t.sessionHigh) / 2;
-          const sessP    = salPct(s.sessions, midGoal);
-          const rebookP  = s.sessions > 0 ? (s.rebooked / s.sessions) * 100 : 0;
-          const rebookGoalP = t.rebookGoal ? salPct(rebookP, t.rebookGoal) : null;
-          const redLightP   = t.redLightGoal ? salPct(s.redLight, t.redLightGoal) : null;
-          const rangeLabel  = t.sessionLow === t.sessionHigh ? `${t.sessionLow}` : `${t.sessionLow}–${t.sessionHigh}`;
-          const atSessGoal  = s.sessions >= t.sessionLow;
-          const atRebook    = t.rebookGoal && rebookP >= t.rebookGoal;
-          const colorBg     = `${t.color}12`;
+      {!usingDB ? (
+        <div style={{ ...S.card, marginBottom: 16, background: "#fef3c7", border: "1px solid #f0d090" }}>
+          <div style={{ fontSize: "13px", fontWeight: "700", color: "#92400e" }}>⚠️ Database required</div>
+          <div style={{ fontSize: "12px", color: "#92400e", marginTop: 4 }}>Connect Supabase in Settings → Database to load staff goal cards.</div>
+        </div>
+      ) : salesStaff.length === 0 ? (
+        <div style={{ ...S.card, marginBottom: 16, background: "#f5f0ea" }}>
+          <div style={{ fontSize: "13px", fontWeight: "700", color: "#5a4a3a" }}>No staff on the sales dashboard yet</div>
+          <div style={{ fontSize: "12px", color: "#8a7a6a", marginTop: 4 }}>Go to Settings → Staff, edit each team member, and turn on "Show on Sales dashboard".</div>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 14, marginBottom: 16 }}>
+          {salesStaff.map(staff => {
+            const color      = staff.sales_color || "#a0785a";
+            const sessLow    = staff.sales_session_low  ?? 10;
+            const sessHigh   = staff.sales_session_high ?? 15;
+            const rebookGoal = staff.sales_rebook_goal  ?? null;
+            const redGoal    = staff.sales_red_light_goal ?? null;
+            const wg         = weeklyGoals[staff.id] || { sessions: 0, rebooked: 0, red_light: 0 };
+            const sessions   = getStaffSessions(staff);
+            const autoSess   = !!staff.vagaro_provider_id;
+            const midGoal    = (sessLow + sessHigh) / 2;
+            const sessP      = salPct(sessions, midGoal);
+            const rebookP    = sessions > 0 ? (wg.rebooked / sessions) * 100 : 0;
+            const rebookGoalP = rebookGoal ? salPct(rebookP, rebookGoal) : null;
+            const redLightP   = redGoal    ? salPct(wg.red_light, redGoal) : null;
+            const rangeLabel  = sessLow === sessHigh ? `${sessLow}` : `${sessLow}–${sessHigh}`;
+            const atSessGoal  = sessions >= sessLow;
+            const atRebook    = rebookGoal && rebookP >= rebookGoal;
+            const displayRole = staff.sales_display_role || staff.role || "";
+            const firstName   = (staff.full_name || "Staff").split(" ")[0];
 
-          return (
-            <div key={t.name} style={{ ...S.card, padding: "20px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-                <div>
-                  <div style={{ fontSize: "16px", fontWeight: "800", color: "#1a120b" }}>{t.name}</div>
-                  <div style={{ fontSize: "10px", color: "#8a7a6a", marginTop: 1 }}>{t.role}</div>
-                </div>
-                <Ring value={animated ? sessP : 0} size={64} stroke={6} color={t.color} bg="#e8e0d6">
-                  <div style={{ textAlign: "center" }}>
-                    <div style={{ fontSize: "13px", fontWeight: "800", color: "#1a120b" }}>{s.sessions}</div>
-                    <div style={{ fontSize: "6px", color: "#8a7a6a" }}>sessions</div>
+            return (
+              <div key={staff.id} style={{ ...S.card, padding: "20px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                  <div>
+                    <div style={{ fontSize: "16px", fontWeight: "800", color: "#1a120b" }}>{firstName}</div>
+                    {displayRole && <div style={{ fontSize: "10px", color: "#8a7a6a", marginTop: 1 }}>{displayRole}</div>}
                   </div>
-                </Ring>
-              </div>
-
-              {/* Weekly sessions */}
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                  <span style={{ fontSize: "11px", color: "#8a7a6a" }}>Weekly Sessions</span>
-                  <span style={{ fontSize: "11px", fontWeight: "700", color: atSessGoal ? "#0f7a4a" : t.color }}>
-                    {s.sessions} / {rangeLabel}{atSessGoal ? " ✓" : ""}
-                  </span>
+                  <Ring value={animated ? sessP : 0} size={64} stroke={6} color={color} bg="#e8e0d6">
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: "13px", fontWeight: "800", color: "#1a120b" }}>{sessions}</div>
+                      <div style={{ fontSize: "6px", color: "#8a7a6a" }}>sessions</div>
+                    </div>
+                  </Ring>
                 </div>
-                <SalesBar value={animated ? sessP : 0} color={t.color} bg="#e8e0d6" h={6} />
-                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
-                  <SalesNumInput value={s.sessions} onChange={v => updStat(t.name, "sessions", v)} color={t.color} />
-                  <span style={{ fontSize: "10px", color: "#8a7a6a" }}>sessions this week</span>
-                </div>
-              </div>
 
-              {/* Red light — Don only */}
-              {t.redLightGoal && (
-                <div style={{ marginBottom: 12, padding: "10px 12px", background: "#dcf5ec",
-                  borderRadius: 10, border: "1px solid #86efac" }}>
+                {/* Sessions */}
+                <div style={{ marginBottom: 12 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                    <span style={{ fontSize: "11px", color: "#0f7a4a", fontWeight: "600" }}>💡 Red Light Sessions</span>
-                    <span style={{ fontSize: "11px", fontWeight: "700", color: "#0f7a4a" }}>
-                      {s.redLight} / {t.redLightGoal}{s.redLight >= t.redLightGoal ? " ✓" : ""}
+                    <span style={{ fontSize: "11px", color: "#8a7a6a" }}>
+                      Weekly Sessions{autoSess && <span style={{ marginLeft: 4, fontSize: "9px", background: "#dcf5ec", color: "#0f7a4a", borderRadius: 4, padding: "1px 5px", fontWeight: "700" }}>AUTO</span>}
+                    </span>
+                    <span style={{ fontSize: "11px", fontWeight: "700", color: atSessGoal ? "#0f7a4a" : color }}>
+                      {sessions} / {rangeLabel}{atSessGoal ? " ✓" : ""}
                     </span>
                   </div>
-                  <SalesBar value={animated ? (redLightP || 0) : 0} color="#0f7a4a" bg="#a7f3d0" h={6} />
-                  <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
-                    <SalesNumInput value={s.redLight} onChange={v => updStat(t.name, "redLight", v)} color="#0f7a4a" />
-                    <span style={{ fontSize: "10px", color: "#8a7a6a" }}>red light this week</span>
-                  </div>
+                  <SalesBar value={animated ? sessP : 0} color={color} bg="#e8e0d6" h={6} />
+                  {!autoSess && (
+                    <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                      <SalesNumInput value={wg.sessions||0} onChange={v => updateWeeklyGoal(staff.id, "sessions", v)} color={color} />
+                      <span style={{ fontSize: "10px", color: "#8a7a6a" }}>sessions this week</span>
+                    </div>
+                  )}
+                  {autoSess && (
+                    <div style={{ marginTop: 5, fontSize: "10px", color: "#8a7a6a", fontStyle: "italic" }}>
+                      Counted automatically from Vagaro transactions
+                    </div>
+                  )}
                 </div>
-              )}
 
-              {/* Rebook % */}
-              {t.rebookGoal && (
-                <div style={{ borderTop: "1px solid #e8e0d6", paddingTop: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                    <span style={{ fontSize: "11px", color: "#8a7a6a" }}>Rebook %</span>
-                    <span style={{ fontSize: "11px", fontWeight: "700", color: atRebook ? "#0f7a4a" : t.color }}>
-                      {s.sessions > 0 ? rebookP.toFixed(1) : "0.0"}% / {t.rebookGoal}% goal{atRebook ? " 🎉" : ""}
-                    </span>
+                {/* Red light */}
+                {redGoal && (
+                  <div style={{ marginBottom: 12, padding: "10px 12px", background: "#dcf5ec", borderRadius: 10, border: "1px solid #86efac" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                      <span style={{ fontSize: "11px", color: "#0f7a4a", fontWeight: "600" }}>💡 Red Light Sessions</span>
+                      <span style={{ fontSize: "11px", fontWeight: "700", color: "#0f7a4a" }}>
+                        {wg.red_light} / {redGoal}{wg.red_light >= redGoal ? " ✓" : ""}
+                      </span>
+                    </div>
+                    <SalesBar value={animated ? (redLightP||0) : 0} color="#0f7a4a" bg="#a7f3d0" h={6} />
+                    <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                      <SalesNumInput value={wg.red_light||0} onChange={v => updateWeeklyGoal(staff.id, "red_light", v)} color="#0f7a4a" />
+                      <span style={{ fontSize: "10px", color: "#8a7a6a" }}>red light this week</span>
+                    </div>
                   </div>
-                  <SalesBar value={animated ? (rebookGoalP || 0) : 0} color={t.color} bg="#e8e0d6" h={6} />
-                  <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
-                    <SalesNumInput value={s.rebooked} onChange={v => updStat(t.name, "rebooked", v)} color={t.color} />
-                    <span style={{ fontSize: "10px", color: "#8a7a6a" }}>clients rebooked</span>
+                )}
+
+                {/* Rebook % */}
+                {rebookGoal && (
+                  <div style={{ borderTop: "1px solid #e8e0d6", paddingTop: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                      <span style={{ fontSize: "11px", color: "#8a7a6a" }}>Rebook %</span>
+                      <span style={{ fontSize: "11px", fontWeight: "700", color: atRebook ? "#0f7a4a" : color }}>
+                        {sessions > 0 ? rebookP.toFixed(1) : "0.0"}% / {rebookGoal}% goal{atRebook ? " 🎉" : ""}
+                      </span>
+                    </div>
+                    <SalesBar value={animated ? (rebookGoalP||0) : 0} color={color} bg="#e8e0d6" h={6} />
+                    <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                      <SalesNumInput value={wg.rebooked||0} onChange={v => updateWeeklyGoal(staff.id, "rebooked", v)} color={color} />
+                      <span style={{ fontSize: "10px", color: "#8a7a6a" }}>clients rebooked</span>
+                    </div>
+                    <div style={{ marginTop: 6, fontSize: "11px", color: "#8a7a6a", fontStyle: "italic" }}>
+                      {sessions > 0 ? `${wg.rebooked||0} of ${sessions} clients rebooked` : "Enter rebooks above"}
+                    </div>
                   </div>
-                  <div style={{ marginTop: 6, fontSize: "11px", color: "#8a7a6a", fontStyle: "italic" }}>
-                    {s.sessions > 0 ? `${s.rebooked} of ${s.sessions} clients rebooked` : "Enter sessions + rebooks above"}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Hot springs tracker */}
       <div style={{
-        ...S.card,
-        textAlign: "center",
-        background: goalUnlocked
-          ? "linear-gradient(135deg,#a0785a,#7a5640)"
-          : "#fff",
+        ...S.card, textAlign: "center", marginBottom: 8,
+        background: goalUnlocked ? "linear-gradient(135deg,#a0785a,#7a5640)" : "#fff",
         border: goalUnlocked ? "none" : "1px solid #e8e0d6",
         transition: "background 0.6s ease",
-        marginBottom: 8,
       }}>
         <div style={{ fontSize: 36, marginBottom: 8 }}>{goalUnlocked ? "🌊" : "💧"}</div>
         <div style={{ fontSize: "18px", fontWeight: "800", color: goalUnlocked ? "#fff" : "#1a120b", marginBottom: 6 }}>
@@ -5397,20 +5525,19 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
         </div>
         <div style={{ fontSize: "13px", color: goalUnlocked ? "rgba(255,255,255,0.85)" : "#8a7a6a" }}>
           {goalUnlocked
-            ? "Becky + the whole team hit their package goals. Pack your bags! 🎉"
-            : `Becky needs ${fmtDollar(Math.max(0, SALES_GOALS.ownerPackages - data.ownerSales))} more · Team needs ${fmtDollar(Math.max(0, SALES_GOALS.teamPackages - data.teamSales))} more`}
+            ? "Both goals hit. Pack your bags! 🎉"
+            : `Owner needs ${fmtDollar(Math.max(0, SALES_GOALS.ownerPackages - pkgChallenge.owner_sales))} more · Team needs ${fmtDollar(Math.max(0, SALES_GOALS.teamPackages - pkgChallenge.team_sales))} more`}
         </div>
         {!goalUnlocked && (
           <div style={{ marginTop: 16, display: "flex", justifyContent: "center", gap: 24, flexWrap: "wrap" }}>
             {[
-              { label: "Becky", p: ownerPct, color: "#a0785a", bg: "#f5ede4" },
-              { label: "Team",  p: teamPct,  color: "#1d5fa8", bg: "#dbeafe" },
-            ].map(({ label, p, color, bg }) => (
+              { label: "Owner", p: ownerPct, color: "#a0785a" },
+              { label: "Team",  p: teamPct,  color: "#1d5fa8" },
+            ].map(({ label, p, color }) => (
               <div key={label} style={{ textAlign: "center" }}>
                 <div style={{ fontSize: "11px", color: "#8a7a6a", marginBottom: 6 }}>{label}</div>
                 <div style={{ width: 120, height: 7, background: "#e8e0d6", borderRadius: 99, overflow: "hidden" }}>
-                  <div style={{ width: `${Math.min(p, 100)}%`, height: "100%",
-                    background: color, borderRadius: 99, transition: "width 1s ease" }} />
+                  <div style={{ width: `${Math.min(p,100)}%`, height: "100%", background: color, borderRadius: 99, transition: "width 1s ease" }} />
                 </div>
                 <div style={{ fontSize: "12px", color, fontWeight: "700", marginTop: 5 }}>{Math.round(p)}%</div>
               </div>
