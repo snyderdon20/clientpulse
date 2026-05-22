@@ -3729,36 +3729,51 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB, currentUserRoles 
     setLoadingHints(true);
     try {
       const client = sb();
-      // distinct provider IDs from transactions
+
+      // Pull IDs + names from transactions table
       const { data: txRows } = await client
         .from("transactions")
-        .select("vagaro_service_provider_id")
+        .select("vagaro_service_provider_id,created_by")
         .not("vagaro_service_provider_id", "is", null);
 
-      // appointment webhooks — payloads often carry provider name
+      // Pull ALL webhook_log entries — appointments AND transactions both carry provider info
       const { data: whRows } = await client
         .from("webhook_log")
         .select("event_type,payload")
-        .like("event_type", "appointment%")
-        .limit(500);
+        .order("received_at", { ascending: false })
+        .limit(1000);
 
       const map = {};
+      const add = (id, name) => {
+        if (!id) return;
+        map[id] = map[id] || { id, names: new Set() };
+        if (name) map[id].names.add(name);
+      };
+
       for (const row of txRows || []) {
-        const id = row.vagaro_service_provider_id;
-        if (id) map[id] = map[id] || { id, names: new Set() };
+        add(row.vagaro_service_provider_id, row.created_by || null);
       }
+
       for (const wh of whRows || []) {
-        const raw = wh.payload;
-        const p   = raw?.payload ?? raw?.Payload ?? raw?.data ?? raw ?? {};
-        const id  = p?.serviceProviderId ?? p?.ServiceProviderId ?? p?.providerId ?? p?.ProviderId;
-        const nm  = p?.providerName ?? p?.ProviderName ?? p?.serviceProviderName ?? p?.ServiceProviderName;
-        if (id) {
-          map[id] = map[id] || { id, names: new Set() };
-          if (nm) map[id].names.add(nm);
-        }
+        // Vagaro wraps the real data in payload.payload or payload.Payload
+        const raw = wh.payload ?? {};
+        const p   = raw.payload ?? raw.Payload ?? raw.data ?? raw.Data ?? raw;
+        // Try every known field name variant Vagaro uses
+        const id  = p?.ServiceProviderId ?? p?.serviceProviderId
+                 ?? p?.ProviderId        ?? p?.providerId
+                 ?? p?.StaffId          ?? p?.staffId;
+        const nm  = p?.ServiceProviderName ?? p?.serviceProviderName
+                 ?? p?.ProviderName        ?? p?.providerName
+                 ?? p?.StaffName          ?? p?.staffName
+                 ?? p?.EmployeeName       ?? p?.employeeName;
+        add(id != null ? String(id) : null, nm != null ? String(nm) : null);
       }
+
       setProviderHints(
-        Object.values(map).map((p) => ({ id: p.id, name: [...p.names][0] || null }))
+        Object.values(map)
+          .filter(p => p.id)
+          .map((p) => ({ id: p.id, name: [...p.names].filter(Boolean)[0] || null }))
+          .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
       );
     } catch (e) {
       setProviderHints([]);
