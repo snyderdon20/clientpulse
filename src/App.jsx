@@ -2370,12 +2370,11 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
     } else if (event._clearFollowUp) {
       onUpdate(client.id, { needsFollowUp: false });
     }
-    // Auto-set contactedAt when a comm event is first logged for a Lead,
-    // enabling the 14-day Lost Lead countdown.
+    // Update contactedAt on every comm logged for a Lead so the 14-day
+    // Lost Lead timer resets on each new contact attempt.
     if (
       event.type && event.type.startsWith("comm.") &&
-      statusLayer1 === "lead" &&
-      !client.contactedAt
+      statusLayer1 === "lead"
     ) {
       onUpdate(client.id, { contactedAt: new Date().toISOString() });
     }
@@ -2925,7 +2924,15 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
   const [sortBy, setSortBy] = useState("priority");
 
   const [snoozed, setSnoozed] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("cp_snoozed") || "{}"); } catch { return {}; }
+    try {
+      const raw = JSON.parse(localStorage.getItem("cp_snoozed") || "{}");
+      // Prune expired entries on load
+      const pruned = Object.fromEntries(Object.entries(raw).filter(([, until]) => until >= TODAY));
+      if (Object.keys(pruned).length !== Object.keys(raw).length) {
+        localStorage.setItem("cp_snoozed", JSON.stringify(pruned));
+      }
+      return pruned;
+    } catch { return {}; }
   });
   const snoozeItem = (clientId, actionType) => {
     const until = new Date(); until.setDate(until.getDate() + 7);
@@ -2984,8 +2991,8 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
   const actions = useMemo(() => {
     const items = [];
 
-    // MONDAY: new clients from last 7 days who haven't rebooked
-    if (weekday === "Monday" || true) { // always check, highlight on Monday
+    // New clients from last 7 days who haven't rebooked
+    {
       clients.forEach((c) => {
         const firstAppt = (c.appointments || [])
           .filter((a) => a.status === "completed")
