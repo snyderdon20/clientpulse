@@ -2564,6 +2564,12 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
           </button>
         </div>
       )}
+      {/* Recently-contacted cooldown banner */}
+      {(status === "overdue-contacted" || status === "stale-contacted") && (
+        <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#166534", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span>✅ <strong>Recently Contacted:</strong> {client.firstName} was reached out to within the last 7 days — removed from reach-out list until the window passes.</span>
+        </div>
+      )}
       {/* Overdue / Lapsed banners */}
       {(status === "overdue" || status === "overdue-with-package") && ds && upcoming.length === 0 && (
         <div style={{ background: "#fff8f0", border: "1px solid #f0e0c8", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#92400e", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
@@ -2989,6 +2995,8 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
     // 0. Follow-up needed — explicitly flagged after a logged comm
     clients.forEach((c) => {
       if (!c.needsFollowUp) return;
+      const { layer1 } = clientStatus(c);
+      if (layer1 === "restricted") return;
       items.push({ type: "followUp", priority: 0, client: c, reason: "Follow-up needed — flagged after last communication", icon: "📋", color: "#5b21b6", bg: "#ede9fe" });
     });
 
@@ -3038,7 +3046,18 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
       items.push({ type: "overdue", priority: 3, client: c, reason: `Overdue — ${ds} days since last visit${pkgNote}`, icon: layer2 === "overdue-with-package" ? "📦" : "🟡", color: "#92400e", bg: "#fef3c7" });
     });
 
-    // 5. Red Light — interested clients who haven't booked after 5+ days
+    // 5a. Red Light — offered but no response after 3+ days
+    clients.forEach((c) => {
+      if (c.redLightStatus !== "offered") return;
+      const lastRL = (c.history || [])
+        .filter((e) => e.detail && e.detail.includes("Red Light"))
+        .sort((a, b) => b.ts - a.ts)[0];
+      const daysSinceRL = lastRL ? Math.floor((Date.now() - lastRL.ts) / 86400000) : 999;
+      if (daysSinceRL < 3) return;
+      items.push({ type: "redLightFollow", priority: 3, client: c, reason: `Red Light offered — no response in ${daysSinceRL}d`, icon: "💡", color: "#92400e", bg: "#fef3c7" });
+    });
+
+    // 5b. Red Light — interested clients who haven't booked after 5+ days
     clients.forEach((c) => {
       if (c.redLightStatus !== "interested") return;
       const lastRL = (c.history || [])
@@ -3049,6 +3068,17 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
       items.push({ type: "redLightFollow", priority: 2, client: c, reason: `Red Light — interested, no booking in ${daysSinceRL}d`, icon: "⭐", color: "#1d5fa8", bg: "#dbeafe" });
     });
 
+    // 5c. Red Light — intro booked, follow up to confirm/convert to active
+    clients.forEach((c) => {
+      if (c.redLightStatus !== "intro_booked") return;
+      const lastRL = (c.history || [])
+        .filter((e) => e.detail && e.detail.includes("Red Light"))
+        .sort((a, b) => b.ts - a.ts)[0];
+      const daysSinceRL = lastRL ? Math.floor((Date.now() - lastRL.ts) / 86400000) : 999;
+      if (daysSinceRL < 1) return;
+      items.push({ type: "redLightFollow", priority: 2, client: c, reason: `Red Light intro booked — confirm session & convert to active`, icon: "📅", color: "#6d28d9", bg: "#ede9fe" });
+    });
+
     // 6. Red Light — not offered to any client with 1+ completed visits
     clients.forEach((c) => {
       if (c.redLightStatus != null) return;
@@ -3057,7 +3087,21 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
       items.push({ type: "redLightOffer", priority: 5, client: c, reason: "Red Light Therapy — hasn't been offered yet", icon: "💡", color: "#6b7280", bg: "#f9fafb" });
     });
 
-    // 7. Birthdays this week — no birthday outreach logged yet
+    // 7a. Lead recovery — first-session no-shows
+    clients.forEach((c) => {
+      const { layer2 } = clientStatus(c);
+      if (layer2 !== "first-session-no-show") return;
+      items.push({ type: "noShowRecovery", priority: 0, client: c, reason: "First session no-show — high-priority empathy recovery", icon: "🚫", color: "#92400e", bg: "#fffbeb" });
+    });
+
+    // 7b. Lead recovery — lost leads (14+ days, no activity)
+    clients.forEach((c) => {
+      const { layer2 } = clientStatus(c);
+      if (layer2 !== "lost-lead") return;
+      items.push({ type: "lostLead", priority: 4, client: c, reason: "Lost lead — no activity in 14+ days", icon: "💨", color: "#4b5563", bg: "#e5e7eb" });
+    });
+
+    // 8. Birthdays this week — no birthday outreach logged yet
     clients.forEach((c) => {
       if (!c.birthday) return;
       const bm = +c.birthday.slice(5, 7) - 1;
