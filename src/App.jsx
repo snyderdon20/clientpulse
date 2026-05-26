@@ -2998,8 +2998,9 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
       if (!alreadySent) items.push({ type: "postVisit", priority: 1, client: c, reason: `Visit ${daysSince(recentCompleted.date)}d ago — follow-up not yet sent`, icon: "❤️", color: "#be185d", bg: "#fce7f3" });
     });
 
-    // 3. Win-back — lapsed/stale clients with no upcoming appointment (skip recently contacted)
+    // 3. Win-back — lapsed/stale clients with no upcoming appointment (skip recently contacted or follow-up flagged)
     clients.forEach((c) => {
+      if (c.needsFollowUp) return;
       const { layer1, layer2 } = clientStatus(c);
       if (layer1 !== "lapsed") return;
       if (layer2 === "stale-contacted" || layer2 === "overdue-contacted") return;
@@ -3009,8 +3010,9 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
       items.push({ type: "lapsed", priority: 2, client: c, reason: `Lapsed — ${ds} days since last visit`, icon: "🔴", color: "#991b1b", bg: "#fee2e2" });
     });
 
-    // 4. Reach out — overdue clients with no upcoming appointment
+    // 4. Reach out — overdue clients with no upcoming appointment (skip follow-up flagged)
     clients.forEach((c) => {
+      if (c.needsFollowUp) return;
       const { layer2 } = clientStatus(c);
       if (layer2 !== "overdue" && layer2 !== "overdue-with-package") return;
       const hasUpcoming = (c.appointments || []).some((a) => a.date >= selectedDate && a.status !== "cancelled");
@@ -3503,6 +3505,7 @@ function PulsePage({ clients, templates, onGoToClient, onUpdateClient, staffName
 
   const lapsed = clients
     .filter((c) => {
+      if (c.needsFollowUp) return false;
       const { layer1, layer2 } = clientStatus(c);
       return layer1 === "lapsed"
         && layer2 !== "stale-contacted"
@@ -3513,6 +3516,7 @@ function PulsePage({ clients, templates, onGoToClient, onUpdateClient, staffName
 
   const overdue = clients
     .filter((c) => {
+      if (c.needsFollowUp) return false;
       const { layer2 } = clientStatus(c);
       return (layer2 === "overdue" || layer2 === "overdue-with-package") &&
         !(c.appointments || []).some((a) => a.date >= TODAY && a.status !== "cancelled");
