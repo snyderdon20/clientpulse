@@ -1077,32 +1077,14 @@ function StatusPill({ status, client }) {
 
 // All selectable statuses grouped by Layer 1, in display order.
 const STATUS_MENU = [
-  { layer1: "lead", items: [
-    { layer2: "new",                   label: "New"                   },
-    { layer2: "contacted",             label: "Contacted"             },
-    { layer2: "first-session-booked",  label: "First Session Booked"  },
-    { layer2: "first-session-no-show", label: "First Session No-Show" },
-    { layer2: "lost-lead",             label: "Lost Lead"             },
-    { layer2: "lead-follow-up",        label: "Needs Follow Up"       },
-  ]},
-  { layer1: "active", items: [
-    { layer2: "new-client",      label: "New Client"      },
-    { layer2: "regular",         label: "Regular"         },
-    { layer2: "package-holder",  label: "Package Holder"  },
+  { group: "Actions", color: "#5b21b6", items: [
     { layer2: "needs-follow-up", label: "Needs Follow Up" },
   ]},
-  { layer1: "lapsed", items: [
-    { layer2: "overdue-with-package", label: "Overdue + Package"    },
-    { layer2: "overdue",              label: "Overdue"               },
-    { layer2: "stale",                label: "Stale (61–90 days)"   },
-    { layer2: "expired-package",      label: "Expired Package"      },
-    { layer2: "lapsed-follow-up",     label: "Needs Follow Up"      },
+  { group: "Lead", color: "#1d5fa8", items: [
+    { layer2: "first-session-no-show", label: "First Session No-Show" },
+    { layer2: "lost-lead",             label: "Lost Lead"             },
   ]},
-  { layer1: "inactive", items: [
-    { layer2: "past-client",      label: "Past Client"    },
-    { layer2: "inactive-follow-up", label: "Needs Follow Up" },
-  ]},
-  { layer1: "restricted", items: [
+  { group: "Restricted", color: "#9d174d", items: [
     { layer2: "deactivated", label: "Deactivated" },
     { layer2: "flagged",     label: "Flagged"      },
   ]},
@@ -1159,16 +1141,15 @@ function StatusSelector({ client, onUpdate }) {
         }}>
           {!showFlagInput ? (
             <>
-              {STATUS_MENU.map(({ layer1, items }) => {
-                const l1cfg = LAYER1_CFG[layer1] ?? { label: layer1, color: "#8a7a6a" };
+              {STATUS_MENU.map(({ group, color, items }) => {
                 return (
-                  <div key={layer1}>
+                  <div key={group}>
                     <div style={{
                       fontSize: "9px", fontWeight: "800", letterSpacing: "1.2px",
-                      textTransform: "uppercase", color: l1cfg.color,
+                      textTransform: "uppercase", color,
                       padding: "8px 10px 3px", opacity: 0.8,
                     }}>
-                      {l1cfg.label}
+                      {group}
                     </div>
                     {items.map(({ layer2, label }) => {
                       const l2cfg2 = LAYER2_CFG[layer2] ?? {};
@@ -1399,6 +1380,7 @@ function LogModal({ client, templates, onClose, onSave, preset, staffName = "Sta
   const [gmailSending, setGmailSending] = useState(false);
   const [gmailError,   setGmailError]   = useState(null);
   const [gmailSent,    setGmailSent]    = useState(false);
+  const [clearFollowUp, setClearFollowUp] = useState(!!client.needsFollowUp);
   const noteMode = !!preset?.noteMode;
 
   useEffect(() => {
@@ -1438,7 +1420,11 @@ function LogModal({ client, templates, onClose, onSave, preset, staffName = "Sta
       const detail = notes.trim()
         ? `${category} · Outcome: ${outcome} · Note: ${notes}`
         : `${category} · Outcome: ${outcome}`;
-      onSave(mkEvent(type, detail, { by: staff, outcome }));
+      const event = mkEvent(type, detail, { by: staff, outcome });
+      if (client.needsFollowUp && outcome !== "Follow-up Needed" && clearFollowUp) {
+        event._clearFollowUp = true;
+      }
+      onSave(event);
     }
   };
 
@@ -1563,7 +1549,7 @@ function LogModal({ client, templates, onClose, onSave, preset, staffName = "Sta
         {/* Outcome */}
         <div style={{ marginBottom: 12 }}>
           <label style={S.lbl}>Outcome</label>
-          <select value={outcome} onChange={(e) => setOutcome(e.target.value)} style={S.inp}>
+          <select value={outcome} onChange={(e) => { setOutcome(e.target.value); if (e.target.value === "Follow-up Needed") setClearFollowUp(false); }} style={S.inp}>
             {(OUTCOMES[channel] || []).map((o) => <option key={o}>{o}</option>)}
           </select>
         </div>
@@ -1624,6 +1610,13 @@ function LogModal({ client, templates, onClose, onSave, preset, staffName = "Sta
           </div>
         )}
 
+        {client.needsFollowUp && !noteMode && outcome !== "Follow-up Needed" && (
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "12px", color: "#5b21b6", fontWeight: "600", cursor: "pointer", padding: "6px 0" }}>
+            <input type="checkbox" checked={clearFollowUp} onChange={(e) => setClearFollowUp(e.target.checked)}
+              style={{ accentColor: "#7c3aed", width: 14, height: 14, cursor: "pointer" }} />
+            Clear "Needs Follow Up" flag after saving
+          </label>
+        )}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
           {onSaveTask && (
             <button style={{ ...S.btn("ghost"), fontSize: "12px", color: "#7a5640", borderColor: "#e8d5c0" }}
@@ -2372,16 +2365,16 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
 
   const addCommunication = (event) => {
     appendHistory(event);
-    // Auto-flag for follow-up when outcome is "Follow-up Needed"
     if (event.outcome === "Follow-up Needed") {
       onUpdate(client.id, { needsFollowUp: true });
+    } else if (event._clearFollowUp) {
+      onUpdate(client.id, { needsFollowUp: false });
     }
-    // Auto-set contactedAt when a comm event is first logged for a Lead,
-    // enabling the 14-day Lost Lead countdown.
+    // Update contactedAt on every comm logged for a Lead so the 14-day
+    // Lost Lead timer resets on each new contact attempt.
     if (
       event.type && event.type.startsWith("comm.") &&
-      statusLayer1 === "lead" &&
-      !client.contactedAt
+      statusLayer1 === "lead"
     ) {
       onUpdate(client.id, { contactedAt: new Date().toISOString() });
     }
@@ -2931,7 +2924,14 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
   const [sortBy, setSortBy] = useState("priority");
 
   const [snoozed, setSnoozed] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("cp_snoozed") || "{}"); } catch { return {}; }
+    try {
+      const raw = JSON.parse(localStorage.getItem("cp_snoozed") || "{}");
+      const pruned = Object.fromEntries(Object.entries(raw).filter(([, until]) => until >= TODAY));
+      if (Object.keys(pruned).length !== Object.keys(raw).length) {
+        localStorage.setItem("cp_snoozed", JSON.stringify(pruned));
+      }
+      return pruned;
+    } catch { return {}; }
   });
   const snoozeItem = (clientId, actionType) => {
     const until = new Date(); until.setDate(until.getDate() + 7);
@@ -2990,8 +2990,8 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
   const actions = useMemo(() => {
     const items = [];
 
-    // MONDAY: new clients from last 7 days who haven't rebooked
-    if (weekday === "Monday" || true) { // always check, highlight on Monday
+    // New clients from last 7 days who haven't rebooked
+    {
       clients.forEach((c) => {
         const firstAppt = (c.appointments || [])
           .filter((a) => a.status === "completed")
