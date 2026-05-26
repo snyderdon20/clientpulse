@@ -354,8 +354,10 @@ const RED_LIGHT_FUNNEL = {
 const RED_LIGHT_STATUSES = RED_LIGHT_FUNNEL;
 
 // ─── HISTORY EVENT FACTORY ────────────────────────────────────────────────────
-function mkEvent(type, detail, { by = "System", ts = nowMs() } = {}) {
-  return { id: uid(), type, detail, by, ts };
+function mkEvent(type, detail, { by = "System", ts = nowMs(), outcome } = {}) {
+  const e = { id: uid(), type, detail, by, ts };
+  if (outcome) e.outcome = outcome;
+  return e;
 }
 
 const CHAN_TYPE = {
@@ -1423,7 +1425,7 @@ function LogModal({ client, templates, onClose, onSave, preset, staffName = "Sta
       const detail = notes.trim()
         ? `${category} · Outcome: ${outcome} · Note: ${notes}`
         : `${category} · Outcome: ${outcome}`;
-      onSave(mkEvent(type, detail, { by: staff }));
+      onSave(mkEvent(type, detail, { by: staff, outcome }));
     }
   };
 
@@ -2358,6 +2360,10 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
 
   const addCommunication = (event) => {
     appendHistory(event);
+    // Auto-flag for follow-up when outcome is "Follow-up Needed"
+    if (event.outcome === "Follow-up Needed") {
+      onUpdate(client.id, { needsFollowUp: true });
+    }
     // Auto-set contactedAt when a comm event is first logged for a Lead,
     // enabling the 14-day Lost Lead countdown.
     if (
@@ -2692,12 +2698,13 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
 // ─── CLIENT SIDEBAR ───────────────────────────────────────────────────────────
 // Filters match on Layer 1 parent key or Layer 2 sub-status key.
 const SIDEBAR_FILTERS = [
-  { key: "all",        label: "All"      },
-  { key: "lead",       label: "Leads"    },
-  { key: "active",     label: "Active"   },
-  { key: "lapsed",     label: "Lapsed"   },
-  { key: "inactive",   label: "Inactive" },
-  { key: "restricted", label: "Restricted" },
+  { key: "all",            label: "All"        },
+  { key: "lead",           label: "Leads"      },
+  { key: "active",         label: "Active"     },
+  { key: "lapsed",         label: "Lapsed"     },
+  { key: "inactive",       label: "Inactive"   },
+  { key: "restricted",     label: "Restricted" },
+  { key: "needs-follow-up", label: "Follow-Up" },
 ];
 
 function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search, setSearch, tagFilter, setTagFilter, fullWidth, onAddClient, staffName = "Staff" }) {
@@ -2962,6 +2969,12 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
         items.push({ type: "newNoRebook", priority: 0, client: c, reason: `New client ${daysAgo}d ago — hasn't rebooked yet`, icon: "🆕", color: "#1d5fa8", bg: "#dbeafe", isMonday: weekday === "Monday" });
       });
     }
+
+    // 0. Follow-up needed — explicitly flagged after a logged comm
+    clients.forEach((c) => {
+      if (!c.needsFollowUp) return;
+      items.push({ type: "followUp", priority: 0, client: c, reason: "Follow-up needed — flagged after last communication", icon: "📋", color: "#5b21b6", bg: "#ede9fe" });
+    });
 
     // 1. Appointment reminders — has appt tomorrow, no reminder logged today or yesterday
     clients.forEach((c) => {
