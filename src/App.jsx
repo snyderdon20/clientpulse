@@ -2899,6 +2899,7 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [editTask, setEditTask] = useState(null);
   const [selectedDate, setSelectedDate] = useState(TODAY);
+  const [sortBy, setSortBy] = useState("priority");
 
   const isToday = selectedDate === TODAY;
   const selDateObj = new Date(selectedDate + "T12:00:00");
@@ -3040,8 +3041,22 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
       }
     });
 
+    if (sortBy === "oldest") {
+      return items.sort((a, b) => {
+        const da = daysSince(lastCompletedDate(a.client)) ?? -1;
+        const db = daysSince(lastCompletedDate(b.client)) ?? -1;
+        return db - da;
+      });
+    }
+    if (sortBy === "recent") {
+      return items.sort((a, b) => {
+        const da = daysSince(lastCompletedDate(a.client)) ?? Infinity;
+        const db = daysSince(lastCompletedDate(b.client)) ?? Infinity;
+        return da - db;
+      });
+    }
     return items.sort((a, b) => a.priority - b.priority);
-  }, [clients, selectedDate, weekday]);
+  }, [clients, selectedDate, weekday, sortBy]);
 
   const PRESET_MAP = {
     reminder: { channel: "Text/SMS", category: "Appointment Reminder",    templateKey: null },
@@ -3171,7 +3186,7 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
 
       {/* Daily action list */}
       <div style={S.card}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: actions.length > 0 ? 10 : 16, flexWrap: "wrap", gap: 8 }}>
           <label style={{ ...S.lbl, marginBottom: 0 }}>Today's action list</label>
           <span style={{ fontSize: "11px", fontWeight: "700",
             color: totalActionCount > 0 ? "#991b1b" : "#0f7a4a",
@@ -3180,6 +3195,25 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
             {totalActionCount > 0 ? `${totalActionCount} need attention` : "All clear ✓"}
           </span>
         </div>
+        {actions.length > 0 && (
+          <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
+            {[
+              { key: "priority", label: "Priority" },
+              { key: "oldest",   label: "Overdue first" },
+              { key: "recent",   label: "Recent first" },
+            ].map((s) => (
+              <button key={s.key} onClick={() => setSortBy(s.key)} style={{
+                fontSize: "11px", padding: "3px 10px", borderRadius: "100px",
+                cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontWeight: "700",
+                border: sortBy === s.key ? "1px solid #d4bfaa" : "1px solid #e8e0d6",
+                background: sortBy === s.key ? "#f5ede4" : "transparent",
+                color: sortBy === s.key ? "#7a5640" : "#8a7a6a",
+              }}>
+                {s.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {totalActionCount === 0 ? (
           <div style={{ textAlign: "center", padding: "32px 20px" }}>
