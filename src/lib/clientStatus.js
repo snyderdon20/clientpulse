@@ -212,6 +212,7 @@ export const LAYER2_CFG = {
   // Lead
   "new":                    { label: "New",                   layer1: "lead",       bg: "#dbeafe", color: "#1d5fa8" },
   "contacted":              { label: "Contacted",             layer1: "lead",       bg: "#bfdbfe", color: "#1e40af" },
+  "lead-follow-up":         { label: "Needs Follow Up",       layer1: "lead",       bg: "#ede9fe", color: "#5b21b6" },
   "first-session-booked":   { label: "First Session Booked",  layer1: "lead",       bg: "#a5f3fc", color: "#0e7490" },
   "first-session-no-show":  { label: "First Session No-Show", layer1: "lead",       bg: "#fef3c7", color: "#92400e" },
   "lost-lead":              { label: "Lost Lead",             layer1: "lead",       bg: "#e5e7eb", color: "#4b5563" },
@@ -226,9 +227,11 @@ export const LAYER2_CFG = {
   "overdue-contacted":      { label: "Overdue · Contacted",   layer1: "lapsed",     bg: "#fef3c7", color: "#92400e" },
   "stale":                  { label: "Stale (61–90 days)",    layer1: "lapsed",     bg: "#fee2e2", color: "#991b1b" },
   "stale-contacted":        { label: "Stale · Contacted",     layer1: "lapsed",     bg: "#fee2e2", color: "#991b1b" },
+  "lapsed-follow-up":       { label: "Needs Follow Up",       layer1: "lapsed",     bg: "#ede9fe", color: "#5b21b6" },
   "expired-package":        { label: "Expired Package",       layer1: "lapsed",     bg: "#fecaca", color: "#7f1d1d" },
   // Inactive
   "past-client":            { label: "Past Client",           layer1: "inactive",   bg: "#f1f5f9", color: "#64748b" },
+  "inactive-follow-up":     { label: "Needs Follow Up",       layer1: "inactive",   bg: "#ede9fe", color: "#5b21b6" },
   // Restricted
   "deactivated":            { label: "Deactivated",           layer1: "restricted", bg: "#fce7f3", color: "#9d174d" },
   "flagged":                { label: "Flagged",               layer1: "restricted", bg: "#fecdd3", color: "#881337" },

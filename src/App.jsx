@@ -320,10 +320,17 @@ function clientStatus(client) {
     if (cfg2) return { layer1: cfg2.layer1, layer2: client.statusOverride };
   }
 
-  // needsFollowUp boolean (kept for backwards compat with direct DB writes)
-  if (client.needsFollowUp) return { layer1: "active", layer2: "needs-follow-up" };
-
-  return computeClientStatus(client);
+  const natural = computeClientStatus(client);
+  if (client.needsFollowUp) {
+    const followUpLayer2 = {
+      "lead":     "lead-follow-up",
+      "active":   "needs-follow-up",
+      "lapsed":   "lapsed-follow-up",
+      "inactive": "inactive-follow-up",
+    }[natural.layer1];
+    if (followUpLayer2) return { layer1: natural.layer1, layer2: followUpLayer2 };
+  }
+  return natural;
 }
 
 function fillTemplate(text, client) {
@@ -1078,6 +1085,7 @@ const STATUS_MENU = [
     { layer2: "first-session-booked",  label: "First Session Booked"  },
     { layer2: "first-session-no-show", label: "First Session No-Show" },
     { layer2: "lost-lead",             label: "Lost Lead"             },
+    { layer2: "lead-follow-up",        label: "Needs Follow Up"       },
   ]},
   { layer1: "active", items: [
     { layer2: "new-client",      label: "New Client"      },
@@ -1090,9 +1098,11 @@ const STATUS_MENU = [
     { layer2: "overdue",              label: "Overdue"               },
     { layer2: "stale",                label: "Stale (61–90 days)"   },
     { layer2: "expired-package",      label: "Expired Package"      },
+    { layer2: "lapsed-follow-up",     label: "Needs Follow Up"      },
   ]},
   { layer1: "inactive", items: [
-    { layer2: "past-client", label: "Past Client" },
+    { layer2: "past-client",      label: "Past Client"    },
+    { layer2: "inactive-follow-up", label: "Needs Follow Up" },
   ]},
   { layer1: "restricted", items: [
     { layer2: "deactivated", label: "Deactivated" },
@@ -1111,13 +1121,15 @@ function StatusSelector({ client, onUpdate }) {
 
   const close = () => { setOpen(false); setShowFlagInput(false); setFlagNote(""); };
 
+  const FOLLOW_UP_STATUSES = new Set(["needs-follow-up", "lead-follow-up", "lapsed-follow-up", "inactive-follow-up"]);
+
   const applyStatus = (layer2) => {
     if (layer2 === "flagged") { setShowFlagInput(true); return; }
     const base = { statusOverride: null, needsFollowUp: false, restrictedStatus: null, restrictedNote: null };
     if (layer2 === "deactivated") {
       onUpdate(client.id, { ...base, restrictedStatus: "deactivated" });
-    } else if (layer2 === "needs-follow-up") {
-      onUpdate(client.id, { ...base, statusOverride: "needs-follow-up", needsFollowUp: true });
+    } else if (FOLLOW_UP_STATUSES.has(layer2)) {
+      onUpdate(client.id, { ...base, needsFollowUp: true });
     } else {
       onUpdate(client.id, { ...base, statusOverride: layer2 });
     }
@@ -2544,9 +2556,9 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
         </div>
       )}
       {/* Needs Follow Up alert */}
-      {status === "needs-follow-up" && upcoming.length === 0 && (
+      {client.needsFollowUp && (
         <div style={{ background: "#faf5ff", border: "1px solid #c4b5fd", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#5b21b6", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-          <span>📋 <strong>Needs Follow Up:</strong> {client.firstName} left without booking their next appointment.</span>
+          <span>📋 <strong>Needs Follow Up:</strong> {client.firstName} has been flagged for follow-up.</span>
           <button onClick={() => setShowLog({ channel: "Text/SMS", category: "Rebooking Outreach" })} style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#7c3aed", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}>
             Log outreach →
           </button>
@@ -2719,6 +2731,7 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
     clients.forEach((cl) => {
       const s = clientStatus(cl);
       c[s.layer1] = (c[s.layer1] || 0) + 1;
+      if (cl.needsFollowUp) c["needs-follow-up"] = (c["needs-follow-up"] || 0) + 1;
     });
     return c;
   }, [clients]);
@@ -2727,7 +2740,10 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
     clients
       .filter((cl) => {
         const s = clientStatus(cl);
-        const matchF = filter === "all" || s.layer1 === filter || s.layer2 === filter;
+        const matchF = filter === "all"
+          || s.layer1 === filter
+          || s.layer2 === filter
+          || (filter === "needs-follow-up" && cl.needsFollowUp);
         const q = search.toLowerCase();
         const matchS = !q ||
           fullName(cl).toLowerCase().includes(q) ||
