@@ -2985,10 +2985,11 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
       if (!alreadySent) items.push({ type: "postVisit", priority: 1, client: c, reason: `Visit ${daysSince(recentCompleted.date)}d ago — follow-up not yet sent`, icon: "❤️", color: "#be185d", bg: "#fce7f3" });
     });
 
-    // 3. Win-back — lapsed/stale clients with no upcoming appointment
+    // 3. Win-back — lapsed/stale clients with no upcoming appointment (skip recently contacted)
     clients.forEach((c) => {
-      const { layer1 } = clientStatus(c);
+      const { layer1, layer2 } = clientStatus(c);
       if (layer1 !== "lapsed") return;
+      if (layer2 === "stale-contacted" || layer2 === "overdue-contacted") return;
       const hasUpcoming = (c.appointments || []).some((a) => a.date >= selectedDate && a.status !== "cancelled");
       if (hasUpcoming) return;
       const ds = daysSince(lastCompletedDate(c));
@@ -3489,8 +3490,11 @@ function PulsePage({ clients, templates, onGoToClient, onUpdateClient, staffName
 
   const lapsed = clients
     .filter((c) => {
-      const { layer1 } = clientStatus(c);
-      return layer1 === "lapsed" && !(c.appointments || []).some((a) => a.date >= TODAY && a.status !== "cancelled");
+      const { layer1, layer2 } = clientStatus(c);
+      return layer1 === "lapsed"
+        && layer2 !== "stale-contacted"
+        && layer2 !== "overdue-contacted"
+        && !(c.appointments || []).some((a) => a.date >= TODAY && a.status !== "cancelled");
     })
     .sort(visitSort);
 

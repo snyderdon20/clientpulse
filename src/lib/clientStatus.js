@@ -52,6 +52,24 @@ function hasOutreachHistory(client) {
   return (client.history || []).some((h) => h.type && h.type.startsWith("comm."));
 }
 
+const CONTACTED_COOLDOWN_DAYS = 7;
+
+/** Returns the ms timestamp of the most recent comm.* history entry, or null. */
+function lastOutreachTs(client) {
+  const entries = (client.history || []).filter(
+    (h) => h.type && h.type.startsWith("comm.")
+  );
+  if (!entries.length) return null;
+  return Math.max(...entries.map((h) => h.ts || 0));
+}
+
+/** True if a comm entry was logged within the cooldown window. */
+function wasRecentlyContacted(client) {
+  const ts = lastOutreachTs(client);
+  if (!ts) return false;
+  return Date.now() - ts < CONTACTED_COOLDOWN_DAYS * MSEC_PER_DAY;
+}
+
 /**
  * Returns { layer1: string, layer2: string } for the given client.
  *
@@ -130,15 +148,19 @@ export function computeClientStatus(client) {
 
   // ── Layer 1: LAPSED — 31 – 90 days since last visit ──────────────────────
   if (ds > 30) {
+    const contacted = wasRecentlyContacted(client);
     // Stale: 61 – 90 days (or 90+ with a future appt keeping them out of inactive)
     if (ds > 60) {
-      return { layer1: "lapsed", layer2: "stale" };
+      return { layer1: "lapsed", layer2: contacted ? "stale-contacted" : "stale" };
     }
     // Overdue 31 – 60 days
     const hasActivePackage =
       (client.packageCreditsRemaining ?? 0) > 0 &&
       client.packageExpirationDate &&
       client.packageExpirationDate > today;
+    if (contacted) {
+      return { layer1: "lapsed", layer2: "overdue-contacted" };
+    }
     if (hasActivePackage) {
       return { layer1: "lapsed", layer2: "overdue-with-package" };
     }
@@ -194,7 +216,9 @@ export const LAYER2_CFG = {
   // Lapsed
   "overdue-with-package":   { label: "Overdue + Package",     layer1: "lapsed",     bg: "#ffedd5", color: "#9a3412" },
   "overdue":                { label: "Overdue",               layer1: "lapsed",     bg: "#fef3c7", color: "#92400e" },
+  "overdue-contacted":      { label: "Overdue · Contacted",   layer1: "lapsed",     bg: "#fef3c7", color: "#92400e" },
   "stale":                  { label: "Stale (61–90 days)",    layer1: "lapsed",     bg: "#fee2e2", color: "#991b1b" },
+  "stale-contacted":        { label: "Stale · Contacted",     layer1: "lapsed",     bg: "#fee2e2", color: "#991b1b" },
   "expired-package":        { label: "Expired Package",       layer1: "lapsed",     bg: "#fecaca", color: "#7f1d1d" },
   // Inactive
   "past-client":            { label: "Past Client",           layer1: "inactive",   bg: "#f1f5f9", color: "#64748b" },
