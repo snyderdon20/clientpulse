@@ -349,12 +349,10 @@ const CARE_CATEGORIES = {
 };
 
 const RED_LIGHT_FUNNEL = {
-  null:          { label: "Not offered yet",      icon: "💡", color: "#6b7280", bg: "#f9fafb",  next: "offered",       action: "Offer it",           actionNote: "Offer Red Light Therapy at next contact" },
-  offered:       { label: "Offered — no response",icon: "💡", color: "#92400e", bg: "#fef3c7",  next: "interested",    action: "Follow up",          actionNote: "Follow up on Red Light interest" },
-  interested:    { label: "Interested",           icon: "⭐", color: "#1d5fa8", bg: "#dbeafe",  next: "intro_booked",  action: "Book intro",         actionNote: "Book Red Light intro session" },
-  intro_booked:  { label: "Intro booked",         icon: "📅", color: "#6d28d9", bg: "#ede9fe",  next: "active",        action: "Confirm session",    actionNote: "Confirm Red Light intro session" },
-  active:        { label: "Active client",        icon: "✅", color: "#065f46", bg: "#d1fae5",  next: "active",        action: "Log session",        actionNote: "Log Red Light session" },
-  declined:      { label: "Declined",             icon: "✗",  color: "#9ca3af", bg: "#f3f4f6",  next: "offered",       action: "Re-offer",           actionNote: "Re-offer Red Light Therapy" },
+  null:     { label: "Not offered yet", icon: "💡", color: "#6b7280", bg: "#f9fafb",  next: "offered",  action: "Offer it",      actionNote: "Offer Red Light Therapy at next contact" },
+  offered:  { label: "Considering",    icon: "⭐", color: "#1d5fa8", bg: "#dbeafe",  next: "active",   action: "Book session",  actionNote: "Book Red Light session" },
+  active:   { label: "Active client",  icon: "✅", color: "#065f46", bg: "#d1fae5",  next: "active",   action: "Log session",   actionNote: "Log Red Light session" },
+  declined: { label: "Declined",       icon: "✗",  color: "#9ca3af", bg: "#f3f4f6",  next: "offered",  action: "Re-offer",      actionNote: "Re-offer Red Light Therapy" },
 };
 
 // Keep RED_LIGHT_STATUSES as alias for any legacy references
@@ -1140,10 +1138,13 @@ function StatusSelector({ client, onUpdate }) {
     <div style={{ position: "relative", display: "inline-flex" }}>
       <button
         onClick={() => { setOpen((v) => !v); setShowFlagInput(false); setFlagNote(""); }}
-        title={hasManualOverride ? "Status manually overridden — click to change" : "Click to set status"}
+        title={hasManualOverride ? "Status manually set — click to change or reset" : "Click to set status"}
         style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: "2px 0", background: "transparent", border: "none", cursor: "pointer" }}
       >
         <StatusPill status={activeLayer2} />
+        {hasManualOverride && (
+          <span title="Manually set" style={{ fontSize: "9px", fontWeight: "800", color: "#7c3aed", background: "#ede9fe", border: "1px solid #c4b5fd", borderRadius: "4px", padding: "0 4px", lineHeight: "14px", flexShrink: 0 }}>M</span>
+        )}
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={l2cfg.color} strokeWidth="2.5" strokeLinecap="round" style={{ opacity: 0.6, flexShrink: 0 }}>
           <path d="M6 9l6 6 6-6" />
         </svg>
@@ -1764,8 +1765,9 @@ function RedLightRow({ client, onLog, onStageChange }) {
   const current = RED_LIGHT_FUNNEL[stage] || RED_LIGHT_FUNNEL[null];
   const lastSent = getLastSent(client, "Red Light Therapy");
 
-  const stageOrder = [null, "offered", "interested", "intro_booked", "active", "declined"];
-  const stageIdx = stageOrder.indexOf(stage);
+  const stageOrder = [null, "offered", "active", "declined"];
+  const progressOrder = [null, "offered", "active"];
+  const stageIdx = progressOrder.indexOf(stage);
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", borderRadius: "10px", background: current.bg, border: `1px solid ${current.color}33`, position: "relative" }}>
@@ -1781,11 +1783,11 @@ function RedLightRow({ client, onLog, onStageChange }) {
         </div>
         {/* Progress dots */}
         <div style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: lastSent ? 2 : 0 }}>
-          {stageOrder.slice(0, 5).map((s, i) => (
+          {progressOrder.map((s, i) => (
             <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: i <= stageIdx ? current.color : "#e5e7eb", transition: "background 0.2s" }} />
           ))}
           <span style={{ fontSize: "10px", color: "#b0a090", marginLeft: 4 }}>
-            {stage === "active" ? "Active" : stage === null ? "Not started" : `Step ${Math.max(stageIdx, 0) + 1} of 5`}
+            {stage === "active" ? "Active" : stage === null ? "Not started" : "Considering"}
           </span>
         </div>
         {lastSent && (
@@ -2287,12 +2289,10 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
       .then(({ data }) => { if (data) setTransactions(data); });
   }, [client.id, usingDB, supabaseUrl, supabaseAnonKey]);
 
-  const lifetimeTotal = transactions.length > 0
-    ? transactions.reduce((sum, t) =>
-        sum + (+t.cc_amount||0) + (+t.cash_amount||0) + (+t.check_amount||0) + (+t.ach_amount||0)
-            + (+t.package_redemption||0) + (+t.gc_redemption||0) + (+t.bank_account_amount||0)
-            + (+t.vagaro_pay_later_amount||0) + (+t.other_amount||0), 0)
-    : client.totalSpent || 0;
+  const lifetimeTotal = transactions.reduce((sum, t) =>
+    sum + (+t.cc_amount||0) + (+t.cash_amount||0) + (+t.check_amount||0) + (+t.ach_amount||0)
+        + (+t.package_redemption||0) + (+t.gc_redemption||0) + (+t.bank_account_amount||0)
+        + (+t.vagaro_pay_later_amount||0) + (+t.other_amount||0), 0);
 
   const initInfoForm = () => ({
     firstName:          client.firstName          || "",
@@ -2930,6 +2930,20 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
   const [selectedDate, setSelectedDate] = useState(TODAY);
   const [sortBy, setSortBy] = useState("priority");
 
+  const [snoozed, setSnoozed] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("cp_snoozed") || "{}"); } catch { return {}; }
+  });
+  const snoozeItem = (clientId, actionType) => {
+    const until = new Date(); until.setDate(until.getDate() + 7);
+    const updated = { ...snoozed, [`${clientId}:${actionType}`]: until.toISOString().split("T")[0] };
+    setSnoozed(updated);
+    localStorage.setItem("cp_snoozed", JSON.stringify(updated));
+  };
+  const isSnoozed = (clientId, actionType) => {
+    const until = snoozed[`${clientId}:${actionType}`];
+    return until && until >= TODAY;
+  };
+
   const isToday = selectedDate === TODAY;
   const selDateObj = new Date(selectedDate + "T12:00:00");
   const prevDate = new Date(selDateObj); prevDate.setDate(selDateObj.getDate() - 1);
@@ -3046,42 +3060,21 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
       items.push({ type: "overdue", priority: 3, client: c, reason: `Overdue — ${ds} days since last visit${pkgNote}`, icon: layer2 === "overdue-with-package" ? "📦" : "🟡", color: "#92400e", bg: "#fef3c7" });
     });
 
-    // 5a. Red Light — offered but no response after 3+ days
+    // 5. Red Light — considering but no booking after 7+ days
     clients.forEach((c) => {
       if (c.redLightStatus !== "offered") return;
       const lastRL = (c.history || [])
         .filter((e) => e.detail && e.detail.includes("Red Light"))
         .sort((a, b) => b.ts - a.ts)[0];
       const daysSinceRL = lastRL ? Math.floor((Date.now() - lastRL.ts) / 86400000) : 999;
-      if (daysSinceRL < 3) return;
-      items.push({ type: "redLightFollow", priority: 3, client: c, reason: `Red Light offered — no response in ${daysSinceRL}d`, icon: "💡", color: "#92400e", bg: "#fef3c7" });
+      if (daysSinceRL < 7) return;
+      items.push({ type: "redLightFollow", priority: 3, client: c, reason: `Red Light — considering, follow up to book (${daysSinceRL}d)`, icon: "⭐", color: "#1d5fa8", bg: "#dbeafe" });
     });
 
-    // 5b. Red Light — interested clients who haven't booked after 5+ days
-    clients.forEach((c) => {
-      if (c.redLightStatus !== "interested") return;
-      const lastRL = (c.history || [])
-        .filter((e) => e.detail && e.detail.includes("Red Light"))
-        .sort((a, b) => b.ts - a.ts)[0];
-      const daysSinceRL = lastRL ? Math.floor((Date.now() - lastRL.ts) / 86400000) : 999;
-      if (daysSinceRL < 5) return;
-      items.push({ type: "redLightFollow", priority: 2, client: c, reason: `Red Light — interested, no booking in ${daysSinceRL}d`, icon: "⭐", color: "#1d5fa8", bg: "#dbeafe" });
-    });
-
-    // 5c. Red Light — intro booked, follow up to confirm/convert to active
-    clients.forEach((c) => {
-      if (c.redLightStatus !== "intro_booked") return;
-      const lastRL = (c.history || [])
-        .filter((e) => e.detail && e.detail.includes("Red Light"))
-        .sort((a, b) => b.ts - a.ts)[0];
-      const daysSinceRL = lastRL ? Math.floor((Date.now() - lastRL.ts) / 86400000) : 999;
-      if (daysSinceRL < 1) return;
-      items.push({ type: "redLightFollow", priority: 2, client: c, reason: `Red Light intro booked — confirm session & convert to active`, icon: "📅", color: "#6d28d9", bg: "#ede9fe" });
-    });
-
-    // 6. Red Light — not offered to any client with 1+ completed visits
+    // 6. Red Light — not offered to clients with 1+ visits (skip prenatal)
     clients.forEach((c) => {
       if (c.redLightStatus != null) return;
+      if (c.careCategory === "prenatal") return;
       const hasVisit = (c.appointments || []).some((a) => a.status === "completed");
       if (!hasVisit) return;
       items.push({ type: "redLightOffer", priority: 5, client: c, reason: "Red Light Therapy — hasn't been offered yet", icon: "💡", color: "#6b7280", bg: "#f9fafb" });
@@ -3144,7 +3137,8 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
 
   // Tasks due on selectedDate or overdue relative to it
   const dueTasks = tasks.filter((t) => !t.done && t.dueDate <= selectedDate);
-  const totalActionCount = actions.length + dueTasks.length;
+  const visibleActions = actions.filter((item) => !isSnoozed(item.client.id, item.type));
+  const totalActionCount = visibleActions.length + dueTasks.length;
 
   // Referral milestones — clients who have hit 3 referrals
   const referralMilestones = useMemo(() => {
@@ -3340,7 +3334,7 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
             })}
 
             {/* Auto-generated client action items */}
-            {actions.map((item) => {
+            {visibleActions.map((item) => {
               const c = item.client;
               return (
                 <div key={`${item.type}-${c.id}`} style={{
@@ -3363,11 +3357,19 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
                     </div>
                     <div style={{ fontSize: "12px", color: item.color, fontWeight: "600" }}>{item.reason}</div>
                   </div>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onGoToClient(c.id); }}
-                    style={{ fontSize: "11px", fontWeight: "700", color: item.color, background: "#fff", border: `1px solid ${item.color}44`, borderRadius: 8, padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0, whiteSpace: "nowrap" }}>
-                    Open →
-                  </button>
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); snoozeItem(c.id, item.type); }}
+                      title="Hide for 7 days"
+                      style={{ fontSize: "11px", fontWeight: "700", color: "#8a7a6a", background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: 8, padding: "5px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", whiteSpace: "nowrap" }}>
+                      7d ✕
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onGoToClient(c.id); }}
+                      style={{ fontSize: "11px", fontWeight: "700", color: item.color, background: "#fff", border: `1px solid ${item.color}44`, borderRadius: 8, padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", whiteSpace: "nowrap" }}>
+                      Open →
+                    </button>
+                  </div>
                 </div>
               );
             })}
