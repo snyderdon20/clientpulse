@@ -6083,7 +6083,9 @@ async function dbUpdateClient(url, key, id, updates) {
   if (updates.history?.length > 0) {
     const e = updates.history[updates.history.length - 1];
     const direction = e.type === 'comm.inperson' ? 'in-person' : e.type.startsWith('comm.') ? 'outbound' : 'internal';
-    await sb.from('history').insert({ id: e.id||uid(), client_id: id, type: e.type, detail: e.detail, by: e.by||'System', ts: e.ts||Date.now(), source: 'manual', direction }).catch(console.warn);
+    const tsIso = typeof e.ts === 'number' ? new Date(e.ts).toISOString() : (e.ts || new Date().toISOString());
+    const { error: hErr } = await sb.from('history').insert({ id: e.id||uid(), client_id: id, type: e.type, detail: e.detail, by: e.by||'System', ts: tsIso, source: 'manual', direction });
+    if (hErr) console.warn('history insert error:', hErr);
   }
 }
 
