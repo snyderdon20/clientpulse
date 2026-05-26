@@ -54,13 +54,20 @@ function hasOutreachHistory(client) {
 
 const CONTACTED_COOLDOWN_DAYS = 7;
 
-/** Returns the ms timestamp of the most recent comm.* history entry, or null. */
+/** Returns the ms timestamp of the most recent comm.* history entry, or null.
+ *  Handles both numeric ms timestamps (local state) and ISO strings (Supabase). */
 function lastOutreachTs(client) {
   const entries = (client.history || []).filter(
     (h) => h.type && h.type.startsWith("comm.")
   );
   if (!entries.length) return null;
-  return Math.max(...entries.map((h) => h.ts || 0));
+  const timestamps = entries.map((h) => {
+    if (!h.ts) return 0;
+    const n = typeof h.ts === "number" ? h.ts : new Date(h.ts).getTime();
+    return isNaN(n) ? 0 : n;
+  });
+  const max = Math.max(...timestamps);
+  return max > 0 ? max : null;
 }
 
 /** True if a comm entry was logged within the cooldown window. */
