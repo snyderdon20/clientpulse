@@ -2926,7 +2926,6 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
   const [snoozed, setSnoozed] = useState(() => {
     try {
       const raw = JSON.parse(localStorage.getItem("cp_snoozed") || "{}");
-      // Prune expired entries on load
       const pruned = Object.fromEntries(Object.entries(raw).filter(([, until]) => until >= TODAY));
       if (Object.keys(pruned).length !== Object.keys(raw).length) {
         localStorage.setItem("cp_snoozed", JSON.stringify(pruned));
