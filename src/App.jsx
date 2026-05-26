@@ -2271,6 +2271,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
   const [transactions, setTransactions] = useState([]);
   const [showLogAppt,  setShowLogAppt]  = useState(false);
   const [showLogTx,    setShowLogTx]    = useState(false);
+  const [saveError,    setSaveError]    = useState(null);
 
   useEffect(() => {
     if (!usingDB || !supabaseUrl || !supabaseAnonKey || !client.id) return;
@@ -2321,11 +2322,14 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
   );
 
   const appendHistory = (event) => {
-    onUpdate(client.id, { history: [...(client.history || []), event] });
+    onUpdate(client.id, { _appendHistory: event });
   };
 
   const handleSaveAppointment = async (appt) => {
-    if (usingDB) await dbSaveAppointment(supabaseUrl, supabaseAnonKey, client.id, appt).catch(console.warn);
+    if (usingDB) {
+      try { await dbSaveAppointment(supabaseUrl, supabaseAnonKey, client.id, appt); }
+      catch { setSaveError("Failed to save appointment — check your connection and try again."); return; }
+    }
     onUpdate(client.id, { appointments: [...(client.appointments || []), appt] });
     appendHistory(mkEvent("appt.scheduled",
       `Appointment manually logged: ${appt.service} · ${fmtDate(appt.date)}${appt.time ? " at " + fmtTime(appt.time) : ""} · ${appt.duration} min · ${APPT_STATUSES.find(s => s.value === appt.status)?.label ?? appt.status}`,
@@ -2334,7 +2338,10 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
   };
 
   const handleSaveTransaction = async (tx) => {
-    if (usingDB) await dbSaveTransaction(supabaseUrl, supabaseAnonKey, client.id, tx).catch(console.warn);
+    if (usingDB) {
+      try { await dbSaveTransaction(supabaseUrl, supabaseAnonKey, client.id, tx); }
+      catch { setSaveError("Failed to save transaction — check your connection and try again."); return; }
+    }
     setTransactions((ts) => [tx, ...ts]);
     const txTotalAmt = TX_METHODS.reduce((s, m) => s + (+tx[m.key] || 0), 0);
     appendHistory(mkEvent("payment.received",
@@ -2548,6 +2555,13 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
           <strong>Profile Deactivated.</strong> All communications suppressed.
         </div>
       )}
+      {/* Save error banner */}
+      {saveError && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#991b1b", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <span>⚠️ {saveError}</span>
+          <button onClick={() => setSaveError(null)} style={{ background: "none", border: "none", fontSize: "16px", cursor: "pointer", color: "#991b1b", lineHeight: 1 }}>×</button>
+        </div>
+      )}
       {/* Needs Follow Up alert */}
       {client.needsFollowUp && (
         <div style={{ background: "#faf5ff", border: "1px solid #c4b5fd", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#5b21b6", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
@@ -2593,6 +2607,20 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
           Today is {client.firstName}'s birthday — great time to send a birthday offer!
         </div>
       )}
+      {/* Package expiring soon */}
+      {(() => {
+        if (!client.packageExpirationDate || (client.packageCreditsRemaining ?? 0) <= 0) return null;
+        const daysUntil = Math.ceil((new Date(client.packageExpirationDate + "T12:00:00") - new Date(TODAY + "T12:00:00")) / 86400000);
+        if (daysUntil < 0 || daysUntil > 14) return null;
+        return (
+          <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#92400e", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <span>📦 <strong>Package expiring in {daysUntil} day{daysUntil !== 1 ? "s" : ""}:</strong> {client.packageCreditsRemaining} credit{client.packageCreditsRemaining !== 1 ? "s" : ""} remaining — remind {client.firstName} to book.</span>
+            <button onClick={() => setShowLog({ channel: "Text/SMS", category: "Rebooking Outreach" })} style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#ea580c", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}>
+              Log outreach →
+            </button>
+          </div>
+        );
+      })()}
 
 
           {/* Golden Nuggets */}
@@ -2716,6 +2744,7 @@ const SIDEBAR_FILTERS = [
   { key: "inactive",       label: "Inactive"   },
   { key: "restricted",     label: "Restricted" },
   { key: "needs-follow-up", label: "Follow-Up" },
+  { key: "waitlisted",     label: "Waitlist"   },
 ];
 
 function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search, setSearch, tagFilter, setTagFilter, fullWidth, onAddClient, staffName = "Staff" }) {
@@ -2731,6 +2760,7 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
       const s = clientStatus(cl);
       c[s.layer1] = (c[s.layer1] || 0) + 1;
       if (cl.needsFollowUp) c["needs-follow-up"] = (c["needs-follow-up"] || 0) + 1;
+      if (cl.waitlisted) c["waitlisted"] = (c["waitlisted"] || 0) + 1;
     });
     return c;
   }, [clients]);
@@ -2742,7 +2772,8 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
         const matchF = filter === "all"
           || s.layer1 === filter
           || s.layer2 === filter
-          || (filter === "needs-follow-up" && cl.needsFollowUp);
+          || (filter === "needs-follow-up" && cl.needsFollowUp)
+          || (filter === "waitlisted" && cl.waitlisted);
         const q = search.toLowerCase();
         const matchS = !q ||
           fullName(cl).toLowerCase().includes(q) ||
@@ -2955,7 +2986,7 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
   // "tomorrow" relative to selected date for reminder logic
   const tomorrowStr = nextStr;
   // "7 days from selected" for birthday window
-  const in7Obj = new Date(selDateObj); in7Obj.setDate(selDateObj.getDate() + 7);
+  const in14Obj = new Date(selDateObj); in14Obj.setDate(selDateObj.getDate() + 14);
 
   // 7 days before selected date (for new client review on Mondays)
   const weekAgoStr = new Date(selDateObj.getTime() - 7 * 86400000).toISOString().split("T")[0];
@@ -3094,14 +3125,28 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
       items.push({ type: "lostLead", priority: 4, client: c, reason: "Lost lead — no activity in 14+ days", icon: "💨", color: "#4b5563", bg: "#e5e7eb" });
     });
 
-    // 8. Birthdays this week — no birthday outreach logged yet
+    // 8. Package expiring within 14 days with credits remaining
+    clients.forEach((c) => {
+      if (!c.packageExpirationDate || (c.packageCreditsRemaining ?? 0) <= 0) return;
+      const daysUntil = Math.ceil((new Date(c.packageExpirationDate + "T12:00:00") - selDateObj) / 86400000);
+      if (daysUntil < 0 || daysUntil > 14) return;
+      items.push({ type: "packageExpiring", priority: 1, client: c, reason: `Package expires in ${daysUntil}d — ${c.packageCreditsRemaining} credit${c.packageCreditsRemaining !== 1 ? "s" : ""} remaining`, icon: "📦", color: "#92400e", bg: "#fff7ed" });
+    });
+
+    // 9. Waitlisted clients — contact when a slot opens
+    clients.forEach((c) => {
+      if (!c.waitlisted) return;
+      items.push({ type: "waitlisted", priority: 2, client: c, reason: "On waitlist — contact when a slot opens", icon: "⏳", color: "#1d5fa8", bg: "#dbeafe" });
+    });
+
+    // 10. Birthdays in next 14 days — no birthday outreach logged yet
     clients.forEach((c) => {
       if (!c.birthday) return;
       const bm = +c.birthday.slice(5, 7) - 1;
       const bd = +c.birthday.slice(8, 10);
       const bDate = new Date(selDateObj.getFullYear(), bm, bd);
       if (bDate < new Date(selDateObj.getFullYear(), selDateObj.getMonth(), selDateObj.getDate())) bDate.setFullYear(selDateObj.getFullYear() + 1);
-      if (bDate > in7Obj) return;
+      if (bDate > in14Obj) return;
       const lastB = getLastSent(c, "Birthday / Special Offer");
       const alreadySent = lastB === "today" || lastB === "yesterday";
       if (!alreadySent) {
@@ -6080,11 +6125,11 @@ async function dbUpdateClient(url, key, id, updates) {
   const map = { firstName:'first_name', lastName:'last_name', email:'email', phone:'phone', birthday:'birthday', customerSince:'customer_since', lastVisit:'last_visit', avgVisitIntervalDays:'avg_visit_interval_days', referredBy:'referred_by', careCategory:'care_category', redLightStatus:'red_light_status', waitlisted:'waitlisted', address:'address', city:'city', state:'state', zip:'zip', tags:'tags', goldenNuggets:'golden_nuggets', noShows:'no_shows', totalSpent:'total_spent', vagaroId:'vagaro_id', vagaroSynced:'vagaro_synced', statusOverride:'status_override', completedAppointmentsCount:'completed_appointments_count', packageCreditsRemaining:'package_credits_remaining', packageExpirationDate:'package_expiration_date', giftCardBalance:'gift_card_balance', giftCardPurchaseDate:'gift_card_purchase_date', contactedAt:'contacted_at', needsFollowUp:'needs_follow_up', restrictedStatus:'restricted_status', restrictedNote:'restricted_note' };
   Object.entries(map).forEach(([k,v]) => { if (updates[k] !== undefined) m[v] = updates[k]; });
   if (Object.keys(m).length > 0) { const { error } = await sb.from('clients').update(m).eq('id', id); if (error) throw error; }
-  if (updates.history?.length > 0) {
-    const e = updates.history[updates.history.length - 1];
-    const direction = e.type === 'comm.inperson' ? 'in-person' : e.type.startsWith('comm.') ? 'outbound' : 'internal';
-    const tsIso = typeof e.ts === 'number' ? new Date(e.ts).toISOString() : (e.ts || new Date().toISOString());
-    const { error: hErr } = await sb.from('history').insert({ id: e.id||uid(), client_id: id, type: e.type, detail: e.detail, by: e.by||'System', ts: tsIso, source: 'manual', direction });
+  const histEvent = updates._appendHistory || (updates.history?.length > 0 ? updates.history[updates.history.length - 1] : null);
+  if (histEvent) {
+    const direction = histEvent.type === 'comm.inperson' ? 'in-person' : histEvent.type.startsWith('comm.') ? 'outbound' : 'internal';
+    const tsIso = typeof histEvent.ts === 'number' ? new Date(histEvent.ts).toISOString() : (histEvent.ts || new Date().toISOString());
+    const { error: hErr } = await sb.from('history').insert({ id: histEvent.id||uid(), client_id: id, type: histEvent.type, detail: histEvent.detail, by: histEvent.by||'System', ts: tsIso, source: 'manual', direction });
     if (hErr) console.warn('history insert error:', hErr);
   }
 }
@@ -6491,7 +6536,11 @@ function App() {
 
   const updateClient = useCallback(
     (id, updates) => {
-      setClients((cs) => cs.map((c) => (c.id === id ? { ...c, ...updates } : c)));
+      setClients((cs) => cs.map((c) => {
+        if (c.id !== id) return c;
+        if (updates._appendHistory) return { ...c, history: [...(c.history || []), updates._appendHistory] };
+        return { ...c, ...updates };
+      }));
       if (usingDB) dbUpdateClient(supabaseUrl, supabaseAnonKey, id, updates).catch((e) => console.warn("DB updateClient:", e));
     },
     [usingDB, supabaseUrl, supabaseAnonKey]
