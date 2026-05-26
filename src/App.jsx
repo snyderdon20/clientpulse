@@ -2702,6 +2702,7 @@ const SIDEBAR_FILTERS = [
 
 function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search, setSearch, tagFilter, setTagFilter, fullWidth, onAddClient, staffName = "Staff" }) {
   const [showNewClient, setShowNewClient] = useState(false);
+  const [sort, setSort] = useState("name");
   const allTags = useMemo(
     () => [...new Set(clients.flatMap((c) => c.tags || []))].sort(),
     [clients]
@@ -2729,10 +2730,20 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
         return matchF && matchS && matchT;
       })
       .sort((a, b) => {
+        if (sort === "recent") {
+          const da = daysSince(lastCompletedDate(a)) ?? Infinity;
+          const db = daysSince(lastCompletedDate(b)) ?? Infinity;
+          return da - db;
+        }
+        if (sort === "oldest") {
+          const da = daysSince(lastCompletedDate(a)) ?? -1;
+          const db = daysSince(lastCompletedDate(b)) ?? -1;
+          return db - da;
+        }
         const last = (a.lastName || "").localeCompare(b.lastName || "");
         return last !== 0 ? last : (a.firstName || "").localeCompare(b.firstName || "");
       }),
-    [clients, filter, search, tagFilter]
+    [clients, filter, search, tagFilter, sort]
   );
 
   return (
@@ -2816,6 +2827,24 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
           </select>
         </div>
       )}
+
+      <div style={{ padding: "0 12px 8px", display: "flex", gap: 4 }}>
+        {[
+          { key: "name",   label: "A→Z"     },
+          { key: "recent", label: "Recent"   },
+          { key: "oldest", label: "Overdue"  },
+        ].map((s) => (
+          <button key={s.key} onClick={() => setSort(s.key)} style={{
+            flex: 1, fontSize: "11px", padding: "4px 0", borderRadius: "8px",
+            cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontWeight: "700",
+            border: sort === s.key ? "1px solid #d4bfaa" : "1px solid #e8e0d6",
+            background: sort === s.key ? "#f5ede4" : "transparent",
+            color: sort === s.key ? "#7a5640" : "#8a7a6a",
+          }}>
+            {s.label}
+          </button>
+        ))}
+      </div>
 
       <div style={{ flex: 1, overflowY: "auto" }}>
         {filtered.length === 0 && (
@@ -3416,13 +3445,20 @@ function PulsePage({ clients, templates, onGoToClient, onUpdateClient, staffName
   const [showGroupTpl, setShowGroupTpl] = useState(false);
   const [groupTplKey, setGroupTplKey] = useState("rebooking");
   const [composer, setComposer] = useState(null); // { client, triggerId }
+  const [sortDir, setSortDir] = useState("desc"); // desc = longest since first, asc = most recent first
+
+  const visitSort = (a, b) => {
+    const da = daysSince(lastCompletedDate(a)) ?? (sortDir === "desc" ? -1 : Infinity);
+    const db = daysSince(lastCompletedDate(b)) ?? (sortDir === "desc" ? -1 : Infinity);
+    return sortDir === "desc" ? db - da : da - db;
+  };
 
   const lapsed = clients
     .filter((c) => {
       const { layer1 } = clientStatus(c);
       return layer1 === "lapsed" && !(c.appointments || []).some((a) => a.date >= TODAY && a.status !== "cancelled");
     })
-    .sort((a, b) => (daysSince(lastCompletedDate(b)) || 0) - (daysSince(lastCompletedDate(a)) || 0));
+    .sort(visitSort);
 
   const overdue = clients
     .filter((c) => {
@@ -3430,7 +3466,7 @@ function PulsePage({ clients, templates, onGoToClient, onUpdateClient, staffName
       return (layer2 === "overdue" || layer2 === "overdue-with-package") &&
         !(c.appointments || []).some((a) => a.date >= TODAY && a.status !== "cancelled");
     })
-    .sort((a, b) => (daysSince(lastCompletedDate(b)) || 0) - (daysSince(lastCompletedDate(a)) || 0));
+    .sort(visitSort);
 
   const now2 = new Date();
   const in14 = new Date(now2.getTime() + 14 * 86400000);
@@ -3476,7 +3512,7 @@ function PulsePage({ clients, templates, onGoToClient, onUpdateClient, staffName
         Clients that need your personal attention today.
       </p>
 
-      <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
         {groupTabs.map((t) => (
           <button
             key={t.key}
@@ -3492,6 +3528,20 @@ function PulsePage({ clients, templates, onGoToClient, onUpdateClient, staffName
             {t.label}
           </button>
         ))}
+        {groupTab !== "birthdays" && (
+          <button
+            onClick={() => setSortDir((d) => d === "desc" ? "asc" : "desc")}
+            style={{
+              marginLeft: "auto", fontSize: "11px", padding: "5px 11px", borderRadius: "100px",
+              cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontWeight: "700",
+              border: "1px solid #e8e0d6", background: "transparent", color: "#8a7a6a",
+              display: "flex", alignItems: "center", gap: 4,
+            }}
+            title="Toggle sort order"
+          >
+            {sortDir === "desc" ? "↓ Longest since" : "↑ Most recent"}
+          </button>
+        )}
       </div>
 
       {activeGroup.length > 0 && (
