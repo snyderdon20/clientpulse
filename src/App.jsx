@@ -4254,6 +4254,7 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB, currentUserRoles 
           role: (editDraft.roles || []).find(r => r !== 'admin') || editDraft.roles?.[0] || 'therapist',
         } : {}),
         vagaro_provider_id:   editDraft.vagaro_provider_id   || null,
+        vagaro_provider_name: editDraft.vagaro_provider_name || null,
         sales_display_role:   editDraft.sales_display_role   || null,
         sales_session_low:    Number(editDraft.sales_session_low)  || 10,
         sales_session_high:   Number(editDraft.sales_session_high) || 15,
@@ -4345,7 +4346,7 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB, currentUserRoles 
                   })}
                 </div>
                 <button
-                  onClick={() => { if (editingId === member.id) { setEditingId(null); } else { setEditingId(member.id); setEditDraft({ full_name: member.full_name || "", email: member.email || "", roles: member.roles || (member.role ? [member.role] : []), vagaro_provider_id: member.vagaro_provider_id || "", sales_display_role: member.sales_display_role || "", sales_session_low: member.sales_session_low ?? 10, sales_session_high: member.sales_session_high ?? 15, sales_rebook_goal: member.sales_rebook_goal ?? "", sales_red_light_goal: member.sales_red_light_goal ?? "", sales_color: member.sales_color || "#a0785a", show_on_sales: member.show_on_sales ?? true }); } }}
+                  onClick={() => { if (editingId === member.id) { setEditingId(null); } else { setEditingId(member.id); setEditDraft({ full_name: member.full_name || "", email: member.email || "", roles: member.roles || (member.role ? [member.role] : []), vagaro_provider_id: member.vagaro_provider_id || "", vagaro_provider_name: member.vagaro_provider_name || "", sales_display_role: member.sales_display_role || "", sales_session_low: member.sales_session_low ?? 10, sales_session_high: member.sales_session_high ?? 15, sales_rebook_goal: member.sales_rebook_goal ?? "", sales_red_light_goal: member.sales_red_light_goal ?? "", sales_color: member.sales_color || "#a0785a", show_on_sales: member.show_on_sales ?? true }); } }}
                   style={{ fontSize: "11px", fontWeight: "700", color: editingId === member.id ? "#8a7a6a" : "#6b5244", background: editingId === member.id ? "#f0e8de" : "#f5ede4", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
                   {editingId === member.id ? "Cancel" : "Edit"}
                 </button>
@@ -4413,42 +4414,76 @@ function StaffManager({ supabaseUrl, supabaseAnonKey, usingDB, currentUserRoles 
                   {/* Sales dashboard goals */}
                   <div style={{ background: "#faf8f5", borderRadius: 10, padding: "12px 14px", marginBottom: 12, border: "1px solid #e8e0d6" }}>
                     <div style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 10 }}>Sales Dashboard</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-                      <div style={{ position: "relative" }}>
-                        <label style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", display: "block", marginBottom: 4 }}>Vagaro Provider ID</label>
-                        <div style={{ display: "flex", gap: 6 }}>
+                    {/* Vagaro provider linking — two fields so both the webhook-encoded ID
+                        and the CSV display name are stored. Lookup fills both at once. */}
+                    <div style={{ position: "relative", marginBottom: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                        <div style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px" }}>
+                          Vagaro Provider Linking
+                        </div>
+                        <button type="button" onClick={discoverProviders} disabled={loadingHints}
+                          title="Find provider IDs and names from your webhook & transaction data"
+                          style={{ padding: "5px 10px", borderRadius: 7, border: "1.5px solid #e8e0d6", background: "#f5f0eb", fontSize: "11px", fontWeight: "700", color: "#a0785a", cursor: loadingHints ? "wait" : "pointer", whiteSpace: "nowrap", fontFamily: "'DM Sans',sans-serif" }}>
+                          {loadingHints ? "…" : "🔍 Lookup"}
+                        </button>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <div>
+                          <label style={{ fontSize: "9px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", display: "block", marginBottom: 3 }}>
+                            Provider ID <span style={{ color: "#b0a090", fontWeight: "400", textTransform: "none", letterSpacing: 0 }}>(webhook transactions)</span>
+                          </label>
                           <input value={editDraft.vagaro_provider_id} onChange={(e) => setEditDraft((d) => ({ ...d, vagaro_provider_id: e.target.value }))}
-                            placeholder="e.g. sp_abc123"
-                            style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e0d6", fontSize: "12px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
-                          <button type="button" onClick={discoverProviders} disabled={loadingHints}
-                            title="Find provider IDs from your webhook & transaction data"
-                            style={{ padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e0d6", background: "#f5f0eb", fontSize: "11px", fontWeight: "700", color: "#a0785a", cursor: loadingHints ? "wait" : "pointer", whiteSpace: "nowrap", fontFamily: "'DM Sans',sans-serif" }}>
-                            {loadingHints ? "…" : "Lookup"}
+                            placeholder="e.g. dLUP-Dadc…=="
+                            style={{ width: "100%", padding: "7px 9px", borderRadius: 7, border: "1.5px solid #e8e0d6", fontSize: "11px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: "9px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", display: "block", marginBottom: 3 }}>
+                            Provider Name <span style={{ color: "#b0a090", fontWeight: "400", textTransform: "none", letterSpacing: 0 }}>(CSV transactions)</span>
+                          </label>
+                          <input value={editDraft.vagaro_provider_name} onChange={(e) => setEditDraft((d) => ({ ...d, vagaro_provider_name: e.target.value }))}
+                            placeholder="e.g. Becky Owen"
+                            style={{ width: "100%", padding: "7px 9px", borderRadius: 7, border: "1.5px solid #e8e0d6", fontSize: "11px", fontFamily: "'DM Sans',sans-serif", outline: "none", boxSizing: "border-box" }} />
+                        </div>
+                      </div>
+                      <div style={{ fontSize: "10px", color: "#b0a090", marginTop: 4 }}>
+                        Use Lookup to auto-fill from your data, or paste the exact string shown in the diagnostic panel on the Sales page.
+                      </div>
+                      {providerHints && providerHints.length === 0 && (
+                        <div style={{ fontSize: "11px", color: "#a0785a", marginTop: 4 }}>No provider IDs found in your data yet.</div>
+                      )}
+                      {providerHints && providerHints.length > 0 && (
+                        <div style={{ position: "absolute", zIndex: 50, top: "100%", left: 0, right: 0, background: "#fff", border: "1.5px solid #e8e0d6", borderRadius: 8, marginTop: 2, boxShadow: "0 4px 16px rgba(0,0,0,0.10)", overflow: "hidden" }}>
+                          <div style={{ padding: "6px 10px", fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", borderBottom: "1px solid #f0ebe4" }}>
+                            Click to fill both fields
+                          </div>
+                          {providerHints.map((ph) => (
+                            <button key={ph.id} type="button"
+                              onClick={() => {
+                                setEditDraft((d) => ({
+                                  ...d,
+                                  vagaro_provider_id:   ph.id,
+                                  vagaro_provider_name: ph.name || d.vagaro_provider_name,
+                                }));
+                                setProviderHints(null);
+                              }}
+                              style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", cursor: "pointer", fontSize: "12px", fontFamily: "'DM Sans',sans-serif", color: "#2e2418", borderBottom: "1px solid #f5f0eb" }}
+                              onMouseOver={(e) => e.currentTarget.style.background = "#faf8f5"}
+                              onMouseOut={(e) => e.currentTarget.style.background = "none"}
+                            >
+                              <span style={{ fontWeight: "700" }}>{ph.name || ph.id}</span>
+                              {ph.name && ph.name !== ph.id && (
+                                <span style={{ fontSize: "10px", color: "#8a7a6a", marginLeft: 8, fontFamily: "monospace" }}>{ph.id}</span>
+                              )}
+                            </button>
+                          ))}
+                          <button type="button" onClick={() => setProviderHints(null)}
+                            style={{ display: "block", width: "100%", textAlign: "center", padding: "6px", background: "none", border: "none", cursor: "pointer", fontSize: "11px", color: "#a0785a", fontFamily: "'DM Sans',sans-serif" }}>
+                            Dismiss
                           </button>
                         </div>
-                        {providerHints && providerHints.length === 0 && (
-                          <div style={{ fontSize: "11px", color: "#a0785a", marginTop: 4 }}>No provider IDs found in your data yet.</div>
-                        )}
-                        {providerHints && providerHints.length > 0 && (
-                          <div style={{ position: "absolute", zIndex: 50, top: "100%", left: 0, right: 0, background: "#fff", border: "1.5px solid #e8e0d6", borderRadius: 8, marginTop: 2, boxShadow: "0 4px 16px rgba(0,0,0,0.10)", overflow: "hidden" }}>
-                            <div style={{ padding: "6px 10px", fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", borderBottom: "1px solid #f0ebe4" }}>Select to fill</div>
-                            {providerHints.map((ph) => (
-                              <button key={ph.id} type="button"
-                                onClick={() => { setEditDraft((d) => ({ ...d, vagaro_provider_id: ph.id })); setProviderHints(null); }}
-                                style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", cursor: "pointer", fontSize: "12px", fontFamily: "'DM Sans',sans-serif", color: "#2e2418", borderBottom: "1px solid #f5f0eb" }}
-                                onMouseOver={(e) => e.currentTarget.style.background = "#faf8f5"}
-                                onMouseOut={(e) => e.currentTarget.style.background = "none"}
-                              >
-                                <span style={{ fontWeight: "700", color: "#2e2418" }}>{ph.name || ph.id}</span>
-                              </button>
-                            ))}
-                            <button type="button" onClick={() => setProviderHints(null)}
-                              style={{ display: "block", width: "100%", textAlign: "center", padding: "6px", background: "none", border: "none", cursor: "pointer", fontSize: "11px", color: "#a0785a", fontFamily: "'DM Sans',sans-serif" }}>
-                              Dismiss
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                      )}
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
                       <div>
                         <label style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", display: "block", marginBottom: 4 }}>Display Role</label>
                         <input value={editDraft.sales_display_role} onChange={(e) => setEditDraft((d) => ({ ...d, sales_display_role: e.target.value }))}
@@ -5774,7 +5809,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
     if (!usingDB || !supabaseUrl || !supabaseAnonKey) { setSalesStaff([]); return; }
     getSB(supabaseUrl, supabaseAnonKey)
       .from("staff")
-      .select("id,full_name,role,roles,vagaro_provider_id,sales_display_role,sales_session_low,sales_session_high,sales_rebook_goal,sales_red_light_goal,sales_color,show_on_sales")
+      .select("id,full_name,role,roles,vagaro_provider_id,vagaro_provider_name,sales_display_role,sales_session_low,sales_session_high,sales_rebook_goal,sales_red_light_goal,sales_color,show_on_sales")
       .eq("active", true)
       .eq("show_on_sales", true)
       .order("created_at")
@@ -5908,10 +5943,12 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
     };
     // 1. vagaro_provider_id (encoded ID from webhook transactions)
     if (staff.vagaro_provider_id) addMatch(staff.vagaro_provider_id);
-    // 2. Full name "First Last" (display name from CSV transactions)
+    // 2. vagaro_provider_name (display name explicitly linked in staff settings)
+    if (staff.vagaro_provider_name) addMatch(staff.vagaro_provider_name);
+    // 3. Full name "First Last" (display name fallback)
     if (staff.full_name) {
       addMatch(staff.full_name);
-      // 3. "Last, First" — Vagaro CSV sometimes exports in this order
+      // 4. "Last, First" — Vagaro CSV sometimes exports in this order
       const parts = staff.full_name.trim().split(/\s+/);
       if (parts.length >= 2) {
         const lastName  = parts[parts.length - 1];
@@ -5935,6 +5972,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
       }
     };
     if (staff.vagaro_provider_id) addMatch(staff.vagaro_provider_id);
+    if (staff.vagaro_provider_name) addMatch(staff.vagaro_provider_name);
     if (staff.full_name) {
       addMatch(staff.full_name);
       const parts = staff.full_name.trim().split(/\s+/);
@@ -5994,6 +6032,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
       }
     };
     if (st.vagaro_provider_id) addMatch(st.vagaro_provider_id);
+    if (st.vagaro_provider_name) addMatch(st.vagaro_provider_name);
     if (st.full_name) {
       addMatch(st.full_name);
       const parts = st.full_name.trim().split(/\s+/);
