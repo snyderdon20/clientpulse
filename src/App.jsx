@@ -5791,6 +5791,8 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
   const [salesStaff,    setSalesStaff]    = useState([]);
   // Session counts from transactions keyed by vagaro_provider_id
   const [sessionCounts, setSessionCounts] = useState({});
+  // RLT session counts (item_sold contains "red light") — separate from massage counts
+  const [rltCounts,     setRltCounts]     = useState({});
   // Weekly rebook/red-light keyed by staff.id
   const [weeklyGoals,   setWeeklyGoals]   = useState({});
   // Package challenge for selected month
@@ -5816,26 +5818,33 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
       .then(({ data }) => setSalesStaff(data || []));
   }, [usingDB, supabaseUrl, supabaseAnonKey]);
 
-  // Count service transactions per provider for the selected week
+  // Count service transactions per provider for the selected week.
+  // Splits into massage (sessionCounts) and red light therapy (rltCounts)
+  // based on whether item_sold contains "red light" (case-insensitive).
   useEffect(() => {
-    if (!usingDB || !supabaseUrl || !supabaseAnonKey) { setSessionCounts({}); return; }
+    if (!usingDB || !supabaseUrl || !supabaseAnonKey) { setSessionCounts({}); setRltCounts({}); return; }
     const wEnd = new Date(weekOf);
     wEnd.setDate(wEnd.getDate() + 7);
     getSB(supabaseUrl, supabaseAnonKey)
       .from("transactions")
-      .select("vagaro_service_provider_id,purchase_type")
+      .select("vagaro_service_provider_id,purchase_type,item_sold")
       .gte("transaction_date", weekOf.toISOString())
       .lt("transaction_date",  wEnd.toISOString())
       .then(({ data: rows }) => {
-        const counts = {};
+        const massage = {};
+        const rlt     = {};
         for (const row of rows || []) {
           const pid = row.vagaro_service_provider_id;
           if (!pid) continue;
           const pt = (row.purchase_type || "").toLowerCase();
-          // Match "Service", "Services", "Service Add-on", or blank (Vagaro varies)
-          if (pt === "service" || pt === "services" || pt.startsWith("service add") || pt === "") counts[pid] = (counts[pid] || 0) + 1;
+          if (pt === "service" || pt === "services" || pt.startsWith("service add") || pt === "") {
+            const isRlt = (row.item_sold || "").toLowerCase().includes("red light");
+            if (isRlt) rlt[pid]     = (rlt[pid]     || 0) + 1;
+            else       massage[pid] = (massage[pid] || 0) + 1;
+          }
         }
-        setSessionCounts(counts);
+        setSessionCounts(massage);
+        setRltCounts(rlt);
       });
   }, [usingDB, supabaseUrl, supabaseAnonKey, weekOf, txTick]);
 
@@ -5987,6 +5996,29 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
     return { count: matchedOn.reduce((s, k) => s + (sessionCounts[k] || 0), 0), fromTx: true, matchedOn };
   };
 
+  // RLT session count for a staff member — same provider-matching logic as resolveStaffSessions
+  // but reads from rltCounts (item_sold contains "red light").
+  const resolveStaffRlt = (staff) => {
+    const matchedKeys = new Set();
+    const addMatch = (key) => {
+      if (!key) return;
+      const k = key.toLowerCase().trim();
+      for (const s of Object.keys(rltCounts)) {
+        if (s.toLowerCase().trim() === k) matchedKeys.add(s);
+      }
+    };
+    if (staff.vagaro_provider_id)   addMatch(staff.vagaro_provider_id);
+    if (staff.vagaro_provider_name) addMatch(staff.vagaro_provider_name);
+    if (staff.full_name) {
+      addMatch(staff.full_name);
+      const parts = staff.full_name.trim().split(/\s+/);
+      if (parts.length >= 2)
+        addMatch(`${parts[parts.length - 1]}, ${parts.slice(0, -1).join(" ")}`);
+    }
+    if (matchedKeys.size === 0) return { count: 0, fromTx: false };
+    return { count: [...matchedKeys].reduce((s, k) => s + (rltCounts[k] || 0), 0), fromTx: true };
+  };
+
   // Persist weekly goal change to Supabase
   const updateWeeklyGoal = (staffId, field, val) => {
     const ws = isoDate(weekOf);
@@ -6054,7 +6086,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
   const ownerPct     = salPct(autoPkgOwner,  SALES_GOALS.ownerPackages);
   const teamPct      = salPct(autoPkgTeam,   SALES_GOALS.teamPackages);
   const goalUnlocked = ownerPct >= 100 && teamPct >= 100;
-  const totalSessionsWeek  = salesStaff.reduce((s, st) => s + getStaffSessions(st), 0);
+  const totalSessionsWeek  = salesStaff.reduce((s, st) => s + getStaffSessions(st) + resolveStaffRlt(st).count, 0);
   const studioSessionsPct  = salPct(totalSessionsWeek, SALES_GOALS.servicesPerWeek);
   const monthlyRevenue     = liveData?.totalRevenue ?? 0;
   const monthlyPct         = salPct(monthlyRevenue, SALES_GOALS.monthly);
@@ -6313,14 +6345,18 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
         </div>
         {/* Provider matching diagnostic — shows every provider key found in this week's
             transactions so staff can confirm their vagaro_provider_id is set correctly */}
-        {Object.keys(sessionCounts).length > 0 && (() => {
+        {(Object.keys(sessionCounts).length > 0 || Object.keys(rltCounts).length > 0) && (() => {
+          // Merge massage + RLT counts so all provider keys appear in the diagnostic panel
+          const allCounts = {};
+          for (const [k, v] of Object.entries(sessionCounts)) allCounts[k] = (allCounts[k] || 0) + v;
+          for (const [k, v] of Object.entries(rltCounts))     allCounts[k] = (allCounts[k] || 0) + v;
           // Build a map of matched provider keys → staff name
           const keyToStaff = {};
           for (const st of salesStaff) {
             const { matchedOn } = resolveStaffSessionsWithKeys(st);
             for (const k of (matchedOn || [])) keyToStaff[k] = st.full_name || "?";
           }
-          const rows = Object.entries(sessionCounts).sort((a, b) => b[1] - a[1]);
+          const rows = Object.entries(allCounts).sort((a, b) => b[1] - a[1]);
           return (
             <details style={{ marginTop: 12 }}>
               <summary style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase", userSelect: "none" }}>
@@ -6376,11 +6412,14 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
             const redGoal    = staff.sales_red_light_goal ?? null;
             const wg         = weeklyGoals[staff.id] || { sessions: 0, rebooked: 0, red_light: 0 };
             const { count: sessions, fromTx: autoSess } = resolveStaffSessions(staff);
+            const { count: rltSessions, fromTx: autoRlt } = resolveStaffRlt(staff);
             const midGoal    = (sessLow + sessHigh) / 2;
             const sessP      = salPct(sessions, midGoal);
             const rebookP    = sessions > 0 ? (wg.rebooked / sessions) * 100 : 0;
             const rebookGoalP = rebookGoal ? salPct(rebookP, rebookGoal) : null;
-            const redLightP   = redGoal    ? salPct(wg.red_light, redGoal) : null;
+            // RLT count: auto from transactions when available, else manual weekly_goals entry
+            const rltCount   = hasRLT && autoRlt ? rltSessions : wg.red_light || 0;
+            const redLightP  = redGoal ? salPct(rltCount, redGoal) : null;
             const rangeLabel  = sessLow === sessHigh ? `${sessLow}` : `${sessLow}–${sessHigh}`;
             const atSessGoal  = sessions >= sessLow;
             const atRebook    = rebookGoal && rebookP >= rebookGoal;
@@ -6403,16 +6442,16 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
                   <Ring value={animated ? sessP : 0} size={64} stroke={6} color={color} bg="#e8e0d6">
                     <div style={{ textAlign: "center" }}>
                       <div style={{ fontSize: "13px", fontWeight: "800", color: "#1a120b" }}>{sessions}</div>
-                      <div style={{ fontSize: "6px", color: "#8a7a6a" }}>sessions</div>
+                      <div style={{ fontSize: "6px", color: "#8a7a6a" }}>{hasRLT ? "massage" : "sessions"}</div>
                     </div>
                   </Ring>
                 </div>
 
-                {/* Sessions */}
+                {/* Sessions (massages for RLT therapists) */}
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
                     <span style={{ fontSize: "11px", color: "#8a7a6a" }}>
-                      Weekly Sessions{autoSess && <span style={{ marginLeft: 4, fontSize: "9px", background: "#dcf5ec", color: "#0f7a4a", borderRadius: 4, padding: "1px 5px", fontWeight: "700" }}>AUTO</span>}
+                      {hasRLT ? "Massages" : "Weekly Sessions"}{autoSess && <span style={{ marginLeft: 4, fontSize: "9px", background: "#dcf5ec", color: "#0f7a4a", borderRadius: 4, padding: "1px 5px", fontWeight: "700" }}>AUTO</span>}
                     </span>
                     <span style={{ fontSize: "11px", fontWeight: "700", color: atSessGoal ? "#0f7a4a" : color }}>
                       {sessions} / {rangeLabel}{atSessGoal ? " ✓" : ""}
@@ -6436,16 +6475,26 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
                 {(hasRLT || redGoal) && (
                   <div style={{ marginBottom: 12, padding: "10px 12px", background: "#dcf5ec", borderRadius: 10, border: "1px solid #86efac" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                      <span style={{ fontSize: "11px", color: "#0f7a4a", fontWeight: "600" }}>💡 Red Light Sessions</span>
+                      <span style={{ fontSize: "11px", color: "#0f7a4a", fontWeight: "600" }}>
+                        💡 Red Light Sessions
+                        {hasRLT && autoRlt && <span style={{ marginLeft: 4, fontSize: "9px", background: "#fff", color: "#0f7a4a", borderRadius: 4, padding: "1px 5px", fontWeight: "700", border: "1px solid #86efac" }}>AUTO</span>}
+                      </span>
                       <span style={{ fontSize: "11px", fontWeight: "700", color: "#0f7a4a" }}>
-                        {redGoal ? `${wg.red_light} / ${redGoal}${wg.red_light >= redGoal ? " ✓" : ""}` : `${wg.red_light} this week`}
+                        {redGoal ? `${rltCount} / ${redGoal}${rltCount >= redGoal ? " ✓" : ""}` : `${rltCount} this week`}
                       </span>
                     </div>
                     {redGoal && <SalesBar value={animated ? (redLightP||0) : 0} color="#0f7a4a" bg="#a7f3d0" h={6} />}
-                    <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
-                      <SalesNumInput value={wg.red_light||0} onChange={v => updateWeeklyGoal(staff.id, "red_light", v)} color="#0f7a4a" />
-                      <span style={{ fontSize: "10px", color: "#8a7a6a" }}>red light sessions</span>
-                    </div>
+                    {(!hasRLT || !autoRlt) && (
+                      <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                        <SalesNumInput value={wg.red_light||0} onChange={v => updateWeeklyGoal(staff.id, "red_light", v)} color="#0f7a4a" />
+                        <span style={{ fontSize: "10px", color: "#8a7a6a" }}>red light sessions</span>
+                      </div>
+                    )}
+                    {hasRLT && autoRlt && (
+                      <div style={{ marginTop: 5, fontSize: "10px", color: "#0f7a4a", fontStyle: "italic" }}>
+                        Counted automatically from Vagaro transactions
+                      </div>
+                    )}
                   </div>
                 )}
 
