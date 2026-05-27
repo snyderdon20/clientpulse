@@ -6085,7 +6085,6 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
   const pkgPct       = salPct(pkgTotal,      SALES_GOALS.packageTotal);
   const ownerPct     = salPct(autoPkgOwner,  SALES_GOALS.ownerPackages);
   const teamPct      = salPct(autoPkgTeam,   SALES_GOALS.teamPackages);
-  const goalUnlocked = pkgPct >= 100;
   const totalSessionsWeek  = salesStaff.reduce((s, st) => s + getStaffSessions(st) + resolveStaffRlt(st).count, 0);
   const studioSessionsPct  = salPct(totalSessionsWeek, SALES_GOALS.servicesPerWeek);
   const monthlyRevenue     = liveData?.totalRevenue ?? 0;
@@ -6236,9 +6235,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
       <div style={{ ...S.card, marginBottom: 16 }}>
         <label style={slbl}>{monthLabel} Package Challenge</label>
         <div style={{ fontSize: "20px", fontWeight: "800", color: "#1a120b", marginBottom: 2 }}>$10,000 in Package Sales</div>
-        <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 20, fontStyle: "italic" }}>
-          Both goals hit = Becky takes the whole team to the hot springs 🌊
-        </div>
+
         <div style={{ display: "flex", gap: 28, alignItems: "center", flexWrap: "wrap", marginBottom: 20 }}>
           <Ring value={animated ? pkgPct : 0} size={130} stroke={11} color="#a0785a" bg="#e8e0d6">
             <div style={{ textAlign: "center" }}>
@@ -6497,34 +6494,6 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
           })}
         </div>
       )}
-
-      {/* Hot springs tracker */}
-      <div style={{
-        ...S.card, textAlign: "center", marginBottom: 8,
-        background: goalUnlocked ? "linear-gradient(135deg,#a0785a,#7a5640)" : "#fff",
-        border: goalUnlocked ? "none" : "1px solid #e8e0d6",
-        transition: "background 0.6s ease",
-      }}>
-        <div style={{ fontSize: 36, marginBottom: 8 }}>{goalUnlocked ? "🌊" : "💧"}</div>
-        <div style={{ fontSize: "18px", fontWeight: "800", color: goalUnlocked ? "#fff" : "#1a120b", marginBottom: 6 }}>
-          {goalUnlocked ? "HOT SPRINGS TRIP UNLOCKED!" : "Hot Springs Awaits…"}
-        </div>
-        <div style={{ fontSize: "13px", color: goalUnlocked ? "rgba(255,255,255,0.85)" : "#8a7a6a" }}>
-          {goalUnlocked
-            ? "Goal hit. Pack your bags! 🎉"
-            : `${fmtDollar(Math.max(0, SALES_GOALS.packageTotal - pkgTotal))} to go`}
-        </div>
-        {!goalUnlocked && (
-          <div style={{ marginTop: 16, display: "flex", justifyContent: "center" }}>
-            <div style={{ width: 200 }}>
-              <div style={{ width: "100%", height: 7, background: "#e8e0d6", borderRadius: 99, overflow: "hidden" }}>
-                <div style={{ width: `${Math.min(pkgPct,100)}%`, height: "100%", background: "#a0785a", borderRadius: 99, transition: "width 1s ease" }} />
-              </div>
-              <div style={{ fontSize: "12px", color: "#a0785a", fontWeight: "700", marginTop: 5 }}>{Math.round(pkgPct)}%</div>
-            </div>
-          </div>
-        )}
-      </div>
 
     </div>
   );
