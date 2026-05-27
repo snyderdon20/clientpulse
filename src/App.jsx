@@ -5894,34 +5894,34 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
   // Returns { count, fromTx } — fromTx=true means the number came from live
   // transaction data (show AUTO badge); false means it fell back to manual entry.
   const resolveStaffSessions = (staff) => {
-    const scan = (key) => {
-      if (!key) return undefined;
+    // Webhook transactions store the Vagaro-encoded provider ID (e.g. "dLUP-…==")
+    // while CSV-imported transactions store the display name ("Don Snyder").
+    // Both can exist in sessionCounts for the same person — collect ALL matching
+    // keys and SUM them so neither source is missed.
+    const matchedKeys = new Set();
+    const addMatch = (key) => {
+      if (!key) return;
       const k = key.toLowerCase().trim();
-      // Direct key lookup first (fast path)
-      if (sessionCounts[k] !== undefined) return sessionCounts[k];
-      // Case-insensitive scan (handles capitalisation differences)
-      const entry = Object.entries(sessionCounts).find(([s]) => s.toLowerCase().trim() === k);
-      return entry ? entry[1] : undefined;
+      for (const s of Object.keys(sessionCounts)) {
+        if (s.toLowerCase().trim() === k) matchedKeys.add(s);
+      }
     };
-    // 1. vagaro_provider_id exact match
-    if (staff.vagaro_provider_id) {
-      const v = scan(staff.vagaro_provider_id);
-      if (v !== undefined) return { count: v, fromTx: true };
-    }
-    // 2. Full name "First Last"
+    // 1. vagaro_provider_id (encoded ID from webhook transactions)
+    if (staff.vagaro_provider_id) addMatch(staff.vagaro_provider_id);
+    // 2. Full name "First Last" (display name from CSV transactions)
     if (staff.full_name) {
-      const v = scan(staff.full_name);
-      if (v !== undefined) return { count: v, fromTx: true };
-      // 3. "Last, First" — Vagaro sometimes exports in this order
+      addMatch(staff.full_name);
+      // 3. "Last, First" — Vagaro CSV sometimes exports in this order
       const parts = staff.full_name.trim().split(/\s+/);
       if (parts.length >= 2) {
         const lastName  = parts[parts.length - 1];
         const firstName = parts.slice(0, -1).join(" ");
-        const v2 = scan(`${lastName}, ${firstName}`);
-        if (v2 !== undefined) return { count: v2, fromTx: true };
+        addMatch(`${lastName}, ${firstName}`);
       }
     }
-    return { count: weeklyGoals[staff.id]?.sessions || 0, fromTx: false };
+    if (matchedKeys.size === 0) return { count: weeklyGoals[staff.id]?.sessions || 0, fromTx: false };
+    const total = [...matchedKeys].reduce((s, k) => s + (sessionCounts[k] || 0), 0);
+    return { count: total, fromTx: true };
   };
   const getStaffSessions = (staff) => resolveStaffSessions(staff).count;
 
@@ -5959,20 +5959,27 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
   // Owner = staff whose roles array includes "owner"; Team = everyone else on salesStaff.
   const pkgByProv = liveData?.pkgByProvider || {};
   const matchProviderPkg = (st) => {
-    const scan = (key) => {
-      if (!key) return undefined;
+    // Same dual-key logic as resolveStaffSessions: webhook = encoded ID,
+    // CSV = display name — collect all matching keys and sum them.
+    const matchedKeys = new Set();
+    const addMatch = (key) => {
+      if (!key) return;
       const k = key.toLowerCase().trim();
-      if (pkgByProv[k] !== undefined) return pkgByProv[k];
-      const e = Object.entries(pkgByProv).find(([s]) => s.toLowerCase().trim() === k);
-      return e ? e[1] : undefined;
+      for (const s of Object.keys(pkgByProv)) {
+        if (s.toLowerCase().trim() === k) matchedKeys.add(s);
+      }
     };
-    const byId = st.vagaro_provider_id ? scan(st.vagaro_provider_id) : undefined;
-    if (byId !== undefined) return byId;
+    if (st.vagaro_provider_id) addMatch(st.vagaro_provider_id);
     if (st.full_name) {
-      const byName = scan(st.full_name);
-      if (byName !== undefined) return byName;
+      addMatch(st.full_name);
+      const parts = st.full_name.trim().split(/\s+/);
+      if (parts.length >= 2) {
+        const lastName  = parts[parts.length - 1];
+        const firstName = parts.slice(0, -1).join(" ");
+        addMatch(`${lastName}, ${firstName}`);
+      }
     }
-    return 0;
+    return [...matchedKeys].reduce((s, k) => s + (pkgByProv[k] || 0), 0);
   };
   const autoPkgOwner = salesStaff.reduce((sum, st) => {
     const roles = st.roles?.length ? st.roles : (st.role ? [st.role] : []);
