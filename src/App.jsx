@@ -5862,7 +5862,16 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
         );
         const packageRevenue = typeSum("Package", "Packages", "Membership", "Memberships");
         const serviceRevenue = typeSum("Service", "Services");
-        setLiveData({ totalRevenue, totalTips, byType, packageRevenue, serviceRevenue, count: rows.length, recent: rows.slice(0, 8), rowAmt });
+        // Per-provider package/membership revenue (for Package Challenge auto-split)
+        const pkgByProvider = {};
+        for (const t of rows) {
+          const pt = (t.purchase_type || "").toLowerCase();
+          if (pt === "package" || pt === "packages" || pt === "membership" || pt === "memberships") {
+            const pid = t.vagaro_service_provider_id;
+            if (pid) pkgByProvider[pid] = (pkgByProvider[pid] || 0) + rowAmt(t);
+          }
+        }
+        setLiveData({ totalRevenue, totalTips, byType, packageRevenue, serviceRevenue, pkgByProvider, count: rows.length, recent: rows.slice(0, 8), rowAmt });
         setLiveLoading(false);
       });
   }, [usingDB, supabaseUrl, supabaseAnonKey, selYear, selMonth, txTick]);
@@ -5881,22 +5890,40 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
     return () => { sb.removeChannel(ch); };
   }, [usingDB, supabaseUrl, supabaseAnonKey]);
 
-  // Helper: get session count for a staff member (auto from transactions if provider ID exists, else manual)
-  const getStaffSessions = (staff) => {
+  // Helper: resolve session count from transactions for a staff member.
+  // Returns { count, fromTx } — fromTx=true means the number came from live
+  // transaction data (show AUTO badge); false means it fell back to manual entry.
+  const resolveStaffSessions = (staff) => {
+    const scan = (key) => {
+      if (!key) return undefined;
+      const k = key.toLowerCase().trim();
+      // Direct key lookup first (fast path)
+      if (sessionCounts[k] !== undefined) return sessionCounts[k];
+      // Case-insensitive scan (handles capitalisation differences)
+      const entry = Object.entries(sessionCounts).find(([s]) => s.toLowerCase().trim() === k);
+      return entry ? entry[1] : undefined;
+    };
+    // 1. vagaro_provider_id exact match
     if (staff.vagaro_provider_id) {
-      const byId = sessionCounts[staff.vagaro_provider_id];
-      if (byId !== undefined) return byId;
+      const v = scan(staff.vagaro_provider_id);
+      if (v !== undefined) return { count: v, fromTx: true };
     }
-    // Fallback: CSV-imported transactions store the provider's display name in
-    // vagaro_service_provider_id rather than an encoded ID, so try matching by
-    // staff full name when the stored provider ID doesn't match directly.
+    // 2. Full name "First Last"
     if (staff.full_name) {
-      const target = staff.full_name.toLowerCase().trim();
-      const entry = Object.entries(sessionCounts).find(([k]) => k.toLowerCase().trim() === target);
-      if (entry) return entry[1];
+      const v = scan(staff.full_name);
+      if (v !== undefined) return { count: v, fromTx: true };
+      // 3. "Last, First" — Vagaro sometimes exports in this order
+      const parts = staff.full_name.trim().split(/\s+/);
+      if (parts.length >= 2) {
+        const lastName  = parts[parts.length - 1];
+        const firstName = parts.slice(0, -1).join(" ");
+        const v2 = scan(`${lastName}, ${firstName}`);
+        if (v2 !== undefined) return { count: v2, fromTx: true };
+      }
     }
-    return weeklyGoals[staff.id]?.sessions || 0;
+    return { count: weeklyGoals[staff.id]?.sessions || 0, fromTx: false };
   };
+  const getStaffSessions = (staff) => resolveStaffSessions(staff).count;
 
   // Persist weekly goal change to Supabase
   const updateWeeklyGoal = (staffId, field, val) => {
@@ -5928,10 +5955,34 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
   // Derived
   const monthName    = MONTH_NAMES[selMonth - 1];
   const monthLabel   = `${monthName} ${selYear}`;
-  const pkgTotal     = pkgChallenge.owner_sales + pkgChallenge.team_sales;
-  const pkgPct       = salPct(pkgTotal,                 SALES_GOALS.packageTotal);
-  const ownerPct     = salPct(pkgChallenge.owner_sales, SALES_GOALS.ownerPackages);
-  const teamPct      = salPct(pkgChallenge.team_sales,  SALES_GOALS.teamPackages);
+  // Auto-compute package challenge totals from live transaction data.
+  // Owner = staff whose roles array includes "owner"; Team = everyone else on salesStaff.
+  const pkgByProv = liveData?.pkgByProvider || {};
+  const matchProviderPkg = (st) => {
+    const scan = (key) => {
+      if (!key) return undefined;
+      const k = key.toLowerCase().trim();
+      if (pkgByProv[k] !== undefined) return pkgByProv[k];
+      const e = Object.entries(pkgByProv).find(([s]) => s.toLowerCase().trim() === k);
+      return e ? e[1] : undefined;
+    };
+    const byId = st.vagaro_provider_id ? scan(st.vagaro_provider_id) : undefined;
+    if (byId !== undefined) return byId;
+    if (st.full_name) {
+      const byName = scan(st.full_name);
+      if (byName !== undefined) return byName;
+    }
+    return 0;
+  };
+  const autoPkgOwner = salesStaff.reduce((sum, st) => {
+    const roles = st.roles?.length ? st.roles : (st.role ? [st.role] : []);
+    return roles.includes("owner") ? sum + matchProviderPkg(st) : sum;
+  }, 0);
+  const autoPkgTeam  = Math.max(0, (liveData?.packageRevenue || 0) - autoPkgOwner);
+  const pkgTotal     = autoPkgOwner + autoPkgTeam;
+  const pkgPct       = salPct(pkgTotal,      SALES_GOALS.packageTotal);
+  const ownerPct     = salPct(autoPkgOwner,  SALES_GOALS.ownerPackages);
+  const teamPct      = salPct(autoPkgTeam,   SALES_GOALS.teamPackages);
   const goalUnlocked = ownerPct >= 100 && teamPct >= 100;
   const totalSessionsWeek  = salesStaff.reduce((s, st) => s + getStaffSessions(st), 0);
   const studioSessionsPct  = salPct(totalSessionsWeek, SALES_GOALS.servicesPerWeek);
@@ -6112,15 +6163,18 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           {[
-            { name: "Owner", goal: SALES_GOALS.ownerPackages, val: pkgChallenge.owner_sales, color: "#a0785a", bg: "#f5ede4", key: "owner_sales" },
-            { name: "Team",  goal: SALES_GOALS.teamPackages,  val: pkgChallenge.team_sales,  color: "#1d5fa8", bg: "#dbeafe", key: "team_sales"  },
-          ].map(({ name, goal, val, color, bg, key }) => {
+            { name: "Owner", goal: SALES_GOALS.ownerPackages, val: autoPkgOwner, color: "#a0785a", bg: "#f5ede4" },
+            { name: "Team",  goal: SALES_GOALS.teamPackages,  val: autoPkgTeam,  color: "#1d5fa8", bg: "#dbeafe" },
+          ].map(({ name, goal, val, color, bg }) => {
             const p = salPct(val, goal);
             return (
               <div key={name} style={{ background: bg, borderRadius: 12, padding: "16px 18px", border: `1px solid ${color}22` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                   <div>
-                    <label style={{ ...slbl, color }}>{name}'s Goal</label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                      <label style={{ ...slbl, marginBottom: 0, color }}>{name}'s Goal</label>
+                      <span style={{ fontSize: "9px", fontWeight: "700", color: "#0f7a4a", background: "#dcf5ec", borderRadius: 4, padding: "1px 5px" }}>AUTO</span>
+                    </div>
                     <div style={{ fontSize: "20px", fontWeight: "800", color: "#1a120b" }}>{fmtDollar(val)}</div>
                     <div style={{ fontSize: "11px", color: "#8a7a6a" }}>of {fmtDollar(goal)}</div>
                   </div>
@@ -6129,12 +6183,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
                   </Ring>
                 </div>
                 <SalesBar value={animated ? p : 0} color={color} bg="#e8e0d6" h={6} />
-                <div style={{ marginTop: 10 }}>
-                  <input type="range" min={0} max={goal * 1.2} value={val}
-                    onChange={e => updatePkg(key, Number(e.target.value))}
-                    style={{ width: "100%", accentColor: color }} />
-                </div>
-                <div style={{ marginTop: 4, fontSize: "11px", color: "#8a7a6a" }}>
+                <div style={{ marginTop: 6, fontSize: "11px", color: "#8a7a6a" }}>
                   {val >= goal ? "🎉 Goal hit!" : `${fmtDollar(Math.max(0, goal - val))} to go`}
                 </div>
               </div>
@@ -6217,8 +6266,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
             const hasRLT      = staffRoles.includes("therapist_rlt");
             const redGoal    = staff.sales_red_light_goal ?? null;
             const wg         = weeklyGoals[staff.id] || { sessions: 0, rebooked: 0, red_light: 0 };
-            const sessions   = getStaffSessions(staff);
-            const autoSess   = !!staff.vagaro_provider_id;
+            const { count: sessions, fromTx: autoSess } = resolveStaffSessions(staff);
             const midGoal    = (sessLow + sessHigh) / 2;
             const sessP      = salPct(sessions, midGoal);
             const rebookP    = sessions > 0 ? (wg.rebooked / sessions) * 100 : 0;
@@ -6331,7 +6379,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
         <div style={{ fontSize: "13px", color: goalUnlocked ? "rgba(255,255,255,0.85)" : "#8a7a6a" }}>
           {goalUnlocked
             ? "Both goals hit. Pack your bags! 🎉"
-            : `Owner needs ${fmtDollar(Math.max(0, SALES_GOALS.ownerPackages - pkgChallenge.owner_sales))} more · Team needs ${fmtDollar(Math.max(0, SALES_GOALS.teamPackages - pkgChallenge.team_sales))} more`}
+            : `Owner needs ${fmtDollar(Math.max(0, SALES_GOALS.ownerPackages - autoPkgOwner))} more · Team needs ${fmtDollar(Math.max(0, SALES_GOALS.teamPackages - autoPkgTeam))} more`}
         </div>
         {!goalUnlocked && (
           <div style={{ marginTop: 16, display: "flex", justifyContent: "center", gap: 24, flexWrap: "wrap" }}>
