@@ -750,6 +750,7 @@ function NewClientModal({ onSave, onClose, staffName = "Staff" }) {
   const [form, setForm] = useState({
     firstName: "", lastName: "", phone: "", email: "",
     birthday: "", referredBy: "", careCategory: "",
+    acquisitionSource: "",
     address: "", city: "", state: "", zip: "",
   });
   const [saving, setSaving] = useState(false);
@@ -793,6 +794,11 @@ function NewClientModal({ onSave, onClose, staffName = "Staff" }) {
       needsFollowUp: false,
       restrictedStatus: null,
       restrictedNote: null,
+      preferredName: null,
+      contraindications: null,
+      acquisitionSource: form.acquisitionSource || null,
+      referralRewardRedeemed: false,
+      referralRewardDate: null,
     };
     onSave(newClient);
     setSaving(false);
@@ -851,6 +857,22 @@ function NewClientModal({ onSave, onClose, staffName = "Staff" }) {
             <input value={form.referredBy} onChange={(e) => set("referredBy", e.target.value)}
               placeholder="Name, Google, Instagram..." style={S.inp} />
           </div>
+        </div>
+
+        {/* Acquisition source */}
+        <div style={{ marginBottom: 12 }}>
+          <label style={S.lbl}>How did they find us?</label>
+          <select value={form.acquisitionSource} onChange={(e) => set("acquisitionSource", e.target.value)} style={S.inp}>
+            <option value="">— Unknown —</option>
+            <option value="referral">Client Referral</option>
+            <option value="google">Google Search</option>
+            <option value="instagram">Instagram</option>
+            <option value="facebook">Facebook</option>
+            <option value="walkin">Walk-in</option>
+            <option value="event">Event / Pop-up</option>
+            <option value="groupon">Groupon / Deal site</option>
+            <option value="other">Other</option>
+          </select>
         </div>
 
         {/* Care category */}
@@ -2291,12 +2313,15 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
   const initInfoForm = () => ({
     firstName:          client.firstName          || "",
     lastName:           client.lastName           || "",
+    preferredName:      client.preferredName      || "",
     phone:              client.phone              || "",
     email:              client.email              || "",
     birthday:           client.birthday           || "",
     customerSince:      client.customerSince      || "",
     avgVisitIntervalDays: client.avgVisitIntervalDays || "",
     referredBy:         client.referredBy         || "",
+    acquisitionSource:  client.acquisitionSource  || "",
+    contraindications:  client.contraindications  || "",
     address:            client.address            || "",
     city:               client.city               || "",
     state:              client.state              || "",
@@ -2400,12 +2425,15 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
     const updates = {
       firstName:          infoForm.firstName,
       lastName:           infoForm.lastName,
+      preferredName:      infoForm.preferredName.trim() || null,
       phone:              infoForm.phone,
       email:              infoForm.email,
       birthday:           infoForm.birthday,
       customerSince:      infoForm.customerSince,
       avgVisitIntervalDays: infoForm.avgVisitIntervalDays ? Number(infoForm.avgVisitIntervalDays) : client.avgVisitIntervalDays,
       referredBy:         infoForm.referredBy,
+      acquisitionSource:  infoForm.acquisitionSource || null,
+      contraindications:  infoForm.contraindications.trim() || null,
       address:            infoForm.address,
       city:               infoForm.city,
       state:              infoForm.state,
@@ -2455,6 +2483,14 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
               ))}
             </div>
             <div style={{ marginBottom: 12 }}>
+              <label style={S.lbl}>Preferred name <span style={{ fontWeight: 400, color: "#b0a090" }}>(nickname / goes by)</span></label>
+              <input type="text" value={infoForm.preferredName} onChange={(e) => setInfoForm((f) => ({ ...f, preferredName: e.target.value }))} placeholder='e.g. "Sal" for Sarah' style={S.inp} />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={S.lbl}>Contraindications / clinical notes <span style={{ fontWeight: 400, color: "#b0a090" }}>(shows as alert on profile)</span></label>
+              <textarea value={infoForm.contraindications} onChange={(e) => setInfoForm((f) => ({ ...f, contraindications: e.target.value }))} placeholder="e.g. Pregnancy — deep tissue contraindicated. Recent surgery on left shoulder." rows={3} style={{ ...S.inp, resize: "vertical", lineHeight: 1.5 }} />
+            </div>
+            <div style={{ marginBottom: 12 }}>
               <label style={S.lbl}>Mailing address</label>
               <input type="text" value={infoForm.address} onChange={(e) => setInfoForm((f) => ({ ...f, address: e.target.value }))} placeholder="Street address" style={{ ...S.inp, marginBottom: 8 }} />
               <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 8 }}>
@@ -2463,7 +2499,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
                 <input type="text" value={infoForm.zip}   onChange={(e) => setInfoForm((f) => ({ ...f, zip:   e.target.value }))} placeholder="ZIP"   style={S.inp} />
               </div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
               <div>
                 <label style={S.lbl}>Referred by</label>
                 <input type="text" value={infoForm.referredBy} onChange={(e) => setInfoForm((f) => ({ ...f, referredBy: e.target.value }))} placeholder="Name, Google, Instagram..." style={S.inp} />
@@ -2472,6 +2508,20 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
                 <label style={S.lbl}>Avg visit interval (days)</label>
                 <input type="number" value={infoForm.avgVisitIntervalDays} onChange={(e) => setInfoForm((f) => ({ ...f, avgVisitIntervalDays: e.target.value }))} placeholder="e.g. 30" style={S.inp} min={1} />
               </div>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={S.lbl}>How did they find us?</label>
+              <select value={infoForm.acquisitionSource} onChange={(e) => setInfoForm((f) => ({ ...f, acquisitionSource: e.target.value }))} style={S.inp}>
+                <option value="">— Unknown —</option>
+                <option value="referral">Client Referral</option>
+                <option value="google">Google Search</option>
+                <option value="instagram">Instagram</option>
+                <option value="facebook">Facebook</option>
+                <option value="walkin">Walk-in</option>
+                <option value="event">Event / Pop-up</option>
+                <option value="groupon">Groupon / Deal site</option>
+                <option value="other">Other</option>
+              </select>
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button style={S.btn("ghost")} onClick={() => setShowEdit(false)}>Cancel</button>
@@ -2500,17 +2550,44 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
         <Avatar client={client} size={46} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "5px" }}>
-            <h2 style={{ margin: 0, fontSize: "19px", fontWeight: "800", color: "#1a120b" }}>{fullName(client)}</h2>
+            <h2 style={{ margin: 0, fontSize: "19px", fontWeight: "800", color: "#1a120b" }}>
+              {client.firstName}
+              {client.preferredName && <span style={{ fontWeight: 500, color: "#8a7a6a", fontSize: "16px" }}> "{client.preferredName}"</span>}
+              {" "}{client.lastName}
+            </h2>
             <StatusSelector client={client} onUpdate={onUpdate} />
             {isBirthday && <span>🎂</span>}
             {client.waitlisted && <span style={{ fontSize: "10px", fontWeight: "700", color: "#1d5fa8", background: "#dbeafe", padding: "2px 8px", borderRadius: "100px" }}>Waitlisted</span>}
+            {referredClients.length > 0 && (
+              <span style={{ fontSize: "10px", fontWeight: "700", color: "#065f46", background: "#d1fae5", padding: "2px 8px", borderRadius: "100px" }}>
+                ⭐ {referredClients.length} referral{referredClients.length !== 1 ? "s" : ""}
+              </span>
+            )}
           </div>
-          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", fontSize: "13px", color: "#7a6a5a", marginBottom: 8 }}>
-            <span>{client.email}</span>
-            <span>{client.phone}</span>
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", fontSize: "13px", color: "#7a6a5a", marginBottom: 6 }}>
+            {client.email && <span>{client.email}</span>}
+            {client.phone && <span>{client.phone}</span>}
             {client.birthday && <span>Birthday: {fmtDate(client.birthday)}</span>}
-            {lifetimeTotal > 0 && <span style={{ color: "#065f46", fontWeight: "600" }}>Lifetime: ${Number(lifetimeTotal).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>}
             {client.noShows > 0 && <span style={{ color: "#dc2626", fontWeight: "600" }}>No-shows: {client.noShows}</span>}
+          </div>
+          {/* 3-stat summary strip */}
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: 8 }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#7a5640", background: "#f5ede4", border: "1px solid #e8d5c0", padding: "3px 10px", borderRadius: "100px" }}>
+              {client.completedAppointmentsCount || 0} visit{(client.completedAppointmentsCount || 0) !== 1 ? "s" : ""}
+            </span>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#1d5fa8", background: "#dbeafe", border: "1px solid #bfdbfe", padding: "3px 10px", borderRadius: "100px" }}>
+              every {client.avgVisitIntervalDays || 30}d avg
+            </span>
+            {lifetimeTotal > 0 && (
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#065f46", background: "#d1fae5", border: "1px solid #a7f3d0", padding: "3px 10px", borderRadius: "100px" }}>
+                ${Number(lifetimeTotal).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} LTV
+              </span>
+            )}
+            {client.acquisitionSource && (
+              <span style={{ fontSize: "11px", fontWeight: "600", color: "#6b7280", background: "#f3f4f6", border: "1px solid #e5e7eb", padding: "3px 10px", borderRadius: "100px" }}>
+                {({ referral: "👥 Referral", google: "🔍 Google", instagram: "📸 Instagram", facebook: "📘 Facebook", walkin: "🚶 Walk-in", event: "🎪 Event", groupon: "🎟 Groupon", other: "❓ Other" }[client.acquisitionSource]) || client.acquisitionSource}
+              </span>
+            )}
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
             <CareCategoryBadge category={client.careCategory} onChange={updateCareCategory} />
@@ -2539,6 +2616,17 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
           </button>
         </div>
       </div>
+
+      {/* Contraindication alert — clinical safety, always first */}
+      {client.contraindications && (
+        <div style={{ background: "#fff7ed", border: "2px solid #fb923c", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#7c2d12", display: "flex", alignItems: "flex-start", gap: 10 }}>
+          <span style={{ fontSize: "18px", flexShrink: 0 }}>⚕️</span>
+          <div>
+            <strong>CLINICAL NOTE — Contraindications on file.</strong>
+            <div style={{ marginTop: 4, fontWeight: "400", lineHeight: 1.5 }}>{client.contraindications}</div>
+          </div>
+        </div>
+      )}
 
       {/* Restricted profile alert banners */}
       {status === "flagged" && (
@@ -2630,6 +2718,58 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
             onDelete={deleteNugget}
             staffName={staffName}
           />
+
+          {/* Referral card — shown if they came via referral OR have referred others */}
+          {(client.referredBy || referredClients.length > 0) && (
+            <div style={{ ...S.card, marginBottom: "14px" }}>
+              <label style={S.lbl}>Referrals</label>
+              {client.referredBy && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: referredClients.length > 0 ? 10 : 0 }}>
+                  <span style={{ fontSize: "12px", color: "#6b5244" }}>Referred by:</span>
+                  <span style={{ fontSize: "13px", fontWeight: "700", color: "#1a120b" }}>{client.referredBy}</span>
+                </div>
+              )}
+              {referredClients.length > 0 && (
+                <div>
+                  <div style={{ fontSize: "12px", color: "#6b5244", marginBottom: 6 }}>
+                    Has referred <strong>{referredClients.length}</strong> client{referredClients.length !== 1 ? "s" : ""}:
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {referredClients.map((rc) => (
+                      <div key={rc.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", background: "#faf8f5", borderRadius: 8, border: "1px solid #f0e8de" }}>
+                        <span style={{ fontSize: "12px", fontWeight: "600", color: "#2e2418", flex: 1 }}>{fullName(rc)}</span>
+                        <span style={{ fontSize: "11px", color: clientStatus(rc).layer1 === "active" ? "#065f46" : "#8a7a6a", fontWeight: "600" }}>
+                          {LAYER1_CFG[clientStatus(rc).layer1]?.label || clientStatus(rc).layer1}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Referral reward tracking */}
+              {referredClients.length >= 3 && (
+                <div style={{ marginTop: 10, padding: "8px 12px", background: client.referralRewardRedeemed ? "#f0fdf4" : "#fffbeb", border: `1px solid ${client.referralRewardRedeemed ? "#86efac" : "#fcd34d"}`, borderRadius: 8, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: "15px" }}>{client.referralRewardRedeemed ? "✅" : "🏆"}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: "12px", fontWeight: "700", color: client.referralRewardRedeemed ? "#065f46" : "#92400e" }}>
+                      {client.referralRewardRedeemed ? `Reward redeemed${client.referralRewardDate ? " · " + fmtDate(client.referralRewardDate) : ""}` : `Referral reward earned (${referredClients.length} referrals)`}
+                    </div>
+                    {!client.referralRewardRedeemed && (
+                      <div style={{ fontSize: "11px", color: "#78350f" }}>Send a complimentary half-hour session</div>
+                    )}
+                  </div>
+                  {!client.referralRewardRedeemed && (
+                    <button
+                      onClick={() => { onUpdate(client.id, { referralRewardRedeemed: true, referralRewardDate: TODAY }); appendHistory(mkEvent("client.updated", "Referral reward marked as redeemed", { by: staffName })); }}
+                      style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#d97706", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}
+                    >
+                      Mark redeemed
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Outreach & touchpoints card */}
           <div style={{ ...S.card, marginBottom: "14px" }}>
@@ -5335,6 +5475,215 @@ function MobileClientShell({ clients, selected, setSelected, filter, setFilter, 
   );
 }
 
+// ─── ANALYTICS / INSIGHTS DASHBOARD ─────────────────────────────────────────
+const ACQSOURCE_LABELS = {
+  referral: "Client Referral", google: "Google", instagram: "Instagram",
+  facebook: "Facebook", walkin: "Walk-in", event: "Event", groupon: "Groupon", other: "Other",
+};
+const ACQSOURCE_COLORS = {
+  referral: "#7c3aed", google: "#1d5fa8", instagram: "#be185d",
+  facebook: "#1e40af", walkin: "#065f46", event: "#92400e", groupon: "#b45309", other: "#6b7280",
+};
+
+function AnalyticsDashboard({ clients }) {
+  const now = new Date();
+  const todayMs = now.getTime();
+
+  const stats = useMemo(() => {
+    const everVisited = clients.filter((c) => c.lastVisit || c.completedAppointmentsCount > 0);
+    const active90 = everVisited.filter((c) => {
+      if (!c.lastVisit) return false;
+      const ms = new Date(c.lastVisit).getTime();
+      return (todayMs - ms) / 86400000 <= 90;
+    });
+    const retentionRate = everVisited.length > 0
+      ? Math.round((active90.length / everVisited.length) * 100) : 0;
+
+    // Avg rebooking interval across active clients
+    const activeClients = clients.filter((c) => {
+      if (!c.avgVisitIntervalDays || !c.lastVisit) return false;
+      const ms = new Date(c.lastVisit).getTime();
+      return (todayMs - ms) / 86400000 <= 120;
+    });
+    const avgInterval = activeClients.length > 0
+      ? Math.round(activeClients.reduce((s, c) => s + (c.avgVisitIntervalDays || 30), 0) / activeClients.length)
+      : 30;
+
+    // Lapsed buckets (days since last visit)
+    const buckets = { "0-30d": 0, "31-60d": 0, "61-90d": 0, "91-180d": 0, "180d+": 0 };
+    everVisited.forEach((c) => {
+      if (!c.lastVisit) return;
+      const d = Math.floor((todayMs - new Date(c.lastVisit).getTime()) / 86400000);
+      if (d <= 30)       buckets["0-30d"]++;
+      else if (d <= 60)  buckets["31-60d"]++;
+      else if (d <= 90)  buckets["61-90d"]++;
+      else if (d <= 180) buckets["91-180d"]++;
+      else               buckets["180d+"]++;
+    });
+
+    // Acquisition source breakdown
+    const acqCounts = {};
+    clients.forEach((c) => {
+      const k = c.acquisitionSource || "unknown";
+      acqCounts[k] = (acqCounts[k] || 0) + 1;
+    });
+
+    // Top referrers
+    const referrerMap = {};
+    clients.forEach((c) => {
+      if (!c.referredBy) return;
+      const key = c.referredBy.toLowerCase().trim();
+      referrerMap[key] = (referrerMap[key] || 0) + 1;
+    });
+    const topReferrers = Object.entries(referrerMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([name, count]) => {
+        // Try to find the matching client record
+        const match = clients.find(
+          (c) => fullName(c).toLowerCase() === name
+        );
+        return { name: match ? fullName(match) : name, count, clientId: match?.id };
+      });
+
+    return { retentionRate, avgInterval, buckets, acqCounts, topReferrers, active90Count: active90.length, everVisitedCount: everVisited.length };
+  }, [clients, todayMs]);
+
+  const maxBucket = Math.max(...Object.values(stats.buckets), 1);
+  const BUCKET_COLORS = {
+    "0-30d": "#065f46", "31-60d": "#0f766e", "61-90d": "#d97706", "91-180d": "#dc2626", "180d+": "#9ca3af",
+  };
+  const BUCKET_LABELS = {
+    "0-30d": "Active (0-30d)", "31-60d": "Cooling (31-60d)", "61-90d": "Overdue (61-90d)", "91-180d": "Lapsed (91-180d)", "180d+": "Lost (180d+)",
+  };
+
+  const acqTotal = Object.values(stats.acqCounts).reduce((s, n) => s + n, 0);
+
+  return (
+    <div className="page-pad" style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
+      <div style={{ maxWidth: 900, margin: "0 auto" }}>
+        <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: "800", color: "#1a120b" }}>Insights</h2>
+        <p style={{ margin: "0 0 24px", fontSize: "13px", color: "#8a7a6a" }}>
+          Retention, visit cadence, and acquisition — computed from {clients.length} client records.
+        </p>
+
+        {/* KPI strip */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14, marginBottom: 24 }}>
+          {[
+            { label: "Retention rate", value: `${stats.retentionRate}%`, sub: `${stats.active90Count} of ${stats.everVisitedCount} visited clients active in 90d`, color: stats.retentionRate >= 70 ? "#065f46" : stats.retentionRate >= 50 ? "#d97706" : "#dc2626", bg: stats.retentionRate >= 70 ? "#d1fae5" : stats.retentionRate >= 50 ? "#fff7ed" : "#fef2f2" },
+            { label: "Avg rebook interval", value: `${stats.avgInterval}d`, sub: "across active clients (≤120d since last visit)", color: "#1d5fa8", bg: "#dbeafe" },
+            { label: "Total clients", value: clients.length, sub: `${stats.everVisitedCount} have visited`, color: "#7c3aed", bg: "#f5f3ff" },
+            { label: "Needs reactivation", value: stats.buckets["91-180d"] + stats.buckets["180d+"], sub: "lapsed 90+ days", color: "#dc2626", bg: "#fef2f2" },
+          ].map(({ label, value, sub, color, bg }) => (
+            <div key={label} style={{ background: bg, border: `1px solid ${color}33`, borderRadius: 14, padding: "16px 18px" }}>
+              <div style={{ fontSize: "11px", fontWeight: "700", color, textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 4 }}>{label}</div>
+              <div style={{ fontSize: "28px", fontWeight: "800", color, lineHeight: 1, marginBottom: 4 }}>{value}</div>
+              <div style={{ fontSize: "11px", color: `${color}aa` }}>{sub}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 24 }}>
+          {/* Visit recency distribution */}
+          <div style={{ ...S.card }}>
+            <label style={{ ...S.lbl, marginBottom: 14 }}>Visit recency distribution</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {Object.entries(stats.buckets).map(([key, count]) => (
+                <div key={key}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontSize: "12px", fontWeight: "600", color: BUCKET_COLORS[key] }}>{BUCKET_LABELS[key]}</span>
+                    <span style={{ fontSize: "12px", fontWeight: "700", color: "#2e2418" }}>{count}</span>
+                  </div>
+                  <div style={{ background: "#f0e8de", borderRadius: 99, height: 7, overflow: "hidden" }}>
+                    <div style={{ width: `${(count / maxBucket) * 100}%`, height: "100%", background: BUCKET_COLORS[key], borderRadius: 99, transition: "width 0.8s ease" }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Acquisition source breakdown */}
+          <div style={{ ...S.card }}>
+            <label style={{ ...S.lbl, marginBottom: 14 }}>How clients found you</label>
+            {acqTotal === 0 ? (
+              <p style={{ fontSize: "13px", color: "#b0a090" }}>No acquisition data yet — add "How did they find us?" when creating clients.</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {Object.entries(stats.acqCounts)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([key, count]) => {
+                    const label = key === "unknown" ? "Unknown" : (ACQSOURCE_LABELS[key] || key);
+                    const color = key === "unknown" ? "#9ca3af" : (ACQSOURCE_COLORS[key] || "#6b7280");
+                    const pct = Math.round((count / acqTotal) * 100);
+                    return (
+                      <div key={key}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                          <span style={{ fontSize: "12px", fontWeight: "600", color }}>{label}</span>
+                          <span style={{ fontSize: "12px", color: "#6b5244" }}>{count} <span style={{ color: "#b0a090" }}>({pct}%)</span></span>
+                        </div>
+                        <div style={{ background: "#f0e8de", borderRadius: 99, height: 6, overflow: "hidden" }}>
+                          <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 99, transition: "width 0.8s ease" }} />
+                        </div>
+                      </div>
+                    );
+                  })
+                }
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Top referrers */}
+        {stats.topReferrers.length > 0 && (
+          <div style={{ ...S.card, marginBottom: 24 }}>
+            <label style={{ ...S.lbl, marginBottom: 14 }}>Top referrers</label>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
+              {stats.topReferrers.map(({ name, count }, i) => (
+                <div key={name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: i === 0 ? "#fdf6ef" : "#faf8f5", border: `1px solid ${i === 0 ? "#e8d5c0" : "#f0e8de"}`, borderRadius: 10 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: "50%", background: i === 0 ? "#a0785a" : "#e8e0d6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: "800", color: i === 0 ? "#fff" : "#7a6a5a", flexShrink: 0 }}>
+                    {i + 1}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: "13px", fontWeight: "700", color: "#1a120b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+                    <div style={{ fontSize: "11px", color: "#7c3aed", fontWeight: "600" }}>{count} referral{count !== 1 ? "s" : ""}</div>
+                  </div>
+                  {i === 0 && <span style={{ fontSize: "16px" }}>⭐</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Referral reward outstanding */}
+        {(() => {
+          const eligible = clients.filter((c) => {
+            const count = clients.filter((x) => (x.referredBy || "").toLowerCase() === fullName(c).toLowerCase()).length;
+            return count >= 3 && !c.referralRewardRedeemed;
+          });
+          if (eligible.length === 0) return null;
+          return (
+            <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 14, padding: "16px 18px", marginBottom: 24 }}>
+              <div style={{ fontSize: "12px", fontWeight: "700", color: "#92400e", marginBottom: 10 }}>🏆 Referral rewards outstanding ({eligible.length})</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {eligible.map((c) => {
+                  const count = clients.filter((x) => (x.referredBy || "").toLowerCase() === fullName(c).toLowerCase()).length;
+                  return (
+                    <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: "13px" }}>
+                      <Avatar client={c} size={26} />
+                      <span style={{ flex: 1, fontWeight: "600", color: "#1a120b" }}>{fullName(c)}</span>
+                      <span style={{ color: "#78350f", fontSize: "12px" }}>{count} referrals — send a complimentary half-hour</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
+}
+
 // ─── SALES DASHBOARD ─────────────────────────────────────────────────────────
 const SALES_GOALS = {
   monthly: 30000, servicesPerWeek: 79, sessionsPerDay: 15.8,
@@ -6009,6 +6358,10 @@ const NAV_ITEMS = [
   },
   { id: "pulse",     label: "Pulse",     short: "Pulse",     isPulse: true },
   {
+    id: "insights", label: "Insights", short: "Insights",
+    icon: "M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z",
+  },
+  {
     id: "sales", label: "Sales", short: "Sales",
     icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
   },
@@ -6070,6 +6423,13 @@ const rowToClient = (row) => ({
   needsFollowUp: row.needs_follow_up || false,
   restrictedStatus: row.restricted_status || null,
   restrictedNote: row.restricted_note || null,
+  // Rich profile fields
+  preferredName: row.preferred_name || null,
+  contraindications: row.contraindications || null,
+  // Referral / acquisition tracking
+  acquisitionSource: row.acquisition_source || null,
+  referralRewardRedeemed: row.referral_reward_redeemed || false,
+  referralRewardDate: row.referral_reward_date || null,
   appointments: [], history: [],
 });
 
@@ -6093,6 +6453,13 @@ const clientToRow = (c) => ({
   needs_follow_up: c.needsFollowUp || false,
   restricted_status: c.restrictedStatus || null,
   restricted_note: c.restrictedNote || null,
+  // Rich profile fields
+  preferred_name: c.preferredName || null,
+  contraindications: c.contraindications || null,
+  // Referral / acquisition tracking
+  acquisition_source: c.acquisitionSource || null,
+  referral_reward_redeemed: c.referralRewardRedeemed || false,
+  referral_reward_date: c.referralRewardDate || null,
 });
 
 const rowToAppt = (r) => ({ id: r.id, date: r.date, time: r.time, service: r.service, duration: r.duration, therapist: r.therapist, status: r.status });
@@ -6122,7 +6489,7 @@ async function dbSaveClient(url, key, client) {
 async function dbUpdateClient(url, key, id, updates) {
   const sb = getSB(url, key); if (!sb) return;
   const m = {};
-  const map = { firstName:'first_name', lastName:'last_name', email:'email', phone:'phone', birthday:'birthday', customerSince:'customer_since', lastVisit:'last_visit', avgVisitIntervalDays:'avg_visit_interval_days', referredBy:'referred_by', careCategory:'care_category', redLightStatus:'red_light_status', waitlisted:'waitlisted', address:'address', city:'city', state:'state', zip:'zip', tags:'tags', goldenNuggets:'golden_nuggets', noShows:'no_shows', totalSpent:'total_spent', vagaroId:'vagaro_id', vagaroSynced:'vagaro_synced', statusOverride:'status_override', completedAppointmentsCount:'completed_appointments_count', packageCreditsRemaining:'package_credits_remaining', packageExpirationDate:'package_expiration_date', giftCardBalance:'gift_card_balance', giftCardPurchaseDate:'gift_card_purchase_date', contactedAt:'contacted_at', needsFollowUp:'needs_follow_up', restrictedStatus:'restricted_status', restrictedNote:'restricted_note' };
+  const map = { firstName:'first_name', lastName:'last_name', email:'email', phone:'phone', birthday:'birthday', customerSince:'customer_since', lastVisit:'last_visit', avgVisitIntervalDays:'avg_visit_interval_days', referredBy:'referred_by', careCategory:'care_category', redLightStatus:'red_light_status', waitlisted:'waitlisted', address:'address', city:'city', state:'state', zip:'zip', tags:'tags', goldenNuggets:'golden_nuggets', noShows:'no_shows', totalSpent:'total_spent', vagaroId:'vagaro_id', vagaroSynced:'vagaro_synced', statusOverride:'status_override', completedAppointmentsCount:'completed_appointments_count', packageCreditsRemaining:'package_credits_remaining', packageExpirationDate:'package_expiration_date', giftCardBalance:'gift_card_balance', giftCardPurchaseDate:'gift_card_purchase_date', contactedAt:'contacted_at', needsFollowUp:'needs_follow_up', restrictedStatus:'restricted_status', restrictedNote:'restricted_note', preferredName:'preferred_name', contraindications:'contraindications', acquisitionSource:'acquisition_source', referralRewardRedeemed:'referral_reward_redeemed', referralRewardDate:'referral_reward_date' };
   Object.entries(map).forEach(([k,v]) => { if (updates[k] !== undefined) m[v] = updates[k]; });
   if (Object.keys(m).length > 0) { const { error } = await sb.from('clients').update(m).eq('id', id); if (error) throw error; }
   const histEvent = updates._appendHistory || (updates.history?.length > 0 ? updates.history[updates.history.length - 1] : null);
@@ -6788,6 +7155,7 @@ function App() {
             staffName={auth.staff?.full_name || "Staff"}
           />}
         {tab === "pulse"     && <PulsePage clients={clients} templates={templates} onGoToClient={goToClient} onUpdateClient={updateClient} staffName={auth.staff?.full_name || "Staff"} />}
+        {tab === "insights"  && <AnalyticsDashboard clients={clients} />}
         {tab === "sales"     && <SalesDashboard supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} />}
         {tab === "settings"  && (
           <SettingsPage

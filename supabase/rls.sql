@@ -25,3 +25,20 @@ CREATE POLICY "open_history"      ON history      FOR ALL USING (true) WITH CHEC
 CREATE POLICY "open_appointments" ON appointments FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "open_tasks"        ON tasks        FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "open_transactions" ON transactions FOR ALL USING (true) WITH CHECK (true);
+
+-- ─── New columns added in Feature: Rich Profile + Referral Tracking ──────────
+-- Run this migration if upgrading an existing database:
+--
+-- ALTER TABLE clients
+--   ADD COLUMN IF NOT EXISTS preferred_name          TEXT,
+--   ADD COLUMN IF NOT EXISTS contraindications        TEXT,
+--   ADD COLUMN IF NOT EXISTS acquisition_source       TEXT,
+--   ADD COLUMN IF NOT EXISTS referral_reward_redeemed BOOLEAN DEFAULT false,
+--   ADD COLUMN IF NOT EXISTS referral_reward_date     DATE;
+--
+-- These columns are optional — the app handles NULL gracefully for all of them.
+-- preferred_name:          Client's preferred name or nickname (displayed in profile header)
+-- contraindications:       Clinical notes shown as a prominent alert on the profile
+-- acquisition_source:      How they found the business (referral/google/instagram/etc.)
+-- referral_reward_redeemed: Whether the referral milestone reward has been sent
+-- referral_reward_date:    Date the reward was redeemed
