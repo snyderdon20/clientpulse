@@ -52,8 +52,9 @@ Deno.serve(async (req) => {
       await handleCustomer(supabase, event, data);
     } else if (type === "appointment") {
       await handleAppointment(supabase, event, data);
+    } else if (type === "transaction") {
+      await handleTransaction(supabase, data);
     }
-    // transaction and other types: logged above, no further action needed yet
   } catch (err) {
     console.error(`Error processing ${event}:`, err);
     // Update the log row with the error so it shows in Settings
@@ -224,6 +225,108 @@ async function handleAppointment(
     source: "vagaro",
     direction: "internal",
   });
+}
+
+// ─── Transaction handler ──────────────────────────────────────────────────────
+// Vagaro sends one webhook event per transaction line item (mirrors CSV rows).
+// We upsert by vagaro_transaction_id + item_sold so re-deliveries are idempotent
+// and multi-item checkouts each get their own row (same transaction ID, different item).
+
+async function handleTransaction(
+  sb: ReturnType<typeof createClient>,
+  data: Record<string, unknown>,
+) {
+  // Transaction ID is required — without it we can't deduplicate
+  const vagaro_transaction_id = orNull(
+    data.transactionId ?? data.TransactionId ?? data.Id ?? data.id
+  );
+  if (!vagaro_transaction_id) return;
+
+  // Resolve client by Vagaro customer ID
+  const vagaro_customer_id = orNull(data.customerId ?? data.CustomerId);
+  let client_id: string | null = null;
+  if (vagaro_customer_id) {
+    const { data: client } = await sb
+      .from("clients").select("id").eq("vagaro_id", vagaro_customer_id).maybeSingle();
+    if (client) client_id = client.id;
+  }
+
+  // Checkout date — Vagaro sends "YYYY-MM-DD" or a full ISO string
+  const dateRaw = str(
+    data.checkoutDate ?? data.CheckoutDate ??
+    data.transactionDate ?? data.TransactionDate ??
+    data.createdDate ?? data.CreatedDate ?? ""
+  );
+  const transaction_date = dateRaw
+    ? (dateRaw.includes("T") ? dateRaw : dateRaw + "T12:00:00Z")
+    : null;
+
+  // Item / service name (Vagaro CSV column: "Service/Product/GC/Package/Membership/Class")
+  const item_sold = orNull(
+    data.itemSold ?? data.ItemSold ??
+    data.serviceName ?? data.ServiceName ??
+    data.name ?? data.Name
+  );
+
+  // Purchase type (Vagaro CSV column: "Transaction Type" — "Services", "Packages", etc.)
+  const purchase_type = orNull(
+    data.purchaseType ?? data.PurchaseType ??
+    data.transactionType ?? data.TransactionType ??
+    data.type ?? data.Type
+  );
+
+  // Provider name or ID (used for per-staff session counts)
+  const vagaro_service_provider_id = orNull(
+    data.serviceProviderName ?? data.ServiceProviderName ??
+    data.providerName ?? data.ProviderName ??
+    data.serviceProviderId ?? data.ServiceProviderId ??
+    data.staffName ?? data.StaffName
+  );
+
+  const row = {
+    vagaro_transaction_id,
+    vagaro_customer_id,
+    vagaro_service_provider_id,
+    client_id,
+    transaction_date,
+    item_sold,
+    purchase_type,
+    quantity:               num(data.quantity ?? data.Quantity) ?? 1,
+    tax:                    num(data.tax ?? data.Tax),
+    tip:                    num(data.tip ?? data.Tip),
+    discount:               num(data.discount ?? data.Discount),
+    cash_amount:            num(data.cashAmount ?? data.CashAmount),
+    check_amount:           num(data.checkAmount ?? data.CheckAmount),
+    gc_redemption:          num(data.gcRedemption ?? data.GcRedemption ?? data.gcAmount ?? data.GcAmount ?? data.giftCardAmount ?? data.GiftCardAmount),
+    package_redemption:     num(data.packageRedemption ?? data.PackageRedemption ?? data.packageAmount ?? data.PackageAmount),
+    membership_amount:      num(data.membershipAmount ?? data.MembershipAmount ?? data.membershipRedemption),
+    cc_amount:              num(data.ccAmount ?? data.CcAmount ?? data.creditCardAmount ?? data.CreditCardAmount),
+    bank_account_amount:    num(data.bankAccountAmount ?? data.BankAccountAmount),
+    vagaro_pay_later_amount: num(data.vagaroPayLaterAmount ?? data.VagaroPayLaterAmount),
+    other_amount:           num(data.otherAmount ?? data.OtherAmount),
+    created_by:             orNull(data.checkedOutBy ?? data.CheckedOutBy ?? data.staffName ?? data.StaffName),
+  };
+
+  // Upsert: check for existing row by transaction_id + item_sold
+  // (same checkout can have multiple line items with the same transaction_id)
+  if (item_sold) {
+    const { data: existing } = await sb.from("transactions")
+      .select("id")
+      .eq("vagaro_transaction_id", vagaro_transaction_id)
+      .eq("item_sold", item_sold)
+      .maybeSingle();
+
+    if (existing) {
+      // Update — fill in any missing fields (e.g. client_id if it was null before)
+      const { error } = await sb.from("transactions").update(row).eq("id", existing.id);
+      if (error) throw error;
+      return;
+    }
+  }
+
+  // Insert new row
+  const { error } = await sb.from("transactions").insert(row);
+  if (error) throw error;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
