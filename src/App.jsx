@@ -5595,8 +5595,7 @@ function AnalyticsDashboard({ clients }) {
   const acqTotal = Object.values(stats.acqCounts).reduce((s, n) => s + n, 0);
 
   return (
-    <div className="page-pad" style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
-      <div style={{ maxWidth: 900, margin: "0 auto" }}>
+    <div style={{ maxWidth: 900, margin: "0 auto" }}>
         <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: "800", color: "#1a120b" }}>Insights</h2>
         <p style={{ margin: "0 0 24px", fontSize: "13px", color: "#8a7a6a" }}>
           Retention, visit cadence, and acquisition — computed from {clients.length} client records.
@@ -5714,7 +5713,6 @@ function AnalyticsDashboard({ clients }) {
             </div>
           );
         })()}
-      </div>
     </div>
   );
 }
@@ -5779,13 +5777,12 @@ function SalesNumInput({ value, onChange, color }) {
   );
 }
 
-function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
+function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB, clients = [] }) {
   const now = new Date();
   const [selYear,  setSelYear]  = useState(now.getFullYear());
   const [selMonth, setSelMonth] = useState(now.getMonth() + 1);
   const [weekOf,   setWeekOf]   = useState(() => salesWeekStart());
   const [animated, setAnimated] = useState(false);
-  const [showNote, setShowNote] = useState(false);
 
   // Dynamic staff from Supabase
   const [salesStaff,    setSalesStaff]    = useState([]);
@@ -6085,7 +6082,6 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
   const pkgPct       = salPct(pkgTotal,      SALES_GOALS.packageTotal);
   const ownerPct     = salPct(autoPkgOwner,  SALES_GOALS.ownerPackages);
   const teamPct      = salPct(autoPkgTeam,   SALES_GOALS.teamPackages);
-  const goalUnlocked = pkgPct >= 100;
   const totalSessionsWeek  = salesStaff.reduce((s, st) => s + getStaffSessions(st) + resolveStaffRlt(st).count, 0);
   const studioSessionsPct  = salPct(totalSessionsWeek, SALES_GOALS.servicesPerWeek);
   const monthlyRevenue     = liveData?.totalRevenue ?? 0;
@@ -6201,44 +6197,11 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
         </div>
       )}
 
-      {/* Vagaro reminder */}
-      <div style={{ ...S.card, marginBottom: 16, padding: "0", overflow: "hidden" }}>
-        <div onClick={() => setShowNote(p => !p)}
-          style={{ padding: "14px 20px", cursor: "pointer", display: "flex", alignItems: "center",
-            justifyContent: "space-between", background: "#fef3c7", borderBottom: showNote ? "1px solid #e8e0d6" : "none" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 16 }}>📌</span>
-            <div>
-              <div style={{ fontSize: "12px", fontWeight: "700", color: "#92400e" }}>Staff Note — Rebooking in Vagaro</div>
-              <div style={{ fontSize: "11px", color: "#8a7a6a", marginTop: 1 }}>Click to {showNote ? "collapse" : "read"} — important for accurate data</div>
-            </div>
-          </div>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#92400e" strokeWidth="2.5" strokeLinecap="round"
-            style={{ transform: showNote ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", flexShrink: 0 }}>
-            <path d="M6 9l6 6 6-6" />
-          </svg>
-        </div>
-        {showNote && (
-          <div style={{ padding: "16px 20px" }}>
-            <p style={{ margin: "0 0 10px", fontSize: "13px", lineHeight: 1.7, color: "#2e2418" }}>
-              <strong style={{ color: "#991b1b" }}>⚠️ When rebooking a client, you MUST use the Rebooking Feature in Vagaro</strong> — not just schedule a new appointment manually.
-              The rebooking feature is what captures the data that shows up in rebooking percentage reports.
-              If you schedule without using it, that rebook is invisible and your numbers will not reflect your actual performance.
-            </p>
-            <p style={{ margin: 0, fontSize: "12px", color: "#8a7a6a", fontStyle: "italic", lineHeight: 1.7 }}>
-              This matters for your personal goals, Monday tracking, and for Becky to see the full picture of how we are growing together.
-            </p>
-          </div>
-        )}
-      </div>
-
       {/* Package challenge */}
       <div style={{ ...S.card, marginBottom: 16 }}>
         <label style={slbl}>{monthLabel} Package Challenge</label>
         <div style={{ fontSize: "20px", fontWeight: "800", color: "#1a120b", marginBottom: 2 }}>$10,000 in Package Sales</div>
-        <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 20, fontStyle: "italic" }}>
-          Both goals hit = Becky takes the whole team to the hot springs 🌊
-        </div>
+
         <div style={{ display: "flex", gap: 28, alignItems: "center", flexWrap: "wrap", marginBottom: 20 }}>
           <Ring value={animated ? pkgPct : 0} size={130} stroke={11} color="#a0785a" bg="#e8e0d6">
             <div style={{ textAlign: "center" }}>
@@ -6498,32 +6461,8 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
         </div>
       )}
 
-      {/* Hot springs tracker */}
-      <div style={{
-        ...S.card, textAlign: "center", marginBottom: 8,
-        background: goalUnlocked ? "linear-gradient(135deg,#a0785a,#7a5640)" : "#fff",
-        border: goalUnlocked ? "none" : "1px solid #e8e0d6",
-        transition: "background 0.6s ease",
-      }}>
-        <div style={{ fontSize: 36, marginBottom: 8 }}>{goalUnlocked ? "🌊" : "💧"}</div>
-        <div style={{ fontSize: "18px", fontWeight: "800", color: goalUnlocked ? "#fff" : "#1a120b", marginBottom: 6 }}>
-          {goalUnlocked ? "HOT SPRINGS TRIP UNLOCKED!" : "Hot Springs Awaits…"}
-        </div>
-        <div style={{ fontSize: "13px", color: goalUnlocked ? "rgba(255,255,255,0.85)" : "#8a7a6a" }}>
-          {goalUnlocked
-            ? "Goal hit. Pack your bags! 🎉"
-            : `${fmtDollar(Math.max(0, SALES_GOALS.packageTotal - pkgTotal))} to go`}
-        </div>
-        {!goalUnlocked && (
-          <div style={{ marginTop: 16, display: "flex", justifyContent: "center" }}>
-            <div style={{ width: 200 }}>
-              <div style={{ width: "100%", height: 7, background: "#e8e0d6", borderRadius: 99, overflow: "hidden" }}>
-                <div style={{ width: `${Math.min(pkgPct,100)}%`, height: "100%", background: "#a0785a", borderRadius: 99, transition: "width 1s ease" }} />
-              </div>
-              <div style={{ fontSize: "12px", color: "#a0785a", fontWeight: "700", marginTop: 5 }}>{Math.round(pkgPct)}%</div>
-            </div>
-          </div>
-        )}
+      <div style={{ borderTop: "2px solid #e8e0d6", margin: "32px 0 0", paddingTop: 28 }}>
+        <AnalyticsDashboard clients={clients} />
       </div>
 
     </div>
@@ -6537,10 +6476,6 @@ const NAV_ITEMS = [
     icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6",
   },
   { id: "pulse",     label: "Pulse",     short: "Pulse",     isPulse: true },
-  {
-    id: "insights", label: "Insights", short: "Insights",
-    icon: "M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z",
-  },
   {
     id: "sales", label: "Sales", short: "Sales",
     icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
@@ -7335,8 +7270,7 @@ function App() {
             staffName={auth.staff?.full_name || "Staff"}
           />}
         {tab === "pulse"     && <PulsePage clients={clients} templates={templates} onGoToClient={goToClient} onUpdateClient={updateClient} staffName={auth.staff?.full_name || "Staff"} />}
-        {tab === "insights"  && <AnalyticsDashboard clients={clients} />}
-        {tab === "sales"     && <SalesDashboard supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} />}
+        {tab === "sales"     && <SalesDashboard supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} clients={clients} />}
         {tab === "settings"  && (
           <SettingsPage
             webhookLog={WEBHOOK_LOG}
