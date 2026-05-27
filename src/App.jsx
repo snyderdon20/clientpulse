@@ -5783,7 +5783,6 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB, clients = [] })
   const [selMonth, setSelMonth] = useState(now.getMonth() + 1);
   const [weekOf,   setWeekOf]   = useState(() => salesWeekStart());
   const [animated, setAnimated] = useState(false);
-  const [showNote, setShowNote] = useState(false);
 
   // Dynamic staff from Supabase
   const [salesStaff,    setSalesStaff]    = useState([]);
@@ -6197,37 +6196,6 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB, clients = [] })
           )}
         </div>
       )}
-
-      {/* Vagaro reminder */}
-      <div style={{ ...S.card, marginBottom: 16, padding: "0", overflow: "hidden" }}>
-        <div onClick={() => setShowNote(p => !p)}
-          style={{ padding: "14px 20px", cursor: "pointer", display: "flex", alignItems: "center",
-            justifyContent: "space-between", background: "#fef3c7", borderBottom: showNote ? "1px solid #e8e0d6" : "none" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 16 }}>📌</span>
-            <div>
-              <div style={{ fontSize: "12px", fontWeight: "700", color: "#92400e" }}>Staff Note — Rebooking in Vagaro</div>
-              <div style={{ fontSize: "11px", color: "#8a7a6a", marginTop: 1 }}>Click to {showNote ? "collapse" : "read"} — important for accurate data</div>
-            </div>
-          </div>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#92400e" strokeWidth="2.5" strokeLinecap="round"
-            style={{ transform: showNote ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", flexShrink: 0 }}>
-            <path d="M6 9l6 6 6-6" />
-          </svg>
-        </div>
-        {showNote && (
-          <div style={{ padding: "16px 20px" }}>
-            <p style={{ margin: "0 0 10px", fontSize: "13px", lineHeight: 1.7, color: "#2e2418" }}>
-              <strong style={{ color: "#991b1b" }}>⚠️ When rebooking a client, you MUST use the Rebooking Feature in Vagaro</strong> — not just schedule a new appointment manually.
-              The rebooking feature is what captures the data that shows up in rebooking percentage reports.
-              If you schedule without using it, that rebook is invisible and your numbers will not reflect your actual performance.
-            </p>
-            <p style={{ margin: 0, fontSize: "12px", color: "#8a7a6a", fontStyle: "italic", lineHeight: 1.7 }}>
-              This matters for your personal goals, Monday tracking, and for Becky to see the full picture of how we are growing together.
-            </p>
-          </div>
-        )}
-      </div>
 
       {/* Package challenge */}
       <div style={{ ...S.card, marginBottom: 16 }}>
