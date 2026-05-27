@@ -6085,7 +6085,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
   const pkgPct       = salPct(pkgTotal,      SALES_GOALS.packageTotal);
   const ownerPct     = salPct(autoPkgOwner,  SALES_GOALS.ownerPackages);
   const teamPct      = salPct(autoPkgTeam,   SALES_GOALS.teamPackages);
-  const goalUnlocked = ownerPct >= 100 && teamPct >= 100;
+  const goalUnlocked = pkgPct >= 100;
   const totalSessionsWeek  = salesStaff.reduce((s, st) => s + getStaffSessions(st) + resolveStaffRlt(st).count, 0);
   const studioSessionsPct  = salPct(totalSessionsWeek, SALES_GOALS.servicesPerWeek);
   const monthlyRevenue     = liveData?.totalRevenue ?? 0;
@@ -6263,35 +6263,6 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
             <SalesBar value={animated ? pkgPct : 0} color="#a0785a" bg="#e8e0d6" h={10} />
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          {[
-            { name: "Owner", goal: SALES_GOALS.ownerPackages, val: autoPkgOwner, color: "#a0785a", bg: "#f5ede4" },
-            { name: "Team",  goal: SALES_GOALS.teamPackages,  val: autoPkgTeam,  color: "#1d5fa8", bg: "#dbeafe" },
-          ].map(({ name, goal, val, color, bg }) => {
-            const p = salPct(val, goal);
-            return (
-              <div key={name} style={{ background: bg, borderRadius: 12, padding: "16px 18px", border: `1px solid ${color}22` }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                      <label style={{ ...slbl, marginBottom: 0, color }}>{name}'s Goal</label>
-                      <span style={{ fontSize: "9px", fontWeight: "700", color: "#0f7a4a", background: "#dcf5ec", borderRadius: 4, padding: "1px 5px" }}>AUTO</span>
-                    </div>
-                    <div style={{ fontSize: "20px", fontWeight: "800", color: "#1a120b" }}>{fmtDollar(val)}</div>
-                    <div style={{ fontSize: "11px", color: "#8a7a6a" }}>of {fmtDollar(goal)}</div>
-                  </div>
-                  <Ring value={animated ? p : 0} size={60} stroke={6} color={color} bg="#e8e0d6">
-                    <span style={{ fontSize: "11px", fontWeight: "700", color }}>{Math.round(p)}%</span>
-                  </Ring>
-                </div>
-                <SalesBar value={animated ? p : 0} color={color} bg="#e8e0d6" h={6} />
-                <div style={{ marginTop: 6, fontSize: "11px", color: "#8a7a6a" }}>
-                  {val >= goal ? "🎉 Goal hit!" : `${fmtDollar(Math.max(0, goal - val))} to go`}
-                </div>
-              </div>
-            );
-          })}
-        </div>
       </div>
 
       {/* Studio weekly total */}
@@ -6402,7 +6373,11 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 14, marginBottom: 16 }}>
-          {salesStaff.map(staff => {
+          {[...salesStaff].sort((a, b) => {
+            const aOwner = (a.roles?.length ? a.roles : (a.role ? [a.role] : [])).includes("owner") ? 1 : 0;
+            const bOwner = (b.roles?.length ? b.roles : (b.role ? [b.role] : [])).includes("owner") ? 1 : 0;
+            return bOwner - aOwner;
+          }).map(staff => {
             const color      = staff.sales_color || "#a0785a";
             const sessLow    = staff.sales_session_low  ?? 10;
             const sessHigh   = staff.sales_session_high ?? 15;
@@ -6536,23 +6511,17 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
         </div>
         <div style={{ fontSize: "13px", color: goalUnlocked ? "rgba(255,255,255,0.85)" : "#8a7a6a" }}>
           {goalUnlocked
-            ? "Both goals hit. Pack your bags! 🎉"
-            : `Owner needs ${fmtDollar(Math.max(0, SALES_GOALS.ownerPackages - autoPkgOwner))} more · Team needs ${fmtDollar(Math.max(0, SALES_GOALS.teamPackages - autoPkgTeam))} more`}
+            ? "Goal hit. Pack your bags! 🎉"
+            : `${fmtDollar(Math.max(0, SALES_GOALS.packageTotal - pkgTotal))} to go`}
         </div>
         {!goalUnlocked && (
-          <div style={{ marginTop: 16, display: "flex", justifyContent: "center", gap: 24, flexWrap: "wrap" }}>
-            {[
-              { label: "Owner", p: ownerPct, color: "#a0785a" },
-              { label: "Team",  p: teamPct,  color: "#1d5fa8" },
-            ].map(({ label, p, color }) => (
-              <div key={label} style={{ textAlign: "center" }}>
-                <div style={{ fontSize: "11px", color: "#8a7a6a", marginBottom: 6 }}>{label}</div>
-                <div style={{ width: 120, height: 7, background: "#e8e0d6", borderRadius: 99, overflow: "hidden" }}>
-                  <div style={{ width: `${Math.min(p,100)}%`, height: "100%", background: color, borderRadius: 99, transition: "width 1s ease" }} />
-                </div>
-                <div style={{ fontSize: "12px", color, fontWeight: "700", marginTop: 5 }}>{Math.round(p)}%</div>
+          <div style={{ marginTop: 16, display: "flex", justifyContent: "center" }}>
+            <div style={{ width: 200 }}>
+              <div style={{ width: "100%", height: 7, background: "#e8e0d6", borderRadius: 99, overflow: "hidden" }}>
+                <div style={{ width: `${Math.min(pkgPct,100)}%`, height: "100%", background: "#a0785a", borderRadius: 99, transition: "width 1s ease" }} />
               </div>
-            ))}
+              <div style={{ fontSize: "12px", color: "#a0785a", fontWeight: "700", marginTop: 5 }}>{Math.round(pkgPct)}%</div>
+            </div>
           </div>
         )}
       </div>
