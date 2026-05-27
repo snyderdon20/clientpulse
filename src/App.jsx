@@ -5595,8 +5595,7 @@ function AnalyticsDashboard({ clients }) {
   const acqTotal = Object.values(stats.acqCounts).reduce((s, n) => s + n, 0);
 
   return (
-    <div className="page-pad" style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
-      <div style={{ maxWidth: 900, margin: "0 auto" }}>
+    <div style={{ maxWidth: 900, margin: "0 auto" }}>
         <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: "800", color: "#1a120b" }}>Insights</h2>
         <p style={{ margin: "0 0 24px", fontSize: "13px", color: "#8a7a6a" }}>
           Retention, visit cadence, and acquisition — computed from {clients.length} client records.
@@ -5714,7 +5713,6 @@ function AnalyticsDashboard({ clients }) {
             </div>
           );
         })()}
-      </div>
     </div>
   );
 }
@@ -5779,7 +5777,7 @@ function SalesNumInput({ value, onChange, color }) {
   );
 }
 
-function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
+function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB, clients = [] }) {
   const now = new Date();
   const [selYear,  setSelYear]  = useState(now.getFullYear());
   const [selMonth, setSelMonth] = useState(now.getMonth() + 1);
@@ -6495,6 +6493,10 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
         </div>
       )}
 
+      <div style={{ borderTop: "2px solid #e8e0d6", margin: "32px 0 0", paddingTop: 28 }}>
+        <AnalyticsDashboard clients={clients} />
+      </div>
+
     </div>
   );
 }
@@ -6506,10 +6508,6 @@ const NAV_ITEMS = [
     icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6",
   },
   { id: "pulse",     label: "Pulse",     short: "Pulse",     isPulse: true },
-  {
-    id: "insights", label: "Insights", short: "Insights",
-    icon: "M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z",
-  },
   {
     id: "sales", label: "Sales", short: "Sales",
     icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
@@ -7304,8 +7302,7 @@ function App() {
             staffName={auth.staff?.full_name || "Staff"}
           />}
         {tab === "pulse"     && <PulsePage clients={clients} templates={templates} onGoToClient={goToClient} onUpdateClient={updateClient} staffName={auth.staff?.full_name || "Staff"} />}
-        {tab === "insights"  && <AnalyticsDashboard clients={clients} />}
-        {tab === "sales"     && <SalesDashboard supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} />}
+        {tab === "sales"     && <SalesDashboard supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} clients={clients} />}
         {tab === "settings"  && (
           <SettingsPage
             webhookLog={WEBHOOK_LOG}
