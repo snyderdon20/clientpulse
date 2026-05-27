@@ -5924,6 +5924,30 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
     return { count: total, fromTx: true };
   };
   const getStaffSessions = (staff) => resolveStaffSessions(staff).count;
+  // Variant that also returns the matched keys (used by the diagnostic panel)
+  const resolveStaffSessionsWithKeys = (staff) => {
+    const matchedKeys = new Set();
+    const addMatch = (key) => {
+      if (!key) return;
+      const k = key.toLowerCase().trim();
+      for (const s of Object.keys(sessionCounts)) {
+        if (s.toLowerCase().trim() === k) matchedKeys.add(s);
+      }
+    };
+    if (staff.vagaro_provider_id) addMatch(staff.vagaro_provider_id);
+    if (staff.full_name) {
+      addMatch(staff.full_name);
+      const parts = staff.full_name.trim().split(/\s+/);
+      if (parts.length >= 2) {
+        const lastName  = parts[parts.length - 1];
+        const firstName = parts.slice(0, -1).join(" ");
+        addMatch(`${lastName}, ${firstName}`);
+      }
+    }
+    const matchedOn = [...matchedKeys];
+    if (matchedOn.length === 0) return { count: weeklyGoals[staff.id]?.sessions || 0, fromTx: false, matchedOn: [] };
+    return { count: matchedOn.reduce((s, k) => s + (sessionCounts[k] || 0), 0), fromTx: true, matchedOn };
+  };
 
   // Persist weekly goal change to Supabase
   const updateWeeklyGoal = (staffId, field, val) => {
@@ -6248,6 +6272,45 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
             </div>
           ))}
         </div>
+        {/* Provider matching diagnostic — shows every provider key found in this week's
+            transactions so staff can confirm their vagaro_provider_id is set correctly */}
+        {Object.keys(sessionCounts).length > 0 && (() => {
+          // Build a map of matched provider keys → staff name
+          const keyToStaff = {};
+          for (const st of salesStaff) {
+            const { matchedOn } = resolveStaffSessionsWithKeys(st);
+            for (const k of (matchedOn || [])) keyToStaff[k] = st.full_name || "?";
+          }
+          const rows = Object.entries(sessionCounts).sort((a, b) => b[1] - a[1]);
+          return (
+            <details style={{ marginTop: 12 }}>
+              <summary style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase", userSelect: "none" }}>
+                Provider keys this week ({rows.length}) — expand to debug matching
+              </summary>
+              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                {rows.map(([key, cnt]) => {
+                  const matched = keyToStaff[key];
+                  return (
+                    <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 8px", borderRadius: 7,
+                      background: matched ? "#dcf5ec" : "#fff7ed", border: `1px solid ${matched ? "#86efac" : "#fed7aa"}` }}>
+                      <span style={{ fontSize: "10px" }}>{matched ? "✓" : "⚠️"}</span>
+                      <span style={{ flex: 1, fontSize: "11px", fontFamily: "monospace", color: "#2e2418", wordBreak: "break-all" }}>{key}</span>
+                      <span style={{ fontSize: "11px", fontWeight: "700", color: "#5a4a3a" }}>{cnt} sess.</span>
+                      <span style={{ fontSize: "10px", color: matched ? "#0f7a4a" : "#92400e", fontWeight: "700" }}>
+                        {matched ? `→ ${matched}` : "unmatched"}
+                      </span>
+                    </div>
+                  );
+                })}
+                {rows.some(([k]) => !keyToStaff[k]) && (
+                  <div style={{ fontSize: "10px", color: "#92400e", marginTop: 4 }}>
+                    ⚠️ Unmatched keys = set the exact string above as the staff member's <strong>Vagaro Provider ID</strong> in Settings → Staff.
+                  </div>
+                )}
+              </div>
+            </details>
+          );
+        })()}
       </div>
 
       {/* Individual staff goal cards */}
