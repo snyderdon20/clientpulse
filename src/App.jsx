@@ -5797,7 +5797,8 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
           const pid = row.vagaro_service_provider_id;
           if (!pid) continue;
           const pt = (row.purchase_type || "").toLowerCase();
-          if (pt === "service" || pt === "") counts[pid] = (counts[pid] || 0) + 1;
+          // Match "Service", "Services", "Service Add-on", or blank (Vagaro varies)
+          if (pt === "service" || pt === "services" || pt.startsWith("service add") || pt === "") counts[pid] = (counts[pid] || 0) + 1;
         }
         setSessionCounts(counts);
       });
@@ -5855,8 +5856,12 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB }) {
           const pt = t.purchase_type || "Other";
           byType[pt] = (byType[pt] || 0) + rowAmt(t);
         }
-        const packageRevenue = (byType["Package"]||0) + (byType["Membership"]||0);
-        const serviceRevenue = byType["Service"] || 0;
+        // Case-insensitive lookup so "Service"/"Services" and "Package"/"Packages"/"Membership" all match
+        const typeSum = (...keys) => Object.entries(byType).reduce(
+          (sum, [k, v]) => keys.some(key => k.toLowerCase() === key.toLowerCase()) ? sum + v : sum, 0
+        );
+        const packageRevenue = typeSum("Package", "Packages", "Membership", "Memberships");
+        const serviceRevenue = typeSum("Service", "Services");
         setLiveData({ totalRevenue, totalTips, byType, packageRevenue, serviceRevenue, count: rows.length, recent: rows.slice(0, 8), rowAmt });
         setLiveLoading(false);
       });
