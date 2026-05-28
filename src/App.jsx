@@ -103,7 +103,11 @@ function findDuplicates(clients) {
       const na = `${a.firstName} ${a.lastName}`.toLowerCase().trim();
       const nb = `${b.firstName} ${b.lastName}`.toLowerCase().trim();
       if (na.length > 3 && na === nb) r.push("name");
-      if (r.length > 0) { matches.push(b); reasons[b.id] = r; processed.add(b.id); }
+      const neitherHasEmail = !a.email && !b.email;
+      const isDuplicate = neitherHasEmail
+        ? r.includes("name") && r.includes("phone")
+        : r.length > 0;
+      if (isDuplicate) { matches.push(b); reasons[b.id] = r; processed.add(b.id); }
     }
     if (matches.length > 0) { processed.add(a.id); groups.push({ clients: [a, ...matches], reasons }); }
   }
