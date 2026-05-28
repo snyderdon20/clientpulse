@@ -2043,7 +2043,7 @@ function HistoryFeed({ history, transactions = [], onLog, onNote, onLogTx }) {
                     ? new Date(t.transaction_date.length <= 10
                         ? t.transaction_date + "T12:00:00"
                         : t.transaction_date
-                      ).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                      ).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric", year: "numeric" })
                     : null;
                   const tipAmt = +t.tip || 0;
                   return (
@@ -2350,8 +2350,16 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
     (c) => c.id !== client.id && (c.referredBy || "").toLowerCase() === fullName(client).toLowerCase()
   );
 
+  const logUpdate = (updates) => {
+    onUpdate(client.id, updates)
+      ?.catch((e) => {
+        console.warn("DB update failed:", e);
+        setSaveError("Couldn't save to database — check your connection and try again.");
+      });
+  };
+
   const appendHistory = (event) => {
-    onUpdate(client.id, { _appendHistory: event });
+    logUpdate({ _appendHistory: event });
   };
 
   const handleSaveAppointment = async (appt) => {
@@ -2359,7 +2367,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
       try { await dbSaveAppointment(supabaseUrl, supabaseAnonKey, client.id, appt); }
       catch { setSaveError("Failed to save appointment — check your connection and try again."); return; }
     }
-    onUpdate(client.id, { appointments: [...(client.appointments || []), appt] });
+    logUpdate({ appointments: [...(client.appointments || []), appt] });
     appendHistory(mkEvent("appt.scheduled",
       `Appointment manually logged: ${appt.service} · ${fmtDate(appt.date)}${appt.time ? " at " + fmtTime(appt.time) : ""} · ${appt.duration} min · ${APPT_STATUSES.find(s => s.value === appt.status)?.label ?? appt.status}`,
       { by: staffName }));
@@ -2381,30 +2389,30 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
 
   const addNugget = (nugget) => {
     const nuggets = [...(client.goldenNuggets || []), nugget];
-    onUpdate(client.id, { goldenNuggets: nuggets });
+    logUpdate({ goldenNuggets: nuggets });
     appendHistory(mkEvent("notes.updated", `Golden Nugget added: "${nugget.text.slice(0, 60)}${nugget.text.length > 60 ? "…" : ""}"`, { by: nugget.by }));
   };
 
   const deleteNugget = (id) => {
-    onUpdate(client.id, { goldenNuggets: (client.goldenNuggets || []).filter((n) => n.id !== id) });
+    logUpdate({ goldenNuggets: (client.goldenNuggets || []).filter((n) => n.id !== id) });
   };
 
   const updateCareCategory = (cat) => {
-    onUpdate(client.id, { careCategory: cat });
+    logUpdate({ careCategory: cat });
     appendHistory(mkEvent("client.updated", `Care category set to: ${cat ? CARE_CATEGORIES[cat]?.label : "none"}`, { by: staffName }));
   };
 
   const updateRedLight = (val) => {
-    onUpdate(client.id, { redLightStatus: val });
+    logUpdate({ redLightStatus: val });
     appendHistory(mkEvent("client.updated", `Red Light Therapy status: ${val ? RED_LIGHT_STATUSES[val]?.label : "cleared"}`, { by: staffName }));
   };
 
   const addCommunication = (event) => {
     appendHistory(event);
     if (event.outcome === "Follow-up Needed") {
-      onUpdate(client.id, { needsFollowUp: true });
+      logUpdate({ needsFollowUp: true });
     } else if (event._clearFollowUp) {
-      onUpdate(client.id, { needsFollowUp: false });
+      logUpdate({ needsFollowUp: false });
     }
     // Update contactedAt on every comm logged for a Lead so the 14-day
     // Lost Lead timer resets on each new contact attempt.
@@ -2412,7 +2420,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
       event.type && event.type.startsWith("comm.") &&
       statusLayer1 === "lead"
     ) {
-      onUpdate(client.id, { contactedAt: new Date().toISOString() });
+      logUpdate({ contactedAt: new Date().toISOString() });
     }
     // If the log modal had an onAfterSave callback (e.g. Red Light stage advance), call it
     if (showLog && typeof showLog.onAfterSave === "function") {
@@ -2443,7 +2451,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
       state:              infoForm.state,
       zip:                infoForm.zip,
     };
-    onUpdate(client.id, updates);
+    logUpdate(updates);
     setShowEdit(false);
     appendHistory(mkEvent("client.updated", "Client profile updated", { by: staffName }));
   };
@@ -2599,7 +2607,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
           <TagEditor
             tags={client.tags || []}
             onChange={(tags) => {
-              onUpdate(client.id, { tags });
+              logUpdate({ tags });
               appendHistory(mkEvent("client.updated", "Client tags updated", { by: staffName }));
             }}
           />
@@ -2764,7 +2772,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
                   </div>
                   {!client.referralRewardRedeemed && (
                     <button
-                      onClick={() => { onUpdate(client.id, { referralRewardRedeemed: true, referralRewardDate: TODAY }); appendHistory(mkEvent("client.updated", "Referral reward marked as redeemed", { by: staffName })); }}
+                      onClick={() => { logUpdate({ referralRewardRedeemed: true, referralRewardDate: TODAY }); appendHistory(mkEvent("client.updated", "Referral reward marked as redeemed", { by: staffName })); }}
                       style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#d97706", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}
                     >
                       Mark redeemed
@@ -3125,7 +3133,7 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
   const nextDate = new Date(selDateObj); nextDate.setDate(selDateObj.getDate() + 1);
   const prevStr = prevDate.toISOString().split("T")[0];
   const nextStr = nextDate.toISOString().split("T")[0];
-  const weekday = selDateObj.toLocaleDateString("en-US", { weekday: "long" }); // "Monday", "Wednesday", etc.
+  const weekday = selDateObj.toLocaleDateString("en-US", { timeZone: TZ, weekday: "long" }); // "Monday", "Wednesday", etc.
 
   // "tomorrow" relative to selected date for reminder logic
   const tomorrowStr = nextStr;
@@ -3139,7 +3147,7 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
     ? "Today"
     : selectedDate === prevStr
     ? "Yesterday"
-    : selDateObj.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+    : selDateObj.toLocaleDateString("en-US", { timeZone: TZ, weekday: "long", month: "long", day: "numeric" });
 
   // Weekday-specific context banner
   const weekdayContext = {
@@ -3361,7 +3369,7 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
             })() : dayLabel}
           </h2>
           <p style={{ margin: 0, fontSize: "13px", color: "#8a7a6a" }}>
-            {selDateObj.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
+            {selDateObj.toLocaleDateString("en-US", { timeZone: TZ, weekday: "long", month: "long", day: "numeric", year: "numeric" })}
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -6113,7 +6121,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB, clients = [] })
 
   // Week label
   const weekEnd = new Date(weekOf); weekEnd.setDate(weekEnd.getDate() + 6);
-  const weekLabel = `${weekOf.toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${weekEnd.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}`;
+  const weekLabel = `${weekOf.toLocaleDateString("en-US",{timeZone:TZ,month:"short",day:"numeric"})} – ${weekEnd.toLocaleDateString("en-US",{timeZone:TZ,month:"short",day:"numeric",year:"numeric"})}`;
   const isCurrentWeek = isoDate(weekOf) === isoDate(salesWeekStart());
 
   const prevWeek = () => setWeekOf(d => { const n = new Date(d); n.setDate(n.getDate()-7); return n; });
@@ -6198,7 +6206,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB, clients = [] })
                   <div style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 8 }}>Recent Transactions</div>
                   {liveData.recent.map((t, i) => {
                     const amt = liveData.rowAmt(t);
-                    const dateStr = t.transaction_date ? new Date(t.transaction_date).toLocaleDateString("en-US",{month:"short",day:"numeric"}) : "";
+                    const dateStr = t.transaction_date ? new Date(t.transaction_date).toLocaleDateString("en-US",{timeZone:TZ,month:"short",day:"numeric"}) : "";
                     return (
                       <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
                         padding: "6px 0", borderBottom: i < liveData.recent.length - 1 ? "1px solid #f0ece6" : "none" }}>
@@ -6602,7 +6610,7 @@ const clientToRow = (c) => ({
 });
 
 const rowToAppt = (r) => ({ id: r.id, date: r.date, time: r.time, service: r.service, duration: r.duration, therapist: r.therapist, status: r.status });
-const rowToHistory = (r) => ({ id: r.id, type: r.type, detail: r.detail, by: r.by, ts: r.ts, source: r.source, direction: r.direction });
+const rowToHistory = (r) => ({ id: r.id, type: r.type, detail: r.detail, by: r.by, ts: typeof r.ts === 'string' ? new Date(r.ts).getTime() : (r.ts || Date.now()), source: r.source, direction: r.direction });
 const rowToTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, clientId: r.client_id, createdBy: r.created_by, done: r.done, createdAt: new Date(r.created_at).getTime() });
 
 async function dbLoadAll(url, key) {
@@ -6634,9 +6642,9 @@ async function dbUpdateClient(url, key, id, updates) {
   const histEvent = updates._appendHistory || (updates.history?.length > 0 ? updates.history[updates.history.length - 1] : null);
   if (histEvent) {
     const direction = histEvent.type === 'comm.inperson' ? 'in-person' : histEvent.type.startsWith('comm.') ? 'outbound' : 'internal';
-    const tsIso = typeof histEvent.ts === 'number' ? new Date(histEvent.ts).toISOString() : (histEvent.ts || new Date().toISOString());
-    const { error: hErr } = await sb.from('history').insert({ id: histEvent.id||uid(), client_id: id, type: histEvent.type, detail: histEvent.detail, by: histEvent.by||'System', ts: tsIso, source: 'manual', direction });
-    if (hErr) console.warn('history insert error:', hErr);
+    const tsMs = typeof histEvent.ts === 'number' ? histEvent.ts : (histEvent.ts ? new Date(histEvent.ts).getTime() : Date.now());
+    const { error: hErr } = await sb.from('history').insert({ client_id: id, type: histEvent.type, detail: histEvent.detail, by: histEvent.by||'System', ts: tsMs, source: 'manual', direction });
+    if (hErr) throw hErr;
   }
 }
 
@@ -7047,7 +7055,8 @@ function App() {
         if (updates._appendHistory) return { ...c, history: [...(c.history || []), updates._appendHistory] };
         return { ...c, ...updates };
       }));
-      if (usingDB) dbUpdateClient(supabaseUrl, supabaseAnonKey, id, updates).catch((e) => console.warn("DB updateClient:", e));
+      if (usingDB) return dbUpdateClient(supabaseUrl, supabaseAnonKey, id, updates);
+      return Promise.resolve();
     },
     [usingDB, supabaseUrl, supabaseAnonKey]
   );
