@@ -1279,7 +1279,7 @@ function Avatar({ client, size = 36 }) {
       display: "flex", alignItems: "center", justifyContent: "center",
       fontSize: size * 0.36, fontWeight: "800", flexShrink: 0,
     }}>
-      {client.firstName[0]}{client.lastName[0]}
+      {client.firstName?.[0] ?? ""}{client.lastName?.[0] ?? ""}
     </div>
   );
 }
@@ -6544,7 +6544,7 @@ function getSB(url, key) {
 
 const rowToClient = (row) => ({
   id: row.id, vagaroId: row.vagaro_id, vagaroSynced: row.vagaro_synced,
-  firstName: row.first_name, lastName: row.last_name, email: row.email, phone: row.phone,
+  firstName: row.first_name || "", lastName: row.last_name || "", email: row.email, phone: row.phone,
   birthday: row.birthday, customerSince: row.customer_since, lastVisit: row.last_visit || null,
   avgVisitIntervalDays: row.avg_visit_interval_days, referredBy: row.referred_by,
   careCategory: row.care_category, redLightStatus: row.red_light_status,
