@@ -6635,7 +6635,7 @@ async function dbUpdateClient(url, key, id, updates) {
   if (histEvent) {
     const direction = histEvent.type === 'comm.inperson' ? 'in-person' : histEvent.type.startsWith('comm.') ? 'outbound' : 'internal';
     const tsMs = typeof histEvent.ts === 'number' ? histEvent.ts : (histEvent.ts ? new Date(histEvent.ts).getTime() : Date.now());
-    const { error: hErr } = await sb.from('history').insert({ id: histEvent.id||uid(), client_id: id, type: histEvent.type, detail: histEvent.detail, by: histEvent.by||'System', ts: tsMs, source: 'manual', direction });
+    const { error: hErr } = await sb.from('history').insert({ client_id: id, type: histEvent.type, detail: histEvent.detail, by: histEvent.by||'System', ts: tsMs, source: 'manual', direction });
     if (hErr) throw hErr;
   }
 }
