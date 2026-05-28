@@ -2043,7 +2043,7 @@ function HistoryFeed({ history, transactions = [], onLog, onNote, onLogTx }) {
                     ? new Date(t.transaction_date.length <= 10
                         ? t.transaction_date + "T12:00:00"
                         : t.transaction_date
-                      ).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                      ).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric", year: "numeric" })
                     : null;
                   const tipAmt = +t.tip || 0;
                   return (
@@ -3125,7 +3125,7 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
   const nextDate = new Date(selDateObj); nextDate.setDate(selDateObj.getDate() + 1);
   const prevStr = prevDate.toISOString().split("T")[0];
   const nextStr = nextDate.toISOString().split("T")[0];
-  const weekday = selDateObj.toLocaleDateString("en-US", { weekday: "long" }); // "Monday", "Wednesday", etc.
+  const weekday = selDateObj.toLocaleDateString("en-US", { timeZone: TZ, weekday: "long" }); // "Monday", "Wednesday", etc.
 
   // "tomorrow" relative to selected date for reminder logic
   const tomorrowStr = nextStr;
@@ -3139,7 +3139,7 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
     ? "Today"
     : selectedDate === prevStr
     ? "Yesterday"
-    : selDateObj.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+    : selDateObj.toLocaleDateString("en-US", { timeZone: TZ, weekday: "long", month: "long", day: "numeric" });
 
   // Weekday-specific context banner
   const weekdayContext = {
@@ -3361,7 +3361,7 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
             })() : dayLabel}
           </h2>
           <p style={{ margin: 0, fontSize: "13px", color: "#8a7a6a" }}>
-            {selDateObj.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
+            {selDateObj.toLocaleDateString("en-US", { timeZone: TZ, weekday: "long", month: "long", day: "numeric", year: "numeric" })}
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -6113,7 +6113,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB, clients = [] })
 
   // Week label
   const weekEnd = new Date(weekOf); weekEnd.setDate(weekEnd.getDate() + 6);
-  const weekLabel = `${weekOf.toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${weekEnd.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}`;
+  const weekLabel = `${weekOf.toLocaleDateString("en-US",{timeZone:TZ,month:"short",day:"numeric"})} – ${weekEnd.toLocaleDateString("en-US",{timeZone:TZ,month:"short",day:"numeric",year:"numeric"})}`;
   const isCurrentWeek = isoDate(weekOf) === isoDate(salesWeekStart());
 
   const prevWeek = () => setWeekOf(d => { const n = new Date(d); n.setDate(n.getDate()-7); return n; });
@@ -6198,7 +6198,7 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB, clients = [] })
                   <div style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 8 }}>Recent Transactions</div>
                   {liveData.recent.map((t, i) => {
                     const amt = liveData.rowAmt(t);
-                    const dateStr = t.transaction_date ? new Date(t.transaction_date).toLocaleDateString("en-US",{month:"short",day:"numeric"}) : "";
+                    const dateStr = t.transaction_date ? new Date(t.transaction_date).toLocaleDateString("en-US",{timeZone:TZ,month:"short",day:"numeric"}) : "";
                     return (
                       <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
                         padding: "6px 0", borderBottom: i < liveData.recent.length - 1 ? "1px solid #f0ece6" : "none" }}>
