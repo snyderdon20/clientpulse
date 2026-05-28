@@ -2350,8 +2350,16 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
     (c) => c.id !== client.id && (c.referredBy || "").toLowerCase() === fullName(client).toLowerCase()
   );
 
+  const logUpdate = (updates) => {
+    onUpdate(client.id, updates)
+      ?.catch((e) => {
+        console.warn("DB update failed:", e);
+        setSaveError("Couldn't save to database — check your connection and try again.");
+      });
+  };
+
   const appendHistory = (event) => {
-    onUpdate(client.id, { _appendHistory: event });
+    logUpdate({ _appendHistory: event });
   };
 
   const handleSaveAppointment = async (appt) => {
@@ -2359,7 +2367,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
       try { await dbSaveAppointment(supabaseUrl, supabaseAnonKey, client.id, appt); }
       catch { setSaveError("Failed to save appointment — check your connection and try again."); return; }
     }
-    onUpdate(client.id, { appointments: [...(client.appointments || []), appt] });
+    logUpdate({ appointments: [...(client.appointments || []), appt] });
     appendHistory(mkEvent("appt.scheduled",
       `Appointment manually logged: ${appt.service} · ${fmtDate(appt.date)}${appt.time ? " at " + fmtTime(appt.time) : ""} · ${appt.duration} min · ${APPT_STATUSES.find(s => s.value === appt.status)?.label ?? appt.status}`,
       { by: staffName }));
@@ -2381,30 +2389,30 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
 
   const addNugget = (nugget) => {
     const nuggets = [...(client.goldenNuggets || []), nugget];
-    onUpdate(client.id, { goldenNuggets: nuggets });
+    logUpdate({ goldenNuggets: nuggets });
     appendHistory(mkEvent("notes.updated", `Golden Nugget added: "${nugget.text.slice(0, 60)}${nugget.text.length > 60 ? "…" : ""}"`, { by: nugget.by }));
   };
 
   const deleteNugget = (id) => {
-    onUpdate(client.id, { goldenNuggets: (client.goldenNuggets || []).filter((n) => n.id !== id) });
+    logUpdate({ goldenNuggets: (client.goldenNuggets || []).filter((n) => n.id !== id) });
   };
 
   const updateCareCategory = (cat) => {
-    onUpdate(client.id, { careCategory: cat });
+    logUpdate({ careCategory: cat });
     appendHistory(mkEvent("client.updated", `Care category set to: ${cat ? CARE_CATEGORIES[cat]?.label : "none"}`, { by: staffName }));
   };
 
   const updateRedLight = (val) => {
-    onUpdate(client.id, { redLightStatus: val });
+    logUpdate({ redLightStatus: val });
     appendHistory(mkEvent("client.updated", `Red Light Therapy status: ${val ? RED_LIGHT_STATUSES[val]?.label : "cleared"}`, { by: staffName }));
   };
 
   const addCommunication = (event) => {
     appendHistory(event);
     if (event.outcome === "Follow-up Needed") {
-      onUpdate(client.id, { needsFollowUp: true });
+      logUpdate({ needsFollowUp: true });
     } else if (event._clearFollowUp) {
-      onUpdate(client.id, { needsFollowUp: false });
+      logUpdate({ needsFollowUp: false });
     }
     // Update contactedAt on every comm logged for a Lead so the 14-day
     // Lost Lead timer resets on each new contact attempt.
@@ -2412,7 +2420,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
       event.type && event.type.startsWith("comm.") &&
       statusLayer1 === "lead"
     ) {
-      onUpdate(client.id, { contactedAt: new Date().toISOString() });
+      logUpdate({ contactedAt: new Date().toISOString() });
     }
     // If the log modal had an onAfterSave callback (e.g. Red Light stage advance), call it
     if (showLog && typeof showLog.onAfterSave === "function") {
@@ -2443,7 +2451,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
       state:              infoForm.state,
       zip:                infoForm.zip,
     };
-    onUpdate(client.id, updates);
+    logUpdate(updates);
     setShowEdit(false);
     appendHistory(mkEvent("client.updated", "Client profile updated", { by: staffName }));
   };
@@ -2599,7 +2607,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
           <TagEditor
             tags={client.tags || []}
             onChange={(tags) => {
-              onUpdate(client.id, { tags });
+              logUpdate({ tags });
               appendHistory(mkEvent("client.updated", "Client tags updated", { by: staffName }));
             }}
           />
@@ -2764,7 +2772,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
                   </div>
                   {!client.referralRewardRedeemed && (
                     <button
-                      onClick={() => { onUpdate(client.id, { referralRewardRedeemed: true, referralRewardDate: TODAY }); appendHistory(mkEvent("client.updated", "Referral reward marked as redeemed", { by: staffName })); }}
+                      onClick={() => { logUpdate({ referralRewardRedeemed: true, referralRewardDate: TODAY }); appendHistory(mkEvent("client.updated", "Referral reward marked as redeemed", { by: staffName })); }}
                       style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#d97706", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}
                     >
                       Mark redeemed
@@ -7047,7 +7055,8 @@ function App() {
         if (updates._appendHistory) return { ...c, history: [...(c.history || []), updates._appendHistory] };
         return { ...c, ...updates };
       }));
-      if (usingDB) dbUpdateClient(supabaseUrl, supabaseAnonKey, id, updates).catch((e) => console.warn("DB updateClient:", e));
+      if (usingDB) return dbUpdateClient(supabaseUrl, supabaseAnonKey, id, updates);
+      return Promise.resolve();
     },
     [usingDB, supabaseUrl, supabaseAnonKey]
   );
