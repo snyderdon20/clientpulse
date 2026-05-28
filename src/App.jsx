@@ -6602,7 +6602,7 @@ const clientToRow = (c) => ({
 });
 
 const rowToAppt = (r) => ({ id: r.id, date: r.date, time: r.time, service: r.service, duration: r.duration, therapist: r.therapist, status: r.status });
-const rowToHistory = (r) => ({ id: r.id, type: r.type, detail: r.detail, by: r.by, ts: r.ts, source: r.source, direction: r.direction });
+const rowToHistory = (r) => ({ id: r.id, type: r.type, detail: r.detail, by: r.by, ts: typeof r.ts === 'string' ? new Date(r.ts).getTime() : (r.ts || Date.now()), source: r.source, direction: r.direction });
 const rowToTask = (r) => ({ id: r.id, title: r.title, dueDate: r.due_date, clientId: r.client_id, createdBy: r.created_by, done: r.done, createdAt: new Date(r.created_at).getTime() });
 
 async function dbLoadAll(url, key) {
@@ -6634,9 +6634,9 @@ async function dbUpdateClient(url, key, id, updates) {
   const histEvent = updates._appendHistory || (updates.history?.length > 0 ? updates.history[updates.history.length - 1] : null);
   if (histEvent) {
     const direction = histEvent.type === 'comm.inperson' ? 'in-person' : histEvent.type.startsWith('comm.') ? 'outbound' : 'internal';
-    const tsIso = typeof histEvent.ts === 'number' ? new Date(histEvent.ts).toISOString() : (histEvent.ts || new Date().toISOString());
-    const { error: hErr } = await sb.from('history').insert({ id: histEvent.id||uid(), client_id: id, type: histEvent.type, detail: histEvent.detail, by: histEvent.by||'System', ts: tsIso, source: 'manual', direction });
-    if (hErr) console.warn('history insert error:', hErr);
+    const tsMs = typeof histEvent.ts === 'number' ? histEvent.ts : (histEvent.ts ? new Date(histEvent.ts).getTime() : Date.now());
+    const { error: hErr } = await sb.from('history').insert({ id: histEvent.id||uid(), client_id: id, type: histEvent.type, detail: histEvent.detail, by: histEvent.by||'System', ts: tsMs, source: 'manual', direction });
+    if (hErr) throw hErr;
   }
 }
 
