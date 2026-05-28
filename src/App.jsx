@@ -4654,13 +4654,30 @@ function VagaroSyncCard({ supabaseUrl, supabaseAnonKey }) {
 }
 
 // ─── DUPLICATE MERGE MODAL ───────────────────────────────────────────────────
+const DISMISSED_DUPES_KEY = "clientpulse_dismissed_dupes";
+function dismissedDupesLoad() {
+  try { return new Set(JSON.parse(localStorage.getItem(DISMISSED_DUPES_KEY) || "[]")); } catch { return new Set(); }
+}
+function dismissedDupesSave(set) {
+  try { localStorage.setItem(DISMISSED_DUPES_KEY, JSON.stringify([...set])); } catch {}
+}
+function groupKey(group) { return group.clients.map((c) => c.id).sort().join("|"); }
+
 function DuplicateMergeModal({ clients, supabaseUrl, onMerged, onClose }) {
-  const groups = useMemo(() => findDuplicates(clients), [clients]);
+  const allGroups = useMemo(() => findDuplicates(clients), [clients]);
+  const [dismissed, setDismissed] = useState(() => dismissedDupesLoad());
+  const groups = useMemo(() => allGroups.filter((g) => !dismissed.has(groupKey(g))), [allGroups, dismissed]);
   const bestPrimary = (g) => g.clients.find((c) => c.vagaroId)?.id ?? g.clients[0].id;
   const [primaryMap, setPrimaryMap] = useState(() => Object.fromEntries(groups.map((g, i) => [i, bestPrimary(g)])));
   const [merging, setMerging] = useState(null);
   const [resolved, setResolved] = useState(new Set());
   const [error, setError] = useState(null);
+
+  const handleDismiss = (g) => {
+    const next = new Set([...dismissed, groupKey(g)]);
+    setDismissed(next);
+    dismissedDupesSave(next);
+  };
 
   const handleMerge = async (idx) => {
     const group = groups[idx];
@@ -4737,7 +4754,10 @@ function DuplicateMergeModal({ clients, supabaseUrl, onMerged, onClose }) {
                   );
                 })}
               </div>
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <button onClick={() => handleDismiss(group)} style={{ ...S.btn("ghost"), fontSize: "12px", color: "#8a7a6a" }}>
+                  Not duplicates — keep both
+                </button>
                 <button onClick={() => handleMerge(i)} disabled={merging === i} style={{ ...S.btn("primary"), fontSize: "12px" }}>
                   {merging === i ? "Merging…" : "Merge — keep selected"}
                 </button>
