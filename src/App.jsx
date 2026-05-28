@@ -1107,8 +1107,27 @@ const STATUS_MENU = [
     { layer2: "needs-follow-up", label: "Needs Follow Up" },
   ]},
   { group: "Lead", color: "#1d5fa8", items: [
+    { layer2: "new",                   label: "New"                   },
+    { layer2: "contacted",             label: "Contacted"             },
+    { layer2: "first-session-booked",  label: "First Session Booked"  },
     { layer2: "first-session-no-show", label: "First Session No-Show" },
     { layer2: "lost-lead",             label: "Lost Lead"             },
+  ]},
+  { group: "Active", color: "#0f7a4a", items: [
+    { layer2: "new-client",     label: "New Client"     },
+    { layer2: "regular",        label: "Regular"        },
+    { layer2: "package-holder", label: "Package Holder" },
+  ]},
+  { group: "Lapsed", color: "#991b1b", items: [
+    { layer2: "overdue",              label: "Overdue"             },
+    { layer2: "overdue-with-package", label: "Overdue + Package"   },
+    { layer2: "overdue-contacted",    label: "Overdue · Contacted" },
+    { layer2: "stale",                label: "Stale (61–90 days)"  },
+    { layer2: "stale-contacted",      label: "Stale · Contacted"   },
+    { layer2: "expired-package",      label: "Expired Package"     },
+  ]},
+  { group: "Inactive", color: "#64748b", items: [
+    { layer2: "past-client", label: "Past Client" },
   ]},
   { group: "Restricted", color: "#9d174d", items: [
     { layer2: "deactivated", label: "Deactivated" },
