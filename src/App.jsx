@@ -1581,14 +1581,9 @@ function LogModal({ client, templates, onClose, onSave, preset, staffName = "Sta
         {/* Outcome */}
         <div style={{ marginBottom: 16 }}>
           <label style={S.lbl}>Outcome</label>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {(OUTCOMES[type] || []).map((o) => (
-              <button key={o} onClick={() => { setOutcome(o); if (o !== "Follow Up Needed") setClearFollowUp(!!client.needsFollowUp); }}
-                style={chipStyle(outcome === o)}>
-                {o}
-              </button>
-            ))}
-          </div>
+          <select value={outcome} onChange={(e) => { setOutcome(e.target.value); if (e.target.value !== "Follow Up Needed") setClearFollowUp(!!client.needsFollowUp); }} style={S.inp}>
+            {(OUTCOMES[type] || []).map((o) => <option key={o}>{o}</option>)}
+          </select>
         </div>
 
         {/* Reply field — shown for Texted/Emailed when outcome is Replied */}
