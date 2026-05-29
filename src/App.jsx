@@ -370,78 +370,71 @@ function mkEvent(type, detail, { by = "System", ts = nowMs(), outcome } = {}) {
 }
 
 const CHAN_TYPE = {
-  "Phone": "comm.phone",
-  "Text/SMS": "comm.text",
-  "Email": "comm.email",
-  "Mail": "comm.mail",
-  "In-Person": "comm.inperson",
-  "System": "comm.system",
+  "Called":      "comm.phone",
+  "Texted":      "comm.text",
+  "Emailed":     "comm.email",
+  "Postal Mail": "comm.mail",
 };
 
 // ─── CHANNELS / CATEGORIES / OUTCOMES ────────────────────────────────────────
-const CHANNELS = ["Phone", "Text/SMS", "Email", "Mail", "In-Person"];
+const COMM_TYPES = [
+  { label: "Called",      icon: "📞" },
+  { label: "Texted",      icon: "💬" },
+  { label: "Emailed",     icon: "✉️"  },
+  { label: "Postal Mail", icon: "📬" },
+];
 
-const CHANNEL_CATEGORIES = {
-  "Phone":     ["Rebooking Outreach","Post-Visit Follow-Up","No-Show Follow-Up","New Inquiry","Red Light Therapy","Complaint / Concern","General"],
-  "Text/SMS":  ["Appointment Reminder","Rebooking Outreach","Post-Visit Follow-Up","Birthday / Special Offer","Promotional Offer","Red Light Therapy","Prenatal Package","General"],
-  "Email":     ["Appointment Reminder","Rebooking Outreach","Post-Visit Follow-Up","Birthday / Special Offer","Promotional Offer","Newsletter","General"],
-  "Mail":      ["Birthday / Special Offer","Promotional Offer","Thank You Card","General"],
-  "In-Person": ["Check-In","Post-Visit Chat","Concern Raised","General"],
-};
+const CATEGORIES = [
+  "Appointment Reminder",
+  "Post Visit Follow Up",
+  "Rebooking Outreach",
+  "Birthday",
+  "Promotional Offer",
+  "No Show",
+];
 
 const OUTCOMES = {
-  "Phone":     ["Spoke with Client","Left Voicemail","No Answer","Rebooked","Follow-up Needed"],
-  "Text/SMS":  ["Replied","Rebooked","No Reply","Opted Out","Follow-up Needed"],
-  "Email":     ["Replied","Rebooked","No Reply","Bounced","Follow-up Needed"],
-  "Mail":      ["Sent","Returned to Sender"],
-  "In-Person": ["Completed","Follow-up Needed"],
+  "Called":      ["Spoke with Client", "Left Voicemail", "No Answer", "Booked", "Rebooked", "Follow Up Needed"],
+  "Texted":      ["Sent", "Replied", "No Reply", "Booked", "Rebooked", "Opt-Out", "Follow Up Needed"],
+  "Emailed":     ["Sent", "Replied", "No Reply", "Booked", "Rebooked", "Opt-Out", "Follow Up Needed"],
+  "Postal Mail": ["Sent", "Returned to Sender"],
 };
-
-const QUICK_LOGS = [
-  { label: "Called",     channel: "Phone",     category: "Rebooking Outreach",      icon: "📞" },
-  { label: "Texted",     channel: "Text/SMS",  category: "Rebooking Outreach",      icon: "💬" },
-  { label: "Emailed",    channel: "Email",     category: "Rebooking Outreach",      icon: "✉️" },
-  { label: "Post-Visit", channel: "Text/SMS",  category: "Post-Visit Follow-Up",    icon: "❤️" },
-  { label: "No-Show",    channel: "Phone",     category: "No-Show Follow-Up",       icon: "🚫" },
-  { label: "Birthday",   channel: "Email",     category: "Birthday / Special Offer",icon: "🎂" },
-  { label: "In-Person",  channel: "In-Person", category: "Post-Visit Chat",         icon: "🤝" },
-];
 
 const TOUCHPOINTS_BY_CATEGORY = {
   default: [
-    { key: "reminder",  label: "Appointment Reminder",    icon: "⏰", logPreset: { channel: "Text/SMS", category: "Appointment Reminder"     }, templateKey: null          },
-    { key: "postVisit", label: "Post-Visit Follow-Up",    icon: "❤️", logPreset: { channel: "Text/SMS", category: "Post-Visit Follow-Up"     }, templateKey: "post-visit"  },
-    { key: "rebooking", label: "Rebooking Outreach",      icon: "📅", logPreset: { channel: "Text/SMS", category: "Rebooking Outreach"       }, templateKey: "rebooking"   },
-    { key: "birthday",  label: "Birthday / Special Offer",icon: "🎂", logPreset: { channel: "Email",    category: "Birthday / Special Offer" }, templateKey: "birthday"    },
-    { key: "promo",     label: "Promotional Offer",       icon: "🎁", logPreset: { channel: "Email",    category: "Promotional Offer"        }, templateKey: "promo"       },
+    { key: "reminder",  label: "Appointment Reminder",    icon: "⏰", logPreset: { type: "Texted",  template: "Appointment Reminder" }, templateKey: null          },
+    { key: "postVisit", label: "Post Visit Follow Up",    icon: "❤️", logPreset: { type: "Texted",  template: "Post Visit Follow Up" }, templateKey: "post-visit"  },
+    { key: "rebooking", label: "Rebooking Outreach",      icon: "📅", logPreset: { type: "Texted",  template: "Rebooking Outreach"   }, templateKey: "rebooking"   },
+    { key: "birthday",  label: "Birthday",                icon: "🎂", logPreset: { type: "Emailed", template: "Birthday"             }, templateKey: "birthday"    },
+    { key: "promo",     label: "Promotional Offer",       icon: "🎁", logPreset: { type: "Emailed", template: "Promotional Offer"    }, templateKey: "promo"       },
   ],
   syndrome: [
-    { key: "reminder",     label: "Appointment Reminder",      icon: "⏰", logPreset: { channel: "Text/SMS", category: "Appointment Reminder"   }, templateKey: null          },
-    { key: "postVisit",    label: "Post-Visit Follow-Up",      icon: "❤️", logPreset: { channel: "Text/SMS", category: "Post-Visit Follow-Up"   }, templateKey: "post-visit"  },
-    { key: "treatmentPlan",label: "Treatment Plan Check-In",   icon: "🩺", logPreset: { channel: "Phone",    category: "Rebooking Outreach"     }, templateKey: "rebooking"   },
-    { key: "nextSession",  label: "Next Session Scheduling",   icon: "📅", logPreset: { channel: "Text/SMS", category: "Rebooking Outreach"     }, templateKey: "rebooking"   },
-    { key: "redLight",     label: "Red Light Therapy Intro",   icon: "💡", logPreset: { channel: "Text/SMS", category: "Red Light Therapy"      }, templateKey: "red-light"   },
+    { key: "reminder",     label: "Appointment Reminder",    icon: "⏰", logPreset: { type: "Texted", template: "Appointment Reminder" }, templateKey: null         },
+    { key: "postVisit",    label: "Post Visit Follow Up",    icon: "❤️", logPreset: { type: "Texted", template: "Post Visit Follow Up" }, templateKey: "post-visit" },
+    { key: "treatmentPlan",label: "Treatment Plan Check-In", icon: "🩺", logPreset: { type: "Called", template: "Post Visit Follow Up" }, templateKey: "rebooking"  },
+    { key: "nextSession",  label: "Next Session Scheduling", icon: "📅", logPreset: { type: "Texted", template: "Rebooking Outreach"   }, templateKey: "rebooking"  },
+    { key: "redLight",     label: "Red Light Therapy Intro", icon: "💡", logPreset: { type: "Texted", template: "Rebooking Outreach"   }, templateKey: "red-light"  },
   ],
   stress: [
-    { key: "reminder",  label: "Appointment Reminder",    icon: "⏰", logPreset: { channel: "Text/SMS", category: "Appointment Reminder"     }, templateKey: null          },
-    { key: "postVisit", label: "Post-Visit Follow-Up",    icon: "❤️", logPreset: { channel: "Text/SMS", category: "Post-Visit Follow-Up"     }, templateKey: "post-visit"  },
-    { key: "rebooking", label: "Rebooking Outreach",      icon: "📅", logPreset: { channel: "Text/SMS", category: "Rebooking Outreach"       }, templateKey: "rebooking"   },
-    { key: "package",   label: "Buy 5 Get 1 Free Offer",  icon: "🎁", logPreset: { channel: "Text/SMS", category: "Promotional Offer"        }, templateKey: "promo"       },
-    { key: "redLight",  label: "Red Light Therapy Intro", icon: "💡", logPreset: { channel: "Text/SMS", category: "Red Light Therapy"        }, templateKey: "red-light"   },
+    { key: "reminder",  label: "Appointment Reminder",    icon: "⏰", logPreset: { type: "Texted", template: "Appointment Reminder" }, templateKey: null         },
+    { key: "postVisit", label: "Post Visit Follow Up",    icon: "❤️", logPreset: { type: "Texted", template: "Post Visit Follow Up" }, templateKey: "post-visit" },
+    { key: "rebooking", label: "Rebooking Outreach",      icon: "📅", logPreset: { type: "Texted", template: "Rebooking Outreach"   }, templateKey: "rebooking"  },
+    { key: "package",   label: "Buy 5 Get 1 Free Offer",  icon: "🎁", logPreset: { type: "Texted", template: "Promotional Offer"    }, templateKey: "promo"      },
+    { key: "redLight",  label: "Red Light Therapy Intro", icon: "💡", logPreset: { type: "Texted", template: "Rebooking Outreach"   }, templateKey: "red-light"  },
   ],
   occasional: [
-    { key: "reminder",   label: "Appointment Reminder",    icon: "⏰", logPreset: { channel: "Text/SMS", category: "Appointment Reminder"     }, templateKey: null          },
-    { key: "postVisit",  label: "Post-Visit Follow-Up",    icon: "❤️", logPreset: { channel: "Text/SMS", category: "Post-Visit Follow-Up"     }, templateKey: "post-visit"  },
-    { key: "monthlyInvite",label: "Monthly Care Invitation",icon: "🌱", logPreset: { channel: "Text/SMS", category: "Rebooking Outreach"       }, templateKey: "rebooking"   },
-    { key: "redLight",   label: "Red Light Therapy Intro", icon: "💡", logPreset: { channel: "Text/SMS", category: "Red Light Therapy"        }, templateKey: "red-light"   },
-    { key: "birthday",   label: "Birthday / Special Offer",icon: "🎂", logPreset: { channel: "Email",    category: "Birthday / Special Offer" }, templateKey: "birthday"    },
+    { key: "reminder",     label: "Appointment Reminder",    icon: "⏰", logPreset: { type: "Texted",  template: "Appointment Reminder" }, templateKey: null         },
+    { key: "postVisit",    label: "Post Visit Follow Up",    icon: "❤️", logPreset: { type: "Texted",  template: "Post Visit Follow Up" }, templateKey: "post-visit" },
+    { key: "monthlyInvite",label: "Monthly Care Invitation", icon: "🌱", logPreset: { type: "Texted",  template: "Rebooking Outreach"   }, templateKey: "rebooking"  },
+    { key: "redLight",     label: "Red Light Therapy Intro", icon: "💡", logPreset: { type: "Texted",  template: "Rebooking Outreach"   }, templateKey: "red-light"  },
+    { key: "birthday",     label: "Birthday",                icon: "🎂", logPreset: { type: "Emailed", template: "Birthday"             }, templateKey: "birthday"   },
   ],
   prenatal: [
-    { key: "reminder",    label: "Appointment Reminder",   icon: "⏰", logPreset: { channel: "Text/SMS", category: "Appointment Reminder"     }, templateKey: null          },
-    { key: "postVisit",   label: "Post-Visit Follow-Up",   icon: "❤️", logPreset: { channel: "Text/SMS", category: "Post-Visit Follow-Up"     }, templateKey: "post-visit"  },
-    { key: "prenatalPkg", label: "Prenatal Package Offer", icon: "🤰", logPreset: { channel: "Text/SMS", category: "Prenatal Package"         }, templateKey: "prenatal"    },
-    { key: "trimester",   label: "Trimester Check-In",     icon: "🌙", logPreset: { channel: "Text/SMS", category: "Post-Visit Follow-Up"     }, templateKey: "post-visit"  },
-    { key: "postpartum",  label: "Postpartum Follow-Up",   icon: "👶", logPreset: { channel: "Text/SMS", category: "Post-Visit Follow-Up"     }, templateKey: "post-visit"  },
+    { key: "reminder",    label: "Appointment Reminder",   icon: "⏰", logPreset: { type: "Texted", template: "Appointment Reminder" }, templateKey: null         },
+    { key: "postVisit",   label: "Post Visit Follow Up",   icon: "❤️", logPreset: { type: "Texted", template: "Post Visit Follow Up" }, templateKey: "post-visit" },
+    { key: "prenatalPkg", label: "Prenatal Package Offer", icon: "🤰", logPreset: { type: "Texted", template: "Promotional Offer"    }, templateKey: "prenatal"   },
+    { key: "trimester",   label: "Trimester Check-In",     icon: "🌙", logPreset: { type: "Texted", template: "Post Visit Follow Up" }, templateKey: "post-visit" },
+    { key: "postpartum",  label: "Postpartum Follow-Up",   icon: "👶", logPreset: { type: "Texted", template: "Post Visit Follow Up" }, templateKey: "post-visit" },
   ],
 };
 
@@ -1389,66 +1382,54 @@ function TemplatePicker({ client, templates, onClose }) {
 }
 
 // ─── LOG INTERACTION MODAL ────────────────────────────────────────────────────
-// Template key mapping per quick log category
 const CATEGORY_TEMPLATES = {
-  "Rebooking Outreach":       ["rebooking", "lapsed"],
-  "Post-Visit Follow-Up":     ["post-visit"],
-  "No-Show Follow-Up":        ["no-show"],
-  "Birthday / Special Offer": ["birthday"],
-  "Promotional Offer":        ["promo"],
-  "Prenatal Package":         ["prenatal"],
-  "Red Light Therapy":        ["red-light"],
-  "Referral Reward":          ["referral"],
+  "Appointment Reminder": ["reminder"],
+  "Post Visit Follow Up": ["post-visit"],
+  "Rebooking Outreach":   ["rebooking", "lapsed"],
+  "Birthday":             ["birthday"],
+  "Promotional Offer":    ["promo"],
+  "No Show":              ["no-show"],
 };
 
 function LogModal({ client, templates, onClose, onSave, preset, staffName = "Staff", onSaveTask, allClients = [] }) {
-  // ALL hooks at the top — no exceptions
   const gmail = useGmail(getGmailClientId());
   const [showTaskModal, setShowTaskModal] = useState(false);
-  const initChannel  = preset?.channel  || "Text/SMS";
-  const initCategory = preset?.category && (CHANNEL_CATEGORIES[preset.channel] || []).includes(preset.category)
-    ? preset.category
-    : CHANNEL_CATEGORIES[initChannel]?.[0] || "General";
-  const initTpl = preset?.templateKey ? templates[preset.templateKey] : null;
-  const initNotes = initTpl
-    ? (initChannel === "Email"
-        ? "Subject: " + fillTemplate(initTpl.email?.subject || "", client) + "\n\n" + fillTemplate(initTpl.email?.body || "", client)
+  const noteMode = !!preset?.noteMode;
+
+  const initType     = preset?.type || "Called";
+  const initTemplate = preset?.template || null;
+  const initTpl      = preset?.templateKey ? templates[preset.templateKey] : null;
+  const initNotes    = initTpl
+    ? (initType === "Emailed"
+        ? `Subject: ${fillTemplate(initTpl.email?.subject || "", client)}\n\n${fillTemplate(initTpl.email?.body || "", client)}`
         : fillTemplate(initTpl.sms || "", client))
     : "";
 
-  const [channel,      setChannel]      = useState(initChannel);
-  const [category,     setCategory]     = useState(initCategory);
-  const [outcome,      setOutcome]      = useState(OUTCOMES[initChannel]?.[0] || "Done");
+  const [type,         setType]         = useState(initType);
+  const [template,     setTemplate]     = useState(initTemplate);
+  const [outcome,      setOutcome]      = useState(OUTCOMES[initType]?.[0] || "Spoke with Client");
+  const [replyText,    setReplyText]    = useState("");
+  const [notes,        setNotes]        = useState(initNotes);
   const [staff,        setStaff]        = useState(staffName);
   const [activeTpl,    setActiveTpl]    = useState(preset?.templateKey || null);
-  const [notes,        setNotes]        = useState(initNotes);
   const [gmailSending, setGmailSending] = useState(false);
   const [gmailError,   setGmailError]   = useState(null);
   const [gmailSent,    setGmailSent]    = useState(false);
   const [clearFollowUp, setClearFollowUp] = useState(!!client.needsFollowUp);
-  const noteMode = !!preset?.noteMode;
 
   useEffect(() => {
-    // Only reset category if current one isn't valid for the new channel
-    if (!(CHANNEL_CATEGORIES[channel] || []).includes(category)) {
-      setCategory(CHANNEL_CATEGORIES[channel]?.[0] || "General");
-      setOutcome(OUTCOMES[channel]?.[0] || "Done");
-    } else {
-      setOutcome(OUTCOMES[channel]?.[0] || "Done");
-    }
-  }, [channel]);
+    setOutcome(OUTCOMES[type]?.[0] || "Spoke with Client");
+    setReplyText("");
+  }, [type]);
 
-  // Templates relevant to this category
-  const relevantTplKeys = CATEGORY_TEMPLATES[category] || [];
-  const relevantTpls = relevantTplKeys
-    .map((k) => templates[k] ? { key: k, ...templates[k] } : null)
-    .filter(Boolean);
+  const relevantTplKeys = CATEGORY_TEMPLATES[template] || [];
+  const relevantTpls    = relevantTplKeys.map((k) => templates[k] ? { key: k, ...templates[k] } : null).filter(Boolean);
+  const showReplyField  = (type === "Texted" || type === "Emailed") && outcome === "Replied";
 
   const applyTemplate = (key) => {
     const tpl = templates[key];
     if (!tpl) return;
-    const isEmail = channel === "Email";
-    const text = isEmail
+    const text = type === "Emailed"
       ? `Subject: ${fillTemplate(tpl.email?.subject || "", client)}\n\n${fillTemplate(tpl.email?.body || "", client)}`
       : fillTemplate(tpl.sms || "", client);
     setNotes(text);
@@ -1456,44 +1437,51 @@ function LogModal({ client, templates, onClose, onSave, preset, staffName = "Sta
   };
 
   const handleSave = () => {
-    const notesRequired = noteMode || channel !== "In-Person";
-    if (notesRequired && !notes.trim()) return;
     if (noteMode) {
       onSave(mkEvent("notes.updated", notes, { by: staff }));
-    } else {
-      const type = CHAN_TYPE[channel] || "comm.other";
-      const detail = notes.trim()
-        ? `${category} · Outcome: ${outcome} · Note: ${notes}`
-        : `${category} · Outcome: ${outcome}`;
-      const event = mkEvent(type, detail, { by: staff, outcome });
-      if (client.needsFollowUp && outcome !== "Follow-up Needed" && clearFollowUp) {
-        event._clearFollowUp = true;
-      }
-      onSave(event);
+      return;
     }
+    const parts = [
+      template || "General",
+      type,
+      `Outcome: ${outcome}`,
+      showReplyField && replyText.trim() ? `Reply: "${replyText.trim()}"` : null,
+      notes.trim() ? `Note: ${notes.trim()}` : null,
+    ].filter(Boolean);
+    const event = mkEvent(CHAN_TYPE[type] || "comm.other", parts.join(" · "), { by: staff, outcome });
+    if (client.needsFollowUp && outcome !== "Follow Up Needed" && clearFollowUp) {
+      event._clearFollowUp = true;
+    }
+    onSave(event);
   };
 
   const handleSendViaGmail = async () => {
-    if (!notes.trim() || !client.email) return;
+    if (!client.email) return;
     setGmailSending(true); setGmailError(null);
-    // Parse subject + body from notes if template was loaded (format: "Subject: ...\n\nbody")
-    let subject = category;
+    let subject = template || "Message";
     let body = notes;
     const subjectMatch = notes.match(/^Subject:\s*(.+)\n\n([\s\S]*)$/);
     if (subjectMatch) { subject = subjectMatch[1]; body = subjectMatch[2]; }
     try {
       await gmail.sendEmail({ to: client.email, subject, body });
       setGmailSent(true);
-      // Auto-log after sending
-      const detail = `${category} · Outcome: Sent via Gmail · Subject: "${subject}"`;
-      onSave(mkEvent("comm.email", detail, { by: staff }));
+      const detail = `${template || "General"} · Emailed · Outcome: Sent via Gmail · Subject: "${subject}"`;
+      onSave(mkEvent("comm.email", detail, { by: staff, outcome: "Sent" }));
     } catch (e) {
       setGmailError(e.message || "Failed to send");
       setGmailSending(false);
     }
   };
 
-  // Note mode — simple textarea, no channel/category/outcome
+  const chipStyle = (active) => ({
+    padding: "5px 12px", borderRadius: "100px", fontSize: "12px", fontWeight: "700",
+    cursor: "pointer", fontFamily: "'DM Sans',sans-serif", transition: "all 0.12s",
+    border: active ? "1px solid #a0785a" : "1px solid #e8e0d6",
+    background: active ? "#f5ede4" : "#faf8f5",
+    color: active ? "#7a5640" : "#8a7a6a",
+  });
+
+  // ── Note mode ──────────────────────────────────────────────────────────────
   if (noteMode) {
     return (
       <div style={{ position: "fixed", inset: 0, background: "rgba(46,36,24,0.4)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 400 }}
@@ -1525,47 +1513,51 @@ function LogModal({ client, templates, onClose, onSave, preset, staffName = "Sta
     );
   }
 
+  // ── Communication log ──────────────────────────────────────────────────────
   return (
     <>
     <div style={{ position: "fixed", inset: 0, background: "rgba(46,36,24,0.4)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 400 }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="cp-modal" style={{ ...S.card, width: 480, maxWidth: "100vw", maxHeight: "92vh", overflowY: "auto", animation: "fadeUp 0.15s ease", borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
+      <div className="cp-modal" style={{ ...S.card, width: 500, maxWidth: "100vw", maxHeight: "92vh", overflowY: "auto", animation: "fadeUp 0.15s ease", borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
 
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <div style={{ fontSize: "15px", fontWeight: "800", color: "#1a120b" }}>Log communication</div>
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: "22px", cursor: "pointer", color: "#8a7a6a", lineHeight: 1 }}>×</button>
         </div>
-        <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 16 }}>
+        <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 18 }}>
           For: <span style={{ color: "#2e2418", fontWeight: "600" }}>{fullName(client)}</span>
         </div>
 
-        {/* Quick log type chips */}
-        <label style={S.lbl}>Type</label>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 14 }}>
-          {QUICK_LOGS.map((q) => {
-            const isActive = channel === q.channel && category === q.category;
-            return (
-              <button key={q.label}
-                onClick={() => { setChannel(q.channel); setCategory(q.category); setOutcome(OUTCOMES[q.channel]?.[0] || "Done"); setNotes(""); setActiveTpl(null); }}
-                style={{
-                  display: "flex", alignItems: "center", gap: 4,
-                  padding: "5px 11px", borderRadius: "100px", fontSize: "12px", fontWeight: "700",
-                  cursor: "pointer", fontFamily: "'DM Sans',sans-serif", transition: "all 0.12s",
-                  border: isActive ? "1px solid #a0785a" : "1px solid #e8e0d6",
-                  background: isActive ? "#f5ede4" : "#faf8f5",
-                  color: isActive ? "#7a5640" : "#8a7a6a",
-                }}>
-                {q.icon} {q.label}
+        {/* Type */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={S.lbl}>Type</label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {COMM_TYPES.map(({ label, icon }) => (
+              <button key={label} onClick={() => setType(label)} style={chipStyle(type === label)}>
+                {icon} {label}
               </button>
-            );
-          })}
+            ))}
+          </div>
         </div>
 
-        {/* Inline template chips — only shown when relevant templates exist */}
+        {/* Message Template */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={S.lbl}>Message Template</label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {CATEGORIES.map((cat) => (
+              <button key={cat} onClick={() => { setTemplate(template === cat ? null : cat); setActiveTpl(null); setNotes(""); }}
+                style={chipStyle(template === cat)}>
+                {cat}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Load message template content */}
         {relevantTpls.length > 0 && (
           <div style={{ marginBottom: 14 }}>
-            <label style={S.lbl}>Message template — click to load</label>
+            <label style={S.lbl}>Load message content</label>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {relevantTpls.map((t) => (
                 <button key={t.key}
@@ -1583,45 +1575,48 @@ function LogModal({ client, templates, onClose, onSave, preset, staffName = "Sta
                 </button>
               ))}
             </div>
-            {activeTpl && (
-              <div style={{ fontSize: "11px", color: "#8a7a6a", marginTop: 6 }}>
-                ✏️ Message loaded — edit below before saving
-              </div>
-            )}
           </div>
         )}
 
         {/* Outcome */}
-        <div style={{ marginBottom: 12 }}>
+        <div style={{ marginBottom: 16 }}>
           <label style={S.lbl}>Outcome</label>
-          <select value={outcome} onChange={(e) => { setOutcome(e.target.value); if (e.target.value === "Follow-up Needed") setClearFollowUp(false); }} style={S.inp}>
-            {(OUTCOMES[channel] || []).map((o) => <option key={o}>{o}</option>)}
-          </select>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {(OUTCOMES[type] || []).map((o) => (
+              <button key={o} onClick={() => { setOutcome(o); if (o !== "Follow Up Needed") setClearFollowUp(!!client.needsFollowUp); }}
+                style={chipStyle(outcome === o)}>
+                {o}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Notes */}
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-            <label style={{ ...S.lbl, marginBottom: 0 }}>Notes</label>
-            {channel !== "In-Person" && channel !== "System" && (
-              <span style={{ fontSize: "11px", color: "#b0a090" }}>
-                {channel === "Text/SMS" ? `${notes.length}/160 chars` : ""}
-              </span>
-            )}
+        {/* Reply field — shown for Texted/Emailed when outcome is Replied */}
+        {showReplyField && (
+          <div style={{ marginBottom: 14 }}>
+            <label style={S.lbl}>Their reply</label>
+            <textarea value={replyText} onChange={(e) => setReplyText(e.target.value)}
+              placeholder="Paste or type their reply..."
+              style={{ ...S.inp, minHeight: "80px", resize: "vertical", lineHeight: "1.6" }} autoFocus />
           </div>
+        )}
+
+        {/* Notes */}
+        <div style={{ marginBottom: 14 }}>
+          <label style={S.lbl}>Notes <span style={{ fontWeight: 400, color: "#b0a090" }}>(optional)</span></label>
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
-            placeholder={activeTpl ? "Edit the message above if needed..." : "Describe the interaction or paste a message..."}
-            style={{ ...S.inp, minHeight: "90px", resize: "vertical", lineHeight: "1.6" }} />
+            placeholder={activeTpl ? "Edit the message above if needed..." : "Additional context or message content..."}
+            style={{ ...S.inp, minHeight: "80px", resize: "vertical", lineHeight: "1.6" }} />
         </div>
 
         {/* Staff */}
-        <div style={{ marginBottom: 20 }}>
+        <div style={{ marginBottom: 16 }}>
           <label style={S.lbl}>Staff</label>
           <input value={staff} onChange={(e) => setStaff(e.target.value)} style={S.inp} />
         </div>
 
-        {/* Gmail send option — shown when channel is Email */}
-        {channel === "Email" && !noteMode && (
+        {/* Gmail send — shown for Emailed type */}
+        {type === "Emailed" && (
           <div style={{ marginBottom: 12 }}>
             {gmail.isConnected ? (
               <div>
@@ -1635,10 +1630,8 @@ function LogModal({ client, templates, onClose, onSave, preset, staffName = "Sta
                     ✓ Sent via Gmail to {client.email} — logged automatically
                   </div>
                 ) : (
-                  <button
-                    onClick={handleSendViaGmail}
-                    disabled={!notes.trim() || !client.email || gmailSending}
-                    style={{ ...S.btn("primary"), width: "100%", justifyContent: "center", background: "linear-gradient(135deg,#4285f4,#1a73e8)", opacity: (notes.trim() && client.email) ? 1 : 0.5 }}>
+                  <button onClick={handleSendViaGmail} disabled={!client.email || gmailSending}
+                    style={{ ...S.btn("primary"), width: "100%", justifyContent: "center", background: "linear-gradient(135deg,#4285f4,#1a73e8)", opacity: client.email ? 1 : 0.5 }}>
                     {gmailSending ? "Sending…" : `📧 Send via Gmail to ${client.email || "no email on file"}`}
                   </button>
                 )}
@@ -1655,13 +1648,14 @@ function LogModal({ client, templates, onClose, onSave, preset, staffName = "Sta
           </div>
         )}
 
-        {client.needsFollowUp && !noteMode && outcome !== "Follow-up Needed" && (
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "12px", color: "#5b21b6", fontWeight: "600", cursor: "pointer", padding: "6px 0" }}>
+        {client.needsFollowUp && outcome !== "Follow Up Needed" && (
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "12px", color: "#5b21b6", fontWeight: "600", cursor: "pointer", padding: "6px 0", marginBottom: 8 }}>
             <input type="checkbox" checked={clearFollowUp} onChange={(e) => setClearFollowUp(e.target.checked)}
               style={{ accentColor: "#7c3aed", width: 14, height: 14, cursor: "pointer" }} />
             Clear "Needs Follow Up" flag after saving
           </label>
         )}
+
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
           {onSaveTask && (
             <button style={{ ...S.btn("ghost"), fontSize: "12px", color: "#7a5640", borderColor: "#e8d5c0" }}
@@ -1672,8 +1666,8 @@ function LogModal({ client, templates, onClose, onSave, preset, staffName = "Sta
           <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
             <button style={S.btn("ghost")} onClick={onClose}>Cancel</button>
             {!gmailSent && (
-              <button style={{ ...S.btn("primary"), opacity: (channel === "In-Person" || notes.trim()) ? 1 : 0.5 }} onClick={handleSave}>
-                {channel === "Email" && gmail.isConnected ? "Log only" : "Save log"}
+              <button style={S.btn("primary")} onClick={handleSave}>
+                {type === "Emailed" && gmail.isConnected ? "Log only" : "Save log"}
               </button>
             )}
           </div>
@@ -1834,8 +1828,8 @@ function RedLightRow({ client, onLog, onStageChange }) {
       </div>
       <button
         onClick={() => onLog({
-          channel: "Text/SMS",
-          category: "Red Light Therapy",
+          type: "Texted",
+          template: "Rebooking Outreach",
           templateKey: "red-light",
           rlAction: current.action,
           // auto-advance stage after logging
@@ -2428,7 +2422,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
 
   const addCommunication = (event) => {
     appendHistory(event);
-    if (event.outcome === "Follow-up Needed") {
+    if (event.outcome === "Follow Up Needed") {
       logUpdate({ needsFollowUp: true });
     } else if (event._clearFollowUp) {
       logUpdate({ needsFollowUp: false });
@@ -2640,7 +2634,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
             ✏️ Edit profile
           </button>
           <button
-            onClick={() => setShowLog({ channel: "Text/SMS", category: "Rebooking Outreach" })}
+            onClick={() => setShowLog({ type: "Texted", template: "Rebooking Outreach" })}
             style={{ display: "flex", alignItems: "center", gap: "4px", padding: "6px 12px", background: "#dcf5ec", border: "1px solid #6ee7b7", borderRadius: "8px", fontSize: "12px", fontWeight: "700", color: "#065f46", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}
           >
             + Log
@@ -2685,7 +2679,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
       {client.needsFollowUp && (
         <div style={{ background: "#faf5ff", border: "1px solid #c4b5fd", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#5b21b6", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
           <span>📋 <strong>Needs Follow Up:</strong> {client.firstName} has been flagged for follow-up.</span>
-          <button onClick={() => setShowLog({ channel: "Text/SMS", category: "Rebooking Outreach" })} style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#7c3aed", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}>
+          <button onClick={() => setShowLog({ type: "Texted", template: "Rebooking Outreach" })} style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#7c3aed", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}>
             Log outreach →
           </button>
         </div>
@@ -2700,7 +2694,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
       {(status === "overdue" || status === "overdue-with-package") && ds && upcoming.length === 0 && (
         <div style={{ background: "#fff8f0", border: "1px solid #f0e0c8", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#92400e", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
           <span>⚠️ <strong>Overdue{status === "overdue-with-package" ? " — Has Unused Package!" : ""}:</strong> {client.firstName} last visited {ds} days ago.</span>
-          <button onClick={() => setShowLog({ channel: "Text/SMS", category: "Rebooking Outreach" })} style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#d97706", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}>
+          <button onClick={() => setShowLog({ type: "Texted", template: "Rebooking Outreach" })} style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#d97706", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}>
             Log outreach →
           </button>
         </div>
@@ -2708,7 +2702,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
       {(status === "stale" || status === "expired-package") && ds && upcoming.length === 0 && (
         <div style={{ background: "#fff5f5", border: "1px solid #fca5a5", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#991b1b", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
           <span>🔴 <strong>Lapsed{status === "expired-package" ? " — Package Expired" : ` (${ds} days)`}:</strong> {client.firstName} needs a win-back sequence.</span>
-          <button onClick={() => setShowLog({ channel: "Text/SMS", category: "Rebooking Outreach" })} style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#dc2626", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}>
+          <button onClick={() => setShowLog({ type: "Texted", template: "Rebooking Outreach" })} style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#dc2626", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}>
             Log outreach →
           </button>
         </div>
@@ -2716,7 +2710,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
       {status === "first-session-no-show" && (
         <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#92400e", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
           <span>🚫 <strong>First Session No-Show.</strong> High-priority empathy recovery — contact {client.firstName} to rebook.</span>
-          <button onClick={() => setShowLog({ channel: "Phone", category: "No-Show Follow-Up" })} style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#d97706", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}>
+          <button onClick={() => setShowLog({ type: "Called", template: "No Show" })} style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#d97706", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}>
             Log call →
           </button>
         </div>
@@ -2734,7 +2728,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
         return (
           <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "10px", padding: "11px 14px", marginBottom: "14px", fontSize: "13px", color: "#92400e", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
             <span>📦 <strong>Package expiring in {daysUntil} day{daysUntil !== 1 ? "s" : ""}:</strong> {client.packageCreditsRemaining} credit{client.packageCreditsRemaining !== 1 ? "s" : ""} remaining — remind {client.firstName} to book.</span>
-            <button onClick={() => setShowLog({ channel: "Text/SMS", category: "Rebooking Outreach" })} style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#ea580c", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}>
+            <button onClick={() => setShowLog({ type: "Texted", template: "Rebooking Outreach" })} style={{ fontSize: "11px", fontWeight: "700", color: "#fff", background: "#ea580c", border: "none", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0 }}>
               Log outreach →
             </button>
           </div>
@@ -2895,7 +2889,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
         <HistoryFeed
           history={client.history || []}
           transactions={transactions}
-          onLog={() => setShowLog({ channel: "Text/SMS", category: "Rebooking Outreach" })}
+          onLog={() => setShowLog({ type: "Texted", template: "Rebooking Outreach" })}
           onNote={() => setShowLog({ noteMode: true })}
           onLogTx={() => setShowLogTx(true)}
         />
@@ -3344,11 +3338,11 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
   }, [clients, selectedDate, weekday, sortBy]);
 
   const PRESET_MAP = {
-    reminder: { channel: "Text/SMS", category: "Appointment Reminder",    templateKey: null },
-    postVisit: { channel: "Text/SMS", category: "Post-Visit Follow-Up",   templateKey: "post-visit" },
-    lapsed:   { channel: "Text/SMS", category: "Rebooking Outreach",      templateKey: "lapsed" },
-    overdue:  { channel: "Text/SMS", category: "Rebooking Outreach",      templateKey: "rebooking" },
-    birthday: { channel: "Email",    category: "Birthday / Special Offer", templateKey: "birthday" },
+    reminder: { type: "Texted",  template: "Appointment Reminder", templateKey: null         },
+    postVisit: { type: "Texted", template: "Post Visit Follow Up",  templateKey: "post-visit" },
+    lapsed:   { type: "Texted",  template: "Rebooking Outreach",    templateKey: "lapsed"     },
+    overdue:  { type: "Texted",  template: "Rebooking Outreach",    templateKey: "rebooking"  },
+    birthday: { type: "Emailed", template: "Birthday",              templateKey: "birthday"   },
   };
 
   // Tasks due on selectedDate or overdue relative to it
@@ -3635,8 +3629,8 @@ function OutreachComposer({ client, triggerId, templates, onLog, onClose, staffN
   const doLog = () => {
     onLog && onLog({
       id: uid(),
-      channel: channel === "sms" ? "Text/SMS" : "Email",
-      category: "Rebooking Outreach",
+      type: channel === "sms" ? "Texted" : "Emailed",
+      template: "Rebooking Outreach",
       outcome: "Sent",
       notes: channel === "sms"
         ? `${tpl?.label} sent via SMS: "${editedSms.slice(0, 80)}${editedSms.length > 80 ? "…" : ""}"`
