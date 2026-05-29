@@ -152,7 +152,17 @@ const HISTORY_TYPES = {
 
 // ─── TEMPLATES ────────────────────────────────────────────────────────────────
 const DEFAULT_TEMPLATES = {
+  reminder: {
+    category: "Appointment Reminder",
+    label: "Appointment Reminder", icon: "⏰",
+    sms: "Hi {{firstName}}! Just a reminder about your upcoming appointment with us. We look forward to seeing you! Questions? Reply here or visit: {{bookingLink}}",
+    email: {
+      subject: "Appointment reminder, {{firstName}}",
+      body: "Hi {{firstName}},\n\nThis is a friendly reminder about your upcoming appointment with us.\n\nIf you need to reschedule, visit:\n{{bookingLink}}\n\nSee you soon,\nDon & the team at RCTM",
+    },
+  },
   rebooking: {
+    category: "Rebooking Outreach",
     label: "Rebooking — Stress / Monthly", icon: "📅",
     sms: "Hi {{firstName}}! You carry a lot — this is your time to fill back up. Ready to lock in your next session? We'd love to hold your spot: {{bookingLink}}",
     email: {
@@ -161,6 +171,7 @@ const DEFAULT_TEMPLATES = {
     },
   },
   "post-visit": {
+    category: "Post Visit Follow Up",
     label: "Post-Visit Follow-Up", icon: "❤️",
     sms: "Hi {{firstName}}! Just checking in after your session — how are you feeling? I noticed some significant tension in your upper traps — would love to know if you're getting some relief. 💛",
     email: {
@@ -169,6 +180,7 @@ const DEFAULT_TEMPLATES = {
     },
   },
   "no-show": {
+    category: "No Show",
     label: "No-Show Follow-Up", icon: "🚫",
     sms: "Hi {{firstName}}, we missed you today! We hope everything is okay. Whenever you're ready to rebook, I'll take care of everything for you: {{bookingLink}}",
     email: {
@@ -177,6 +189,7 @@ const DEFAULT_TEMPLATES = {
     },
   },
   birthday: {
+    category: "Birthday",
     label: "Birthday Offer", icon: "🎂",
     sms: "Happy Birthday {{firstName}}! 🎂 We'd love to help you celebrate — we have something special for you this month. Reply and I'll take care of you!",
     email: {
@@ -185,6 +198,7 @@ const DEFAULT_TEMPLATES = {
     },
   },
   promo: {
+    category: "Promotional Offer",
     label: "Promotional Offer", icon: "🎁",
     sms: "Hi {{firstName}}! We're running something special right now that I thought of you for. Would you like details? 😊",
     email: {
@@ -193,6 +207,7 @@ const DEFAULT_TEMPLATES = {
     },
   },
   lapsed: {
+    category: "Rebooking Outreach",
     label: "Win-Back (Lapsed Client)", icon: "🔴",
     sms: "Hi {{firstName}}! This is Don from Rapid City Therapeutic Massage — I'm reaching out to a few clients we haven't seen in a while just to say hello. How have you been? 😊",
     email: {
@@ -201,6 +216,7 @@ const DEFAULT_TEMPLATES = {
     },
   },
   prenatal: {
+    category: "Promotional Offer",
     label: "Prenatal Package", icon: "🤰",
     sms: "Hi {{firstName}}! We have a Prenatal Package I'd love to tell you about — designed to support you through each stage of your pregnancy. Can I share the details?",
     email: {
@@ -209,6 +225,7 @@ const DEFAULT_TEMPLATES = {
     },
   },
   referral: {
+    category: "Promotional Offer",
     label: "Referral Reward 🏆", icon: "🏆",
     sms: "{{firstName}}! I just had to reach out — you've sent us amazing clients and we are SO grateful. As a thank you, we'd love to give you a complimentary half-hour add-on at your next visit. It's already in your file — just show up! 💛",
     email: {
@@ -217,6 +234,7 @@ const DEFAULT_TEMPLATES = {
     },
   },
   "red-light": {
+    category: "Rebooking Outreach",
     label: "Red Light Therapy Intro", icon: "💡",
     sms: "Hi {{firstName}}! Before your next visit — have you had a chance to try our Red Light Therapy mat? There's great research behind it and I'd love to build a session right into your next appointment. Interested?",
     email: {
@@ -1382,14 +1400,6 @@ function TemplatePicker({ client, templates, onClose }) {
 }
 
 // ─── LOG INTERACTION MODAL ────────────────────────────────────────────────────
-const CATEGORY_TEMPLATES = {
-  "Appointment Reminder": ["reminder"],
-  "Post Visit Follow Up": ["post-visit"],
-  "Rebooking Outreach":   ["rebooking", "lapsed"],
-  "Birthday":             ["birthday"],
-  "Promotional Offer":    ["promo"],
-  "No Show":              ["no-show"],
-};
 
 function LogModal({ client, templates, onClose, onSave, preset, staffName = "Staff", onSaveTask, allClients = [] }) {
   const gmail = useGmail(getGmailClientId());
@@ -1422,8 +1432,14 @@ function LogModal({ client, templates, onClose, onSave, preset, staffName = "Sta
     setReplyText("");
   }, [type]);
 
-  const relevantTplKeys = CATEGORY_TEMPLATES[template] || [];
-  const relevantTpls    = relevantTplKeys.map((k) => templates[k] ? { key: k, ...templates[k] } : null).filter(Boolean);
+  // Show all templates that match the selected category and have content for the type
+  const relevantTpls = Object.entries(templates)
+    .filter(([, t]) => {
+      const hasContent = type === "Emailed" ? !!t.email : type === "Texted" ? !!t.sms : !!(t.sms || t.email);
+      const matchesCategory = !template || t.category === template;
+      return hasContent && matchesCategory;
+    })
+    .map(([k, t]) => ({ key: k, ...t }));
   const showReplyField  = (type === "Texted" || type === "Emailed") && outcome === "Replied";
 
   const applyTemplate = (key) => {
@@ -2812,37 +2828,43 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
               </div>
             )}
             <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: 4 }}>
-              {getTouchpoints(client).map((tp) => {
-                // Red Light gets its own smart row
-                if (tp.key === "redLight") {
+              {/* Red Light — dedicated smart row */}
+              <RedLightRow
+                client={client}
+                onLog={(preset) => setShowLog(preset)}
+                onStageChange={updateRedLight}
+              />
+              {/* One row per template defined in Settings */}
+              {Object.entries(templates)
+                .filter(([key]) => key !== "red-light")
+                .map(([key, tpl]) => {
+                  const lastSent = tpl.category ? getLastSent(client, tpl.category) : null;
+                  const defaultType = tpl.sms ? "Texted" : tpl.email ? "Emailed" : "Called";
                   return (
-                    <RedLightRow
-                      key="redLight"
-                      client={client}
-                      onLog={(preset) => setShowLog(preset)}
-                      onStageChange={updateRedLight}
-                    />
-                  );
-                }
-                const lastSent = getLastSent(client, tp.logPreset.category);
-                return (
-                  <div key={tp.key} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 12px", borderRadius: "10px", background: "#faf8f5", border: "1px solid #f0e8de" }}>
-                    <span style={{ fontSize: "15px", flexShrink: 0 }}>{tp.icon}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: "13px", fontWeight: "600", color: "#4a3828" }}>{tp.label}</div>
-                      {lastSent
-                        ? <div style={{ fontSize: "11px", color: "#0f7a4a", fontWeight: "600", marginTop: 1 }}>Last sent {lastSent}</div>
-                        : <div style={{ fontSize: "11px", color: "#b0a090", marginTop: 1 }}>Never sent</div>
-                      }
+                    <div key={key} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 12px", borderRadius: "10px", background: "#faf8f5", border: "1px solid #f0e8de" }}>
+                      <span style={{ fontSize: "15px", flexShrink: 0 }}>{tpl.icon}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: "13px", fontWeight: "600", color: "#4a3828" }}>{tpl.label}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, flexWrap: "wrap" }}>
+                          {tpl.category && (
+                            <span style={{ fontSize: "10px", fontWeight: "700", color: "#a0785a", background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: "100px", padding: "1px 7px" }}>
+                              {tpl.category}
+                            </span>
+                          )}
+                          {lastSent
+                            ? <span style={{ fontSize: "11px", color: "#0f7a4a", fontWeight: "600" }}>Last sent {lastSent}</span>
+                            : <span style={{ fontSize: "11px", color: "#b0a090" }}>Never sent</span>
+                          }
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setShowLog({ type: defaultType, template: tpl.category || null, templateKey: key })}
+                        style={{ fontSize: "11px", fontWeight: "700", color: "#7a5640", background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0, whiteSpace: "nowrap" }}>
+                        Log →
+                      </button>
                     </div>
-                    <button
-                      onClick={() => setShowLog({ ...tp.logPreset, templateKey: tp.templateKey })}
-                      style={{ fontSize: "11px", fontWeight: "700", color: "#7a5640", background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0, whiteSpace: "nowrap" }}>
-                      Log →
-                    </button>
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
           </div>
 
@@ -4043,6 +4065,13 @@ function TemplatesPage({ templates, onSave, embedded = false }) {
           </div>
           {editing === key && form ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <label style={S.lbl}>Category</label>
+                <select value={form.category || ""} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value || undefined }))} style={S.inp}>
+                  <option value="">— None —</option>
+                  {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
               <div>
                 <label style={S.lbl}>SMS / Text</label>
                 <textarea value={form.sms || ""} onChange={(e) => setForm((f) => ({ ...f, sms: e.target.value }))}
