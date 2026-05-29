@@ -155,10 +155,10 @@ const DEFAULT_TEMPLATES = {
   reminder: {
     category: "Appointment Reminder",
     label: "Appointment Reminder", icon: "⏰",
-    sms: "Hi {{firstName}}! Just a reminder about your upcoming appointment with us. We look forward to seeing you! Questions? Reply here or visit: {{bookingLink}}",
+    sms: "Hi {{firstName}}! Just a reminder about your appointment on {{nextApptDate}} at {{nextApptTime}} with {{nextApptTherapist}}. We look forward to seeing you! Questions? Reply here or visit: {{bookingLink}}",
     email: {
       subject: "Appointment reminder, {{firstName}}",
-      body: "Hi {{firstName}},\n\nThis is a friendly reminder about your upcoming appointment with us.\n\nIf you need to reschedule, visit:\n{{bookingLink}}\n\nSee you soon,\nDon & the team at RCTM",
+      body: "Hi {{firstName}},\n\nThis is a friendly reminder about your upcoming appointment:\n\n📅 {{nextApptDate}} at {{nextApptTime}}\n👤 With {{nextApptTherapist}}\n\nIf you need to reschedule, visit:\n{{bookingLink}}\n\nSee you soon,\nDon & the team at RCTM",
     },
   },
   rebooking: {
@@ -356,10 +356,20 @@ function clientStatus(client) {
 }
 
 function fillTemplate(text, client) {
+  const today = new Date().toISOString().split("T")[0];
+  const nextAppt = (client.appointments || [])
+    .filter((a) => a.date >= today && a.status !== "cancelled")
+    .sort((a, b) => a.date.localeCompare(b.date))[0];
+  const nextApptDate = nextAppt ? fmtDate(nextAppt.date) : "[appointment date]";
+  const nextApptTime = nextAppt?.time ? fmtTime(nextAppt.time) : "[appointment time]";
+  const nextApptTherapist = nextAppt?.therapist || "[therapist name]";
   return (text || "")
     .replace(/{{firstName}}/g, client.firstName || "")
     .replace(/{{lastName}}/g, client.lastName || "")
-    .replace(/{{bookingLink}}/g, "[Your Vagaro booking link]");
+    .replace(/{{bookingLink}}/g, "[Your Vagaro booking link]")
+    .replace(/{{nextApptDate}}/g, nextApptDate)
+    .replace(/{{nextApptTime}}/g, nextApptTime)
+    .replace(/{{nextApptTherapist}}/g, nextApptTherapist);
 }
 
 // ─── CARE CATEGORIES ─────────────────────────────────────────────────────────
@@ -4044,10 +4054,24 @@ function TemplatesPage({ templates, onSave, embedded = false }) {
 
   const content = (
     <div>
-      <p style={{ margin: "0 0 16px", fontSize: "13px", color: "#8a7a6a" }}>
-        Use <code style={{ background: "#f5ede4", padding: "1px 5px", borderRadius: 4, fontSize: 12 }}>{"{{firstName}}"}</code> and{" "}
-        <code style={{ background: "#f5ede4", padding: "1px 5px", borderRadius: 4, fontSize: 12 }}>{"{{bookingLink}}"}</code> as placeholders.
+      <p style={{ margin: "0 0 8px", fontSize: "13px", color: "#8a7a6a" }}>
+        Available placeholders:
       </p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
+        {[
+          { tag: "{{firstName}}",          desc: "Client's first name" },
+          { tag: "{{lastName}}",           desc: "Client's last name" },
+          { tag: "{{bookingLink}}",        desc: "Vagaro booking link" },
+          { tag: "{{nextApptDate}}",       desc: "Next appointment date" },
+          { tag: "{{nextApptTime}}",       desc: "Next appointment time" },
+          { tag: "{{nextApptTherapist}}", desc: "Therapist for next appointment" },
+        ].map(({ tag, desc }) => (
+          <div key={tag} title={desc} style={{ display: "flex", alignItems: "center", gap: 4, background: "#f5ede4", borderRadius: 6, padding: "3px 8px" }}>
+            <code style={{ fontSize: 11, color: "#7a4a28" }}>{tag}</code>
+            <span style={{ fontSize: 10, color: "#8a7a6a" }}>— {desc}</span>
+          </div>
+        ))}
+      </div>
       {Object.entries(templates).map(([key, tpl]) => (
         <div key={key} style={{ ...S.card, marginBottom: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: editing === key ? 14 : 0 }}>
