@@ -1138,6 +1138,7 @@ const STATUS_MENU = [
     { layer2: "new-client",     label: "New Client"     },
     { layer2: "regular",        label: "Regular"        },
     { layer2: "package-holder", label: "Package Holder" },
+    { layer2: "active-overdue", label: "Overdue"        },
   ]},
   { group: "Lapsed", color: "#991b1b", items: [
     { layer2: "overdue",              label: "Overdue"             },
