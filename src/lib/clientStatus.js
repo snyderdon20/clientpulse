@@ -153,14 +153,14 @@ export function computeClientStatus(client) {
     return { layer1: "inactive", layer2: "past-client" };
   }
 
-  // ── Layer 1: LAPSED — 31 – 90 days since last visit ──────────────────────
-  if (ds > 30) {
+  // ── Layer 1: LAPSED — 46 – 90 days since last visit ──────────────────────
+  if (ds > 45) {
     const contacted = wasRecentlyContacted(client);
     // Stale: 61 – 90 days (or 90+ with a future appt keeping them out of inactive)
     if (ds > 60) {
       return { layer1: "lapsed", layer2: contacted ? "stale-contacted" : "stale" };
     }
-    // Overdue 31 – 60 days
+    // Overdue 46 – 60 days
     const hasActivePackage =
       (client.packageCreditsRemaining ?? 0) > 0 &&
       client.packageExpirationDate &&
@@ -172,6 +172,11 @@ export function computeClientStatus(client) {
       return { layer1: "lapsed", layer2: "overdue-with-package" };
     }
     return { layer1: "lapsed", layer2: "overdue" };
+  }
+
+  // ── Active-Overdue: 31 – 45 days, past normal cadence, no upcoming booking ─
+  if (ds > 30 && !hasFutureBookedAppointment(client)) {
+    return { layer1: "active", layer2: "active-overdue" };
   }
 
   // ── Layer 1: ACTIVE — last visit within 30 days ───────────────────────────
@@ -220,6 +225,7 @@ export const LAYER2_CFG = {
   "new-client":             { label: "New Client",            layer1: "active",     bg: "#d1fae5", color: "#065f46" },
   "regular":                { label: "Regular",               layer1: "active",     bg: "#dcf5ec", color: "#0f7a4a" },
   "package-holder":         { label: "Package Holder",        layer1: "active",     bg: "#bbf7d0", color: "#166534" },
+  "active-overdue":         { label: "Overdue",               layer1: "active",     bg: "#fef9c3", color: "#854d0e" },
   "needs-follow-up":        { label: "Needs Follow Up",       layer1: "active",     bg: "#ede9fe", color: "#5b21b6" },
   // Lapsed
   "overdue-with-package":   { label: "Overdue + Package",     layer1: "lapsed",     bg: "#ffedd5", color: "#9a3412" },
