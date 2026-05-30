@@ -5100,7 +5100,180 @@ function TransactionCSVImport({ supabaseUrl, supabaseAnonKey }) {
   );
 }
 
-function SettingsPage({ webhookLog, templates, onSaveTemplate, gmailClientId, setGmailClientId, supabaseUrl, setSupabaseUrl, supabaseAnonKey, setSupabaseAnonKey, usingDB, dbError, onAddClient, onFindDuplicates, currentUserRoles = [] }) {
+// ─── ACTIVITY LOG (admin oversight) ──────────────────────────────────────────
+function ActivityLogPanel({ clients = [] }) {
+  const now = Date.now();
+  const [staffFilter, setStaffFilter] = useState("all");
+  const [dayRange,    setDayRange]    = useState(30);
+
+  // Flatten all comm.* history entries across every client
+  const allEntries = useMemo(() => {
+    const cutoff = now - dayRange * 24 * 60 * 60 * 1000;
+    const rows = [];
+    for (const c of clients) {
+      for (const h of c.history || []) {
+        if (!h.type?.startsWith("comm.")) continue;
+        const ts = typeof h.ts === "number" ? h.ts : (h.ts ? new Date(h.ts).getTime() : 0);
+        if (ts < cutoff) continue;
+        rows.push({ ...h, ts, clientId: c.id, clientName: `${c.firstName} ${c.lastName}`.trim() });
+      }
+    }
+    return rows.sort((a, b) => b.ts - a.ts);
+  }, [clients, dayRange, now]);
+
+  // Collect unique staff names for the filter dropdown
+  const staffOptions = useMemo(() => {
+    const names = new Set(allEntries.map((e) => e.by).filter(Boolean));
+    return [...names].sort();
+  }, [allEntries]);
+
+  const filtered = staffFilter === "all" ? allEntries : allEntries.filter((e) => e.by === staffFilter);
+
+  // Parse the structured detail string produced by the log modal
+  // Format: "Category · Type · Outcome: X · Reply: "..." · Note: ..."
+  const parseDetail = (detail = "") => {
+    const parts = detail.split(" · ");
+    let category = null, outcome = null, reply = null, note = null;
+    if (parts.length >= 2) {
+      const maybeCategory = parts[0];
+      // First part is a category if it matches a known category or isn't "Outcome:"
+      if (!maybeCategory.startsWith("Outcome:")) category = maybeCategory;
+    }
+    for (const p of parts) {
+      if (p.startsWith("Outcome: ")) outcome = p.slice(9);
+      else if (p.startsWith('Reply: "')) reply = p.slice(8).replace(/"$/, "");
+      else if (p.startsWith("Note: ")) note = p.slice(6);
+    }
+    // If no structured parts, treat the whole thing as a note
+    if (!outcome && !category) note = detail;
+    return { category, outcome, reply, note };
+  };
+
+  const fmtRelTime = (ts) => {
+    const diffMs = now - ts;
+    const mins   = Math.floor(diffMs / 60000);
+    const hours  = Math.floor(mins / 60);
+    const days   = Math.floor(hours / 24);
+    if (days >= 1) return `${days}d ago`;
+    if (hours >= 1) return `${hours}h ago`;
+    if (mins >= 1) return `${mins}m ago`;
+    return "just now";
+  };
+
+  const fmtTs = (ts) =>
+    new Date(ts).toLocaleString("en-US", {
+      timeZone: TZ, month: "short", day: "numeric",
+      hour: "numeric", minute: "2-digit", hour12: true,
+    });
+
+  // Group entries by calendar day
+  const grouped = useMemo(() => {
+    const groups = [];
+    let curDay = null;
+    for (const e of filtered) {
+      const day = new Date(e.ts).toLocaleDateString("en-US", { timeZone: TZ, weekday: "long", month: "long", day: "numeric", year: "numeric" });
+      if (day !== curDay) { curDay = day; groups.push({ day, entries: [] }); }
+      groups[groups.length - 1].entries.push(e);
+    }
+    return groups;
+  }, [filtered]);
+
+  const EVENT_ICON = { "comm.phone": "📞", "comm.text": "💬", "comm.email": "✉️", "comm.mail": "📬", "comm.inperson": "🤝" };
+  const EVENT_LABEL = { "comm.phone": "Called", "comm.text": "Texted", "comm.email": "Emailed", "comm.mail": "Mailed", "comm.inperson": "In-Person" };
+
+  return (
+    <div>
+      {/* Filters */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 4 }}>
+          {[7, 30, 90].map((d) => (
+            <button key={d} onClick={() => setDayRange(d)} style={{
+              padding: "5px 12px", fontSize: "12px", fontWeight: "700", cursor: "pointer", borderRadius: 8, border: "none",
+              fontFamily: "'DM Sans',sans-serif",
+              background: dayRange === d ? "#a0785a" : "#f5ede4",
+              color: dayRange === d ? "#fff" : "#5a4a3a",
+            }}>Last {d}d</button>
+          ))}
+        </div>
+        <select value={staffFilter} onChange={(e) => setStaffFilter(e.target.value)}
+          style={{ ...S.inp, width: "auto", padding: "5px 12px", fontSize: "12px" }}>
+          <option value="all">All staff</option>
+          {staffOptions.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <span style={{ fontSize: "12px", color: "#8a7a6a", marginLeft: "auto" }}>
+          {filtered.length} contact{filtered.length !== 1 ? "s" : ""}
+        </span>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div style={{ ...S.card, textAlign: "center", color: "#8a7a6a", fontSize: "13px", padding: "28px" }}>
+          No outreach logged in the last {dayRange} days{staffFilter !== "all" ? ` for ${staffFilter}` : ""}.
+        </div>
+      ) : (
+        grouped.map(({ day, entries }) => (
+          <div key={day} style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: "10px", fontWeight: "700", color: "#8a7a6a", textTransform: "uppercase",
+              letterSpacing: "1.2px", marginBottom: 8, paddingBottom: 4, borderBottom: "1px solid #e8e0d6" }}>
+              {day}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {entries.map((e, i) => {
+                const { category, outcome, reply, note } = parseDetail(e.detail);
+                const icon  = EVENT_ICON[e.type]  || "💬";
+                const lbl   = EVENT_LABEL[e.type] || "Message";
+                return (
+                  <div key={e.id ?? i} style={{ ...S.card, padding: "12px 14px", display: "flex", gap: 12, alignItems: "flex-start" }}>
+                    <div style={{ fontSize: 20, lineHeight: 1, marginTop: 2, flexShrink: 0 }}>{icon}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+                        <div>
+                          <span style={{ fontSize: "13px", fontWeight: "700", color: "#1a120b" }}>{e.clientName}</span>
+                          {category && category !== "General" && (
+                            <span style={{ marginLeft: 8, fontSize: "10px", fontWeight: "700", color: "#7a5640", background: "#f5ede4",
+                              borderRadius: 6, padding: "1px 7px" }}>{category}</span>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                          <span style={{ fontSize: "10px", background: "#f5f0ea", color: "#5a4a3a", borderRadius: 6,
+                            padding: "2px 7px", fontWeight: "700" }}>{e.by}</span>
+                          <span style={{ fontSize: "11px", color: "#b0a090" }} title={fmtTs(e.ts)}>{fmtRelTime(e.ts)}</span>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 6, marginTop: 5, flexWrap: "wrap", alignItems: "center" }}>
+                        <span style={{ fontSize: "11px", color: "#5a4a3a", fontWeight: "600" }}>{lbl}</span>
+                        {outcome && (
+                          <span style={{ fontSize: "10px", fontWeight: "700", borderRadius: 6, padding: "1px 7px",
+                            background: outcome.includes("Booked") || outcome.includes("Spoke") ? "#dcf5ec" : "#f5f0ea",
+                            color:      outcome.includes("Booked") || outcome.includes("Spoke") ? "#0f7a4a"  : "#5a4a3a" }}>
+                            {outcome}
+                          </span>
+                        )}
+                      </div>
+                      {reply && (
+                        <div style={{ marginTop: 5, fontSize: "12px", color: "#5a4a3a", fontStyle: "italic",
+                          background: "#f0fdf4", borderRadius: 6, padding: "4px 8px", borderLeft: "2px solid #86efac" }}>
+                          Reply: "{reply}"
+                        </div>
+                      )}
+                      {note && (
+                        <div style={{ marginTop: 5, fontSize: "12px", color: "#5a4a3a",
+                          background: "#faf8f5", borderRadius: 6, padding: "4px 8px" }}>
+                          {note}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+function SettingsPage({ webhookLog, templates, onSaveTemplate, gmailClientId, setGmailClientId, supabaseUrl, setSupabaseUrl, supabaseAnonKey, setSupabaseAnonKey, usingDB, dbError, onAddClient, onFindDuplicates, currentUserRoles = [], clients = [] }) {
   const [activeTab, setActiveTab] = useState("database");
   const [testResult, setTestResult] = useState(null);
   const [testing, setTesting] = useState(false);
@@ -5111,6 +5284,7 @@ function SettingsPage({ webhookLog, templates, onSaveTemplate, gmailClientId, se
   const [webhookLogLoading, setWebhookLogLoading] = useState(false);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
   const gmail = useGmail(getGmailClientId());
+  const isAdmin = currentUserRoles.includes("admin");
 
   const [expandedWebhook, setExpandedWebhook] = useState(null);
 
@@ -5170,7 +5344,7 @@ function SettingsPage({ webhookLog, templates, onSaveTemplate, gmailClientId, se
 
       {/* Tab strip */}
       <div style={{ display: "flex", gap: 2, marginBottom: 20, borderBottom: "1px solid #e8e0d6" }}>
-        {[{ key: "database", label: "Database" }, { key: "connection", label: "Vagaro" }, { key: "gmail", label: "Gmail" }, { key: "staff", label: "Staff" }, { key: "templates", label: "Templates" }].map((t) => (
+        {[{ key: "database", label: "Database" }, { key: "connection", label: "Vagaro" }, { key: "gmail", label: "Gmail" }, { key: "staff", label: "Staff" }, { key: "templates", label: "Templates" }, ...(isAdmin ? [{ key: "activity", label: "Activity" }] : [])].map((t) => (
           <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
             padding: "8px 16px", fontSize: "13px", fontWeight: "700",
             cursor: "pointer", background: "none", border: "none",
@@ -5545,6 +5719,16 @@ function SettingsPage({ webhookLog, templates, onSaveTemplate, gmailClientId, se
 
       {activeTab === "templates" && (
         <TemplatesPage templates={templates} onSave={onSaveTemplate} embedded />
+      )}
+
+      {activeTab === "activity" && isAdmin && (
+        <div>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: "15px", fontWeight: "800", color: "#1a120b", marginBottom: 2 }}>Staff Activity</div>
+            <div style={{ fontSize: "12px", color: "#8a7a6a" }}>All outreach logged by staff across every client profile.</div>
+          </div>
+          <ActivityLogPanel clients={clients} />
+        </div>
       )}
     </div>
   );
@@ -7377,6 +7561,7 @@ function App() {
             onAddClient={addClient}
             onFindDuplicates={() => setShowDuplicates(true)}
             currentUserRoles={auth.staff?.roles || (auth.staff?.role ? [auth.staff.role] : [])}
+            clients={clients}
           />
         )}
 
