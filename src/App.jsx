@@ -7356,8 +7356,23 @@ function App() {
     [usingDB, supabaseUrl, supabaseAnonKey]
   );
 
+  // Roll over any undone past-due tasks to today whenever the task list updates
+  useEffect(() => {
+    const overdue = tasks.filter((t) => !t.done && t.dueDate < TODAY);
+    if (!overdue.length) return;
+    setTasks((ts) =>
+      ts.map((t) => (!t.done && t.dueDate < TODAY ? { ...t, dueDate: TODAY } : t))
+    );
+    if (usingDB) {
+      overdue.forEach((t) =>
+        dbSaveTask(supabaseUrl, supabaseAnonKey, { ...t, dueDate: TODAY }).catch(
+          (e) => console.warn("DB task rollover:", e)
+        )
+      );
+    }
+  }, [tasks, usingDB, supabaseUrl, supabaseAnonKey]);
 
-    // Auth gate — only active when Supabase is configured
+
   if (!noSupabase) {
     if (auth.loading) {
       return (
