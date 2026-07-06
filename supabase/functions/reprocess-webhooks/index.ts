@@ -63,12 +63,25 @@ Deno.serve(async (req) => {
     if (!data || data.length < PAGE) break;
   }
 
+  // Prefetch staff so serviceProviderId can be resolved to a display name
+  const staffMap = new Map<string, string>();
+  {
+    const { data: staffRows } = await sb
+      .from("staff").select("full_name, vagaro_provider_id")
+      .not("vagaro_provider_id", "is", null);
+    for (const s of staffRows ?? []) staffMap.set(str(s.vagaro_provider_id), str(s.full_name));
+  }
+
   const statusMap: Record<string, string> = {
-    confirmed: "scheduled", pending: "scheduled",
-    "checked in": "checked-in", checkedin: "checked-in",
-    completed: "completed", cancelled: "cancelled", canceled: "cancelled",
-    "no show": "no-show", noshow: "no-show",
+    accepted: "scheduled", requested: "scheduled", booked: "scheduled",
+    confirmed: "scheduled", pending: "scheduled", rescheduled: "scheduled",
+    "checked in": "checked-in", checkedin: "checked-in", "checked-in": "checked-in",
+    completed: "completed", serviced: "completed", show: "completed",
+    cancelled: "cancelled", canceled: "cancelled",
+    "no show": "no-show", noshow: "no-show", "no-show": "no-show",
   };
+  // Count raw bookingStatus values so unmapped ones are visible in the response
+  const statusBreakdown: Record<string, number> = {};
 
   let processed        = 0;
   let skippedNoClient  = 0;
@@ -93,23 +106,33 @@ Deno.serve(async (req) => {
     const clientId = clientMap.get(vagaro_customer_id);
     if (!clientId) { skippedNoClient++; continue; }
 
-    // Parse date/time
-    const startRaw = str(data.startDateTime ?? data.StartDateTime ?? data.startDate ?? data.StartDate ?? "");
+    // Parse date/time — Vagaro sends startTime/endTime as full datetimes
+    const startRaw = str(data.startDateTime ?? data.StartDateTime ?? data.startTime ?? data.StartTime ?? data.startDate ?? data.StartDate ?? "");
+    const endRaw   = str(data.endDateTime   ?? data.EndDateTime   ?? data.endTime   ?? data.EndTime   ?? "");
     const apptDate = startRaw ? startRaw.split("T")[0] : null;
-    const apptTime = startRaw?.includes("T")
-      ? startRaw.split("T")[1]?.slice(0, 5)
-      : orNull(data.startTime ?? data.StartTime);
+    const apptTime = startRaw.includes("T") ? startRaw.split("T")[1]?.slice(0, 5) : null;
 
-    const rawStatus = str(data.status ?? data.Status ?? "").toLowerCase();
+    const rawStatus = str(data.bookingStatus ?? data.BookingStatus ?? data.status ?? data.Status ?? "").toLowerCase().trim();
+    statusBreakdown[rawStatus || "(empty)"] = (statusBreakdown[rawStatus || "(empty)"] ?? 0) + 1;
     const status = statusMap[rawStatus] ??
       (event === "appointment.cancelled" ? "cancelled" :
        event === "appointment.completed" ? "completed" :
        event === "appointment.checkedin" ? "checked-in" :
        event === "appointment.noshow"    ? "no-show"   : "scheduled");
 
-    const service   = orNull(data.serviceName    ?? data.ServiceName   ?? data.service);
-    const therapist = orNull(data.providerName   ?? data.ProviderName  ?? data.serviceProviderName ?? data.therapist);
-    const duration  = num(data.duration ?? data.Duration);
+    const service = orNull(data.serviceTitle ?? data.ServiceTitle ?? data.serviceName ?? data.ServiceName ?? data.service);
+
+    // Vagaro only sends serviceProviderId — resolve to a display name via staff
+    const providerId = orNull(data.serviceProviderId ?? data.ServiceProviderId);
+    const therapist  = orNull(data.providerName ?? data.ProviderName ?? data.serviceProviderName)
+      ?? (providerId ? staffMap.get(providerId) ?? null : null);
+
+    // No duration field — compute minutes from startTime → endTime
+    let duration = num(data.duration ?? data.Duration);
+    if (duration == null && startRaw && endRaw) {
+      const ms = new Date(endRaw).getTime() - new Date(startRaw).getTime();
+      if (!isNaN(ms) && ms > 0) duration = Math.round(ms / 60000);
+    }
 
     // Upsert appointment record
     if (apptDate && vagaro_appt_id) {
@@ -203,6 +226,7 @@ Deno.serve(async (req) => {
     apptUpserts,
     upsertErrors,
     firstUpsertError,
+    statusBreakdown,
     clientsUpdated,
     message: `Processed ${processed} appointment events, wrote ${apptUpserts} appointment records, updated ${clientsUpdated} client profiles.`,
   });
