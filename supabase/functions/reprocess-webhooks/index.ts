@@ -9,6 +9,11 @@
  *
  * Safe to run multiple times — all writes are idempotent.
  *
+ * Optimized for Edge Function compute limits: events are deduped to the
+ * latest state per appointment, writes are batched in chunks, and client
+ * metrics are computed from a single pass over the appointments table
+ * instead of per-client queries.
+ *
  * Requires the appointments.vagaro_appt_id column + unique index
  * (migration 20260706_appointments_vagaro_appt_id.sql).
  * Deployed via .github/workflows/deploy-functions.yml on merge to main.
@@ -25,6 +30,10 @@ const str    = (v: unknown): string => (v != null ? String(v) : "");
 const orNull = (v: unknown) => str(v) || null;
 const num    = (v: unknown) => (v != null && v !== "" ? Number(v) : null);
 
+const PAGE = 1000;
+const UPSERT_CHUNK = 500;
+const UPDATE_CONCURRENCY = 20;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return json({ ok: true }, 200);
 
@@ -33,25 +42,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  // Load ALL appointment webhook_log entries — paginated, because PostgREST
-  // caps a single query at 1000 rows.
-  const PAGE = 1000;
-  const logRows: { event_type: string; payload: Record<string, unknown> }[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await sb
-      .from("webhook_log")
-      .select("event_type, payload")
-      .like("event_type", "appointment.%")
-      .order("received_at", { ascending: true }) // oldest first so upserts land in order
-      .range(from, from + PAGE - 1);
-    if (error) return json({ error: error.message }, 500);
-    logRows.push(...(data ?? []));
-    if (!data || data.length < PAGE) break;
-  }
-
-  if (!logRows.length) return json({ ok: true, processed: 0, message: "No appointment webhook entries found in webhook_log." });
-
-  // Prefetch all linked clients once (vagaro_id → id) instead of one query per event
+  // Prefetch all linked clients once (vagaro_id → id)
   const clientMap = new Map<string, string>();
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await sb
@@ -81,63 +72,70 @@ Deno.serve(async (req) => {
     cancelled: "cancelled", canceled: "cancelled",
     "no show": "no-show", noshow: "no-show", "no-show": "no-show",
   };
-  // Count raw bookingStatus values so unmapped ones are visible in the response
   const statusBreakdown: Record<string, number> = {};
 
+  let scanned          = 0;
   let processed        = 0;
   let skippedNoClient  = 0;
   let skippedNoApptId  = 0;
-  let apptUpserts      = 0;
-  let upsertErrors     = 0;
-  let firstUpsertError: string | null = null;
 
-  // Track which client IDs need their metrics recalculated
+  // Dedupe: latest event per vagaro_appt_id wins (log is scanned oldest → newest)
+  const latestByApptId = new Map<string, Record<string, unknown>>();
   const affectedClientIds = new Set<string>();
 
-  for (const row of logRows) {
-    const event = str(row.event_type);
-    const body  = row.payload as Record<string, unknown>;
-    const data  = (body.payload ?? body.Payload ?? body.Data ?? body.data ?? {}) as Record<string, unknown>;
+  // Page through webhook_log, parsing each page immediately so raw payloads
+  // don't accumulate in memory.
+  for (let from = 0; ; from += PAGE) {
+    const { data: rows, error } = await sb
+      .from("webhook_log")
+      .select("event_type, payload")
+      .like("event_type", "appointment.%")
+      .order("received_at", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) return json({ error: error.message }, 500);
 
-    const vagaro_customer_id = orNull(data.customerId ?? data.CustomerId);
-    const vagaro_appt_id     = orNull(data.appointmentId ?? data.AppointmentId ?? data.Id);
+    for (const row of rows ?? []) {
+      scanned++;
+      const event = str(row.event_type);
+      const body  = row.payload as Record<string, unknown>;
+      const data  = (body.payload ?? body.Payload ?? body.Data ?? body.data ?? {}) as Record<string, unknown>;
 
-    if (!vagaro_customer_id) { skippedNoClient++; continue; }
+      const vagaro_customer_id = orNull(data.customerId ?? data.CustomerId);
+      const vagaro_appt_id     = orNull(data.appointmentId ?? data.AppointmentId ?? data.Id);
 
-    const clientId = clientMap.get(vagaro_customer_id);
-    if (!clientId) { skippedNoClient++; continue; }
+      if (!vagaro_customer_id) { skippedNoClient++; continue; }
+      const clientId = clientMap.get(vagaro_customer_id);
+      if (!clientId) { skippedNoClient++; continue; }
 
-    // Parse date/time — Vagaro sends startTime/endTime as full datetimes
-    const startRaw = str(data.startDateTime ?? data.StartDateTime ?? data.startTime ?? data.StartTime ?? data.startDate ?? data.StartDate ?? "");
-    const endRaw   = str(data.endDateTime   ?? data.EndDateTime   ?? data.endTime   ?? data.EndTime   ?? "");
-    const apptDate = startRaw ? startRaw.split("T")[0] : null;
-    const apptTime = startRaw.includes("T") ? startRaw.split("T")[1]?.slice(0, 5) : null;
+      // Parse date/time — Vagaro sends startTime/endTime as full datetimes
+      const startRaw = str(data.startDateTime ?? data.StartDateTime ?? data.startTime ?? data.StartTime ?? data.startDate ?? data.StartDate ?? "");
+      const endRaw   = str(data.endDateTime   ?? data.EndDateTime   ?? data.endTime   ?? data.EndTime   ?? "");
+      const apptDate = startRaw ? startRaw.split("T")[0] : null;
+      const apptTime = startRaw.includes("T") ? startRaw.split("T")[1]?.slice(0, 5) : null;
 
-    const rawStatus = str(data.bookingStatus ?? data.BookingStatus ?? data.status ?? data.Status ?? "").toLowerCase().trim();
-    statusBreakdown[rawStatus || "(empty)"] = (statusBreakdown[rawStatus || "(empty)"] ?? 0) + 1;
-    const status = statusMap[rawStatus] ??
-      (event === "appointment.cancelled" ? "cancelled" :
-       event === "appointment.completed" ? "completed" :
-       event === "appointment.checkedin" ? "checked-in" :
-       event === "appointment.noshow"    ? "no-show"   : "scheduled");
+      const rawStatus = str(data.bookingStatus ?? data.BookingStatus ?? data.status ?? data.Status ?? "").toLowerCase().trim();
+      statusBreakdown[rawStatus || "(empty)"] = (statusBreakdown[rawStatus || "(empty)"] ?? 0) + 1;
+      const status = statusMap[rawStatus] ??
+        (event === "appointment.cancelled" ? "cancelled" :
+         event === "appointment.completed" ? "completed" :
+         event === "appointment.checkedin" ? "checked-in" :
+         event === "appointment.noshow"    ? "no-show"   : "scheduled");
 
-    const service = orNull(data.serviceTitle ?? data.ServiceTitle ?? data.serviceName ?? data.ServiceName ?? data.service);
+      const service = orNull(data.serviceTitle ?? data.ServiceTitle ?? data.serviceName ?? data.ServiceName ?? data.service);
 
-    // Vagaro only sends serviceProviderId — resolve to a display name via staff
-    const providerId = orNull(data.serviceProviderId ?? data.ServiceProviderId);
-    const therapist  = orNull(data.providerName ?? data.ProviderName ?? data.serviceProviderName)
-      ?? (providerId ? staffMap.get(providerId) ?? null : null);
+      const providerId = orNull(data.serviceProviderId ?? data.ServiceProviderId);
+      const therapist  = orNull(data.providerName ?? data.ProviderName ?? data.serviceProviderName)
+        ?? (providerId ? staffMap.get(providerId) ?? null : null);
 
-    // No duration field — compute minutes from startTime → endTime
-    let duration = num(data.duration ?? data.Duration);
-    if (duration == null && startRaw && endRaw) {
-      const ms = new Date(endRaw).getTime() - new Date(startRaw).getTime();
-      if (!isNaN(ms) && ms > 0) duration = Math.round(ms / 60000);
-    }
+      let duration = num(data.duration ?? data.Duration);
+      if (duration == null && startRaw && endRaw) {
+        const ms = new Date(endRaw).getTime() - new Date(startRaw).getTime();
+        if (!isNaN(ms) && ms > 0) duration = Math.round(ms / 60000);
+      }
 
-    // Upsert appointment record
-    if (apptDate && vagaro_appt_id) {
-      const { error: uErr } = await sb.from("appointments").upsert({
+      if (!apptDate || !vagaro_appt_id) { skippedNoApptId++; continue; }
+
+      latestByApptId.set(vagaro_appt_id, {
         vagaro_appt_id,
         client_id: clientId,
         date:      apptDate,
@@ -146,82 +144,95 @@ Deno.serve(async (req) => {
         duration:  duration ?? null,
         therapist: therapist ?? null,
         status,
-      }, { onConflict: "vagaro_appt_id" });
-
-      if (uErr) {
-        upsertErrors++;
-        if (!firstUpsertError) firstUpsertError = uErr.message;
-      } else {
-        apptUpserts++;
-      }
-    } else {
-      skippedNoApptId++;
+      });
+      affectedClientIds.add(clientId);
+      processed++;
     }
 
-    affectedClientIds.add(clientId);
-    processed++;
+    if (!rows || rows.length < PAGE) break;
   }
 
-  // Recalculate metrics for every affected client
-  let clientsUpdated = 0;
-  for (const clientId of affectedClientIds) {
-    // Count completed/checked-in appointments
-    const { count: completedCount } = await sb
-      .from("appointments")
-      .select("*", { count: "exact", head: true })
-      .eq("client_id", clientId)
-      .in("status", ["completed", "checked-in"]);
+  // Bulk upsert unique appointments in chunks
+  const uniqueRows = [...latestByApptId.values()];
+  let apptUpserts  = 0;
+  let upsertErrors = 0;
+  let firstUpsertError: string | null = null;
 
-    // Count no-shows
-    const { count: noShowCount } = await sb
-      .from("appointments")
-      .select("*", { count: "exact", head: true })
-      .eq("client_id", clientId)
-      .eq("status", "no-show");
-
-    // Most recent completed/checked-in date
-    const { data: latestAppt } = await sb
-      .from("appointments")
-      .select("date")
-      .eq("client_id", clientId)
-      .in("status", ["completed", "checked-in"])
-      .order("date", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    const { data: currentClient } = await sb
-      .from("clients")
-      .select("last_visit, completed_appointments_count, no_shows")
-      .eq("id", clientId)
-      .single();
-
-    const updates: Record<string, unknown> = {
-      // Never decrease counts already set from CSV imports
-      completed_appointments_count: Math.max(
-        completedCount ?? 0,
-        currentClient?.completed_appointments_count ?? 0
-      ),
-      no_shows: Math.max(
-        noShowCount ?? 0,
-        currentClient?.no_shows ?? 0
-      ),
-    };
-
-    // Advance last_visit to the most recent completed date
-    if (latestAppt?.date) {
-      if (!currentClient?.last_visit || latestAppt.date > currentClient.last_visit) {
-        updates.last_visit = latestAppt.date;
-      }
+  for (let i = 0; i < uniqueRows.length; i += UPSERT_CHUNK) {
+    const chunk = uniqueRows.slice(i, i + UPSERT_CHUNK);
+    const { error: uErr } = await sb.from("appointments")
+      .upsert(chunk, { onConflict: "vagaro_appt_id" });
+    if (uErr) {
+      upsertErrors += chunk.length;
+      if (!firstUpsertError) firstUpsertError = uErr.message;
+    } else {
+      apptUpserts += chunk.length;
     }
+  }
 
-    const { error: updErr } = await sb.from("clients").update(updates).eq("id", clientId);
-    if (!updErr) clientsUpdated++;
+  // Compute per-client metrics from ONE pass over the appointments table
+  type Metrics = { completed: number; noShows: number; lastVisit: string | null };
+  const metrics = new Map<string, Metrics>();
+  for (let from = 0; ; from += PAGE) {
+    const { data: appts, error } = await sb
+      .from("appointments")
+      .select("client_id, date, status")
+      .range(from, from + PAGE - 1);
+    if (error) return json({ error: error.message }, 500);
+
+    for (const a of appts ?? []) {
+      const cid = str(a.client_id);
+      if (!affectedClientIds.has(cid)) continue;
+      const m = metrics.get(cid) ?? { completed: 0, noShows: 0, lastVisit: null };
+      if (a.status === "completed" || a.status === "checked-in") {
+        m.completed++;
+        if (!m.lastVisit || a.date > m.lastVisit) m.lastVisit = a.date;
+      } else if (a.status === "no-show") {
+        m.noShows++;
+      }
+      metrics.set(cid, m);
+    }
+    if (!appts || appts.length < PAGE) break;
+  }
+
+  // Fetch current client values for affected clients (chunked .in() queries)
+  const affected = [...affectedClientIds];
+  const currentClients = new Map<string, { last_visit: string | null; completed_appointments_count: number | null; no_shows: number | null }>();
+  for (let i = 0; i < affected.length; i += 200) {
+    const ids = affected.slice(i, i + 200);
+    const { data: rows } = await sb
+      .from("clients")
+      .select("id, last_visit, completed_appointments_count, no_shows")
+      .in("id", ids);
+    for (const r of rows ?? []) currentClients.set(str(r.id), r);
+  }
+
+  // Apply updates with limited concurrency
+  let clientsUpdated = 0;
+  for (let i = 0; i < affected.length; i += UPDATE_CONCURRENCY) {
+    const batch = affected.slice(i, i + UPDATE_CONCURRENCY);
+    const results = await Promise.all(batch.map(async (cid) => {
+      const m   = metrics.get(cid) ?? { completed: 0, noShows: 0, lastVisit: null };
+      const cur = currentClients.get(cid);
+      const updates: Record<string, unknown> = {
+        // Never decrease counts already set from CSV imports
+        completed_appointments_count: Math.max(m.completed, cur?.completed_appointments_count ?? 0),
+        no_shows: Math.max(m.noShows, cur?.no_shows ?? 0),
+      };
+      if (m.lastVisit && (!cur?.last_visit || m.lastVisit > cur.last_visit)) {
+        updates.last_visit = m.lastVisit;
+      }
+      const { error } = await sb.from("clients").update(updates).eq("id", cid);
+      return !error;
+    }));
+    clientsUpdated += results.filter(Boolean).length;
   }
 
   return json({
     ok: true,
-    logEntriesScanned: logRows.length,
+    logEntriesScanned: scanned,
     processed,
+    uniqueAppointments: uniqueRows.length,
     skipped: skippedNoClient,
     skippedNoApptId,
     apptUpserts,
@@ -229,7 +240,7 @@ Deno.serve(async (req) => {
     firstUpsertError,
     statusBreakdown,
     clientsUpdated,
-    message: `Processed ${processed} appointment events, wrote ${apptUpserts} appointment records, updated ${clientsUpdated} client profiles.`,
+    message: `Processed ${processed} appointment events (${uniqueRows.length} unique appointments), wrote ${apptUpserts} appointment records, updated ${clientsUpdated} client profiles.`,
   });
 });
 
