@@ -65,12 +65,20 @@ Deno.serve(async (req) => {
     for (const s of staffRows ?? []) staffMap.set(str(s.vagaro_provider_id), str(s.full_name));
   }
 
+  // Vagaro bookingStatus vocabulary observed in live webhook data:
+  // accepted, confirmed, need acceptance, awaiting confirmation,
+  // service completed, show, service in progress, cancel, deleted,
+  // denied, no show
   const statusMap: Record<string, string> = {
     accepted: "scheduled", requested: "scheduled", booked: "scheduled",
     confirmed: "scheduled", pending: "scheduled", rescheduled: "scheduled",
+    "need acceptance": "scheduled", "awaiting confirmation": "scheduled",
     "checked in": "checked-in", checkedin: "checked-in", "checked-in": "checked-in",
+    "service in progress": "checked-in",
     completed: "completed", serviced: "completed", show: "completed",
-    cancelled: "cancelled", canceled: "cancelled",
+    "service completed": "completed",
+    cancelled: "cancelled", canceled: "cancelled", cancel: "cancelled",
+    deleted: "cancelled", denied: "cancelled",
     "no show": "no-show", noshow: "no-show", "no-show": "no-show",
   };
   const statusBreakdown: Record<string, number> = {};
