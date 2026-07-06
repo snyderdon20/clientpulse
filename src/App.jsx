@@ -4766,6 +4766,11 @@ function ReprocessWebhooksCard({ supabaseUrl, supabaseAnonKey }) {
           ) : (<>
             <strong>✓ {result.message}</strong><br />
             {result.logEntriesScanned} webhook entries scanned · {result.apptUpserts} appointment records written · {result.skipped} skipped (no matching client)
+            {result.statusBreakdown && Object.keys(result.statusBreakdown).length > 0 && (
+              <div style={{ marginTop: 6, fontSize: "11px", color: "#166534" }}>
+                Statuses seen: {Object.entries(result.statusBreakdown).map(([k, v]) => `${k} (${v})`).join(" · ")}
+              </div>
+            )}
             {result.upsertErrors > 0 && (
               <div style={{ marginTop: 8, color: "#991b1b", background: "#fee2e2", borderRadius: 6, padding: "6px 10px" }}>
                 ⚠️ {result.upsertErrors} appointment writes failed. First error: <code style={{ fontSize: 11 }}>{result.firstUpsertError}</code>
