@@ -4722,6 +4722,57 @@ function VagaroSyncCard({ supabaseUrl, supabaseAnonKey }) {
   );
 }
 
+function ReprocessWebhooksCard({ supabaseUrl, supabaseAnonKey }) {
+  const [running, setRunning] = useState(false);
+  const [result,  setResult]  = useState(null);
+
+  const run = async () => {
+    if (!supabaseUrl) { setResult({ error: "Connect to Supabase first (Database tab)." }); return; }
+    setRunning(true);
+    setResult(null);
+    try {
+      const res = await fetch(
+        `${supabaseUrl.replace(/\/$/, "")}/functions/v1/reprocess-webhooks`,
+        { method: "POST", headers: { "Content-Type": "application/json", "apikey": supabaseAnonKey, "Authorization": `Bearer ${supabaseAnonKey}` } }
+      );
+      const data = await res.json();
+      setResult(data);
+    } catch (e) {
+      setResult({ error: String(e) });
+    }
+    setRunning(false);
+  };
+
+  return (
+    <div style={{ ...S.card, marginBottom: "14px" }}>
+      <div style={{ fontSize: "14px", fontWeight: "700", color: "#2e2418", marginBottom: 3 }}>Reprocess Webhook History</div>
+      <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 14 }}>
+        Re-reads every appointment event ever received from Vagaro and backfills missing appointment records,
+        <code style={{ background: "#f5ede4", padding: "1px 4px", borderRadius: 4, fontSize: 11 }}> last_visit</code>,
+        <code style={{ background: "#f5ede4", padding: "1px 4px", borderRadius: 4, fontSize: 11 }}> completed_appointments_count</code>, and
+        <code style={{ background: "#f5ede4", padding: "1px 4px", borderRadius: 4, fontSize: 11 }}> no_shows</code>.
+        Safe to run multiple times.
+      </div>
+      <button style={S.btn("primary")} onClick={run} disabled={running}>
+        {running ? "Processing…" : "Reprocess all webhook history"}
+      </button>
+      {result && (
+        <div style={{ marginTop: 14, fontSize: "12px", borderRadius: 10, padding: "12px 14px",
+          background: result.error ? "#fee2e2" : "#dcf5ec",
+          border: `1px solid ${result.error ? "#fca5a5" : "#86efac"}`,
+          color: result.error ? "#991b1b" : "#065f46", lineHeight: 1.7 }}>
+          {result.error ? (
+            <>⚠️ {result.error}</>
+          ) : (<>
+            <strong>✓ {result.message}</strong><br />
+            {result.logEntriesScanned} webhook entries scanned · {result.apptUpserts} appointment records written · {result.skipped} skipped (no matching client)
+          </>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── DUPLICATE MERGE MODAL ───────────────────────────────────────────────────
 const DISMISSED_DUPES_KEY = "clientpulse_dismissed_dupes";
 function dismissedDupesLoad() {
@@ -5476,6 +5527,7 @@ function SettingsPage({ webhookLog, templates, onSaveTemplate, gmailClientId, se
 
       {/* Vagaro ID sync */}
       <VagaroSyncCard supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} />
+      <ReprocessWebhooksCard supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} />
 
       {/* Webhook receiver */}
       <div style={{ ...S.card, marginBottom: "14px" }}>
@@ -7279,6 +7331,54 @@ function App() {
       .subscribe();
 
     return () => { sb.removeChannel(channel); };
+  }, [usingDB, supabaseUrl, supabaseAnonKey]);
+
+  // Realtime: pick up appointment inserts/updates from the Vagaro webhook
+  useEffect(() => {
+    if (!usingDB || !supabaseUrl || !supabaseAnonKey) return;
+    const sb = getSB(supabaseUrl, supabaseAnonKey);
+    if (!sb) return;
+
+    const apptChannel = sb
+      .channel("vagaro-appt-sync")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "appointments" },
+        (payload) => {
+          const row = payload.new;
+          setClients((cs) =>
+            cs.map((c) => {
+              if (c.id !== row.client_id) return c;
+              const appt = rowToAppt(row);
+              const already = c.appointments.some((a) => a.id === appt.id);
+              return already ? c : { ...c, appointments: [...c.appointments, appt] };
+            })
+          );
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "appointments" },
+        (payload) => {
+          const row = payload.new;
+          setClients((cs) =>
+            cs.map((c) => {
+              if (c.id !== row.client_id) return c;
+              const appt = rowToAppt(row);
+              const exists = c.appointments.some((a) => a.id === appt.id);
+              return {
+                ...c,
+                appointments: exists
+                  ? c.appointments.map((a) => (a.id === appt.id ? appt : a))
+                  : [...c.appointments, appt],
+              };
+            })
+          );
+        }
+      )
+      .subscribe();
+
+    return () => { sb.removeChannel(apptChannel); };
   }, [usingDB, supabaseUrl, supabaseAnonKey]);
 
   const searchResults = useMemo(() => {

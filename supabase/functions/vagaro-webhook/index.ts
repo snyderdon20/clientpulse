@@ -200,6 +200,44 @@ async function handleAppointment(
     if (error) console.error("appointment upsert:", error.message);
   }
 
+  // Update client metrics after the appointment record is written
+  if (apptDate) {
+    if (status === "completed" || status === "checked-in") {
+      // Count all completed/checked-in appointments for this client (idempotent)
+      const { count: completedCount } = await sb
+        .from("appointments")
+        .select("*", { count: "exact", head: true })
+        .eq("client_id", client.id)
+        .in("status", ["completed", "checked-in"]);
+
+      const { data: clientRow } = await sb
+        .from("clients")
+        .select("last_visit, completed_appointments_count")
+        .eq("id", client.id)
+        .single();
+
+      // Never let the count go below what was already stored (handles historical imports)
+      const newCount = Math.max(completedCount ?? 0, clientRow?.completed_appointments_count ?? 0);
+      const updates: Record<string, unknown> = { completed_appointments_count: newCount };
+
+      // Only move last_visit forward, never back
+      if (!clientRow?.last_visit || apptDate > clientRow.last_visit) {
+        updates.last_visit = apptDate;
+      }
+
+      const { error: clientErr } = await sb.from("clients").update(updates).eq("id", client.id);
+      if (clientErr) console.error("client metrics update:", clientErr.message);
+
+    } else if (status === "no-show") {
+      const { data: clientRow } = await sb
+        .from("clients").select("no_shows").eq("id", client.id).single();
+      const { error: nsErr } = await sb.from("clients")
+        .update({ no_shows: (clientRow?.no_shows ?? 0) + 1 })
+        .eq("id", client.id);
+      if (nsErr) console.error("no_shows update:", nsErr.message);
+    }
+  }
+
   // Log to client history
   const histType: Record<string, string> = {
     "appointment.created":   "appt.scheduled",
