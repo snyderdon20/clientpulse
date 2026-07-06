@@ -4747,11 +4747,13 @@ function ReprocessWebhooksCard({ supabaseUrl, supabaseAnonKey }) {
     <div style={{ ...S.card, marginBottom: "14px" }}>
       <div style={{ fontSize: "14px", fontWeight: "700", color: "#2e2418", marginBottom: 3 }}>Reprocess Webhook History</div>
       <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 14 }}>
-        Re-reads every appointment event ever received from Vagaro and backfills missing appointment records,
+        Replays every webhook ever received from Vagaro, oldest to newest — customer events create/update
+        client profiles, appointment events rebuild appointment records, and transaction events backfill
+        transactions. Then recalculates
         <code style={{ background: "#f5ede4", padding: "1px 4px", borderRadius: 4, fontSize: 11 }}> last_visit</code>,
         <code style={{ background: "#f5ede4", padding: "1px 4px", borderRadius: 4, fontSize: 11 }}> completed_appointments_count</code>, and
-        <code style={{ background: "#f5ede4", padding: "1px 4px", borderRadius: 4, fontSize: 11 }}> no_shows</code>.
-        Safe to run multiple times.
+        <code style={{ background: "#f5ede4", padding: "1px 4px", borderRadius: 4, fontSize: 11 }}> no_shows</code> for
+        every affected client. Safe to run multiple times.
       </div>
       <button style={S.btn("primary")} onClick={run} disabled={running}>
         {running ? "Processing…" : "Reprocess all webhook history"}
@@ -4765,7 +4767,7 @@ function ReprocessWebhooksCard({ supabaseUrl, supabaseAnonKey }) {
             <>⚠️ {result.error}</>
           ) : (<>
             <strong>✓ {result.message}</strong><br />
-            {result.logEntriesScanned} webhook entries scanned · {result.apptUpserts} appointment records written · {result.skipped} skipped (no matching client)
+            {result.logEntriesScanned} webhooks scanned · {result.apptUpserts} appointments written · {result.txInserted ?? 0} transactions added · {result.txLinked ?? 0} transactions linked · {result.skipped} appointment events skipped (no matching client)
             {result.statusBreakdown && Object.keys(result.statusBreakdown).length > 0 && (
               <div style={{ marginTop: 6, fontSize: "11px", color: "#166534" }}>
                 Statuses seen: {Object.entries(result.statusBreakdown).map(([k, v]) => `${k} (${v})`).join(" · ")}

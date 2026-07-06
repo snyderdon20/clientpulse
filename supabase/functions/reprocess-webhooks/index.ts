@@ -1,18 +1,21 @@
 /**
  * reprocess-webhooks — Supabase Edge Function
  *
- * Replays all appointment events stored in webhook_log to backfill:
- *   - appointments table (upsert by vagaro_appt_id)
- *   - clients.last_visit
- *   - clients.completed_appointments_count
- *   - clients.no_shows
+ * Replays EVERY event stored in webhook_log, oldest first → newest last,
+ * exactly as the live vagaro-webhook handler would have processed them:
+ *
+ *   customer.*    → create missing clients / update profile fields
+ *   appointment.* → upsert appointments (by vagaro_appt_id)
+ *   transaction.* → insert missing transactions, link client_id
+ *
+ * Then recalculates per-client metrics from the appointments table:
+ *   clients.last_visit, clients.completed_appointments_count, clients.no_shows
  *
  * Safe to run multiple times — all writes are idempotent.
  *
  * Optimized for Edge Function compute limits: events are deduped to the
- * latest state per appointment, writes are batched in chunks, and client
- * metrics are computed from a single pass over the appointments table
- * instead of per-client queries.
+ * latest state per entity, writes are batched in chunks, and metrics come
+ * from a single pass over the appointments table.
  *
  * Requires the appointments.vagaro_appt_id column + unique index
  * (migration 20260706_appointments_vagaro_appt_id.sql).
@@ -31,8 +34,8 @@ const orNull = (v: unknown) => str(v) || null;
 const num    = (v: unknown) => (v != null && v !== "" ? Number(v) : null);
 
 const PAGE = 1000;
-const UPSERT_CHUNK = 500;
-const UPDATE_CONCURRENCY = 20;
+const CHUNK = 500;
+const CONCURRENCY = 20;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return json({ ok: true }, 200);
@@ -42,12 +45,11 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  // Prefetch all linked clients once (vagaro_id → id)
-  const clientMap = new Map<string, string>();
+  // ── Prefetch lookups ────────────────────────────────────────────────────────
+  const clientMap = new Map<string, string>(); // vagaro_id → client id
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await sb
-      .from("clients")
-      .select("id, vagaro_id")
+      .from("clients").select("id, vagaro_id")
       .not("vagaro_id", "is", null)
       .range(from, from + PAGE - 1);
     if (error) return json({ error: error.message }, 500);
@@ -55,8 +57,7 @@ Deno.serve(async (req) => {
     if (!data || data.length < PAGE) break;
   }
 
-  // Prefetch staff so serviceProviderId can be resolved to a display name
-  const staffMap = new Map<string, string>();
+  const staffMap = new Map<string, string>(); // vagaro_provider_id → full_name
   {
     const { data: staffRows } = await sb
       .from("staff").select("full_name, vagaro_provider_id")
@@ -74,22 +75,24 @@ Deno.serve(async (req) => {
   };
   const statusBreakdown: Record<string, number> = {};
 
-  let scanned          = 0;
-  let processed        = 0;
-  let skippedNoClient  = 0;
-  let skippedNoApptId  = 0;
+  // ── Counters ────────────────────────────────────────────────────────────────
+  let scanned = 0;
+  let customersCreated = 0, customersUpdated = 0;
+  let apptEvents = 0, skippedNoClient = 0, skippedNoApptId = 0;
+  let txEvents = 0;
 
-  // Dedupe: latest event per vagaro_appt_id wins (log is scanned oldest → newest)
-  const latestByApptId = new Map<string, Record<string, unknown>>();
+  // Latest-state accumulators (log is scanned oldest → newest, so later
+  // entries overwrite earlier ones — newest state wins)
+  const latestApptById  = new Map<string, Record<string, unknown>>();
+  const latestClientUpd = new Map<string, Record<string, unknown>>(); // client id → field updates
+  const latestTxByKey   = new Map<string, Record<string, unknown>>(); // txId|item → row
   const affectedClientIds = new Set<string>();
 
-  // Page through webhook_log, parsing each page immediately so raw payloads
-  // don't accumulate in memory.
+  // ── Single chronological pass over ALL webhook_log entries ────────────────
   for (let from = 0; ; from += PAGE) {
     const { data: rows, error } = await sb
       .from("webhook_log")
       .select("event_type, payload")
-      .like("event_type", "appointment.%")
       .order("received_at", { ascending: true })
       .range(from, from + PAGE - 1);
     if (error) return json({ error: error.message }, 500);
@@ -100,77 +103,219 @@ Deno.serve(async (req) => {
       const body  = row.payload as Record<string, unknown>;
       const data  = (body.payload ?? body.Payload ?? body.Data ?? body.data ?? {}) as Record<string, unknown>;
 
-      const vagaro_customer_id = orNull(data.customerId ?? data.CustomerId);
-      const vagaro_appt_id     = orNull(data.appointmentId ?? data.AppointmentId ?? data.Id);
+      // ── customer.* ─────────────────────────────────────────────────────────
+      if (event.startsWith("customer.")) {
+        const vagaro_id = orNull(data.customerId ?? data.CustomerId);
+        if (!vagaro_id) continue;
+        const firstName = str(data.customerFirstName ?? data.FirstName ?? data.firstName);
+        const lastName  = str(data.customerLastName  ?? data.LastName  ?? data.lastName);
 
-      if (!vagaro_customer_id) { skippedNoClient++; continue; }
-      const clientId = clientMap.get(vagaro_customer_id);
-      if (!clientId) { skippedNoClient++; continue; }
-
-      // Parse date/time — Vagaro sends startTime/endTime as full datetimes
-      const startRaw = str(data.startDateTime ?? data.StartDateTime ?? data.startTime ?? data.StartTime ?? data.startDate ?? data.StartDate ?? "");
-      const endRaw   = str(data.endDateTime   ?? data.EndDateTime   ?? data.endTime   ?? data.EndTime   ?? "");
-      const apptDate = startRaw ? startRaw.split("T")[0] : null;
-      const apptTime = startRaw.includes("T") ? startRaw.split("T")[1]?.slice(0, 5) : null;
-
-      const rawStatus = str(data.bookingStatus ?? data.BookingStatus ?? data.status ?? data.Status ?? "").toLowerCase().trim();
-      statusBreakdown[rawStatus || "(empty)"] = (statusBreakdown[rawStatus || "(empty)"] ?? 0) + 1;
-      const status = statusMap[rawStatus] ??
-        (event === "appointment.cancelled" ? "cancelled" :
-         event === "appointment.completed" ? "completed" :
-         event === "appointment.checkedin" ? "checked-in" :
-         event === "appointment.noshow"    ? "no-show"   : "scheduled");
-
-      const service = orNull(data.serviceTitle ?? data.ServiceTitle ?? data.serviceName ?? data.ServiceName ?? data.service);
-
-      const providerId = orNull(data.serviceProviderId ?? data.ServiceProviderId);
-      const therapist  = orNull(data.providerName ?? data.ProviderName ?? data.serviceProviderName)
-        ?? (providerId ? staffMap.get(providerId) ?? null : null);
-
-      let duration = num(data.duration ?? data.Duration);
-      if (duration == null && startRaw && endRaw) {
-        const ms = new Date(endRaw).getTime() - new Date(startRaw).getTime();
-        if (!isNaN(ms) && ms > 0) duration = Math.round(ms / 60000);
+        if (!clientMap.has(vagaro_id)) {
+          if (!firstName && !lastName) continue;
+          const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Denver" });
+          const { data: inserted, error: insErr } = await sb.from("clients").insert({
+            vagaro_id, vagaro_synced: true,
+            first_name: firstName, last_name: lastName,
+            email: orNull(data.email ?? data.Email),
+            phone: orNull(data.mobilePhone ?? data.MobilePhone ?? data.dayPhone ?? data.Phone),
+            birthday: orNull(data.birthday ?? data.Birthday),
+            address: orNull(data.streetAddress ?? data.Address1 ?? data.address),
+            city: orNull(data.city ?? data.City),
+            state: orNull(data.regionCode ?? data.State ?? data.state),
+            zip: orNull(data.postalCode ?? data.Zip ?? data.zip),
+            customer_since: orNull(str(data.createdDate ?? "").split("T")[0]) ?? today,
+            avg_visit_interval_days: 30, waitlisted: false, tags: [], golden_nuggets: [],
+          }).select("id").single();
+          if (!insErr && inserted) {
+            clientMap.set(vagaro_id, str(inserted.id));
+            customersCreated++;
+          }
+        } else {
+          // Existing client — collect latest non-empty field values (newest wins)
+          const clientId = clientMap.get(vagaro_id)!;
+          const updates = latestClientUpd.get(clientId) ?? {};
+          const maybe = (col: string, ...vals: unknown[]) => {
+            const v = vals.find((x) => x != null && str(x) !== "");
+            if (v !== undefined) updates[col] = str(v);
+          };
+          maybe("first_name", data.customerFirstName, data.FirstName);
+          maybe("last_name",  data.customerLastName,  data.LastName);
+          maybe("email",      data.email,  data.Email);
+          maybe("phone",      data.mobilePhone, data.MobilePhone, data.dayPhone);
+          maybe("address",    data.streetAddress, data.Address1);
+          maybe("city",       data.city,  data.City);
+          maybe("state",      data.regionCode, data.State);
+          maybe("zip",        data.postalCode, data.Zip);
+          maybe("birthday",   data.birthday, data.Birthday);
+          if (Object.keys(updates).length > 0) latestClientUpd.set(clientId, updates);
+        }
+        continue;
       }
 
-      if (!apptDate || !vagaro_appt_id) { skippedNoApptId++; continue; }
+      // ── appointment.* ──────────────────────────────────────────────────────
+      if (event.startsWith("appointment.")) {
+        apptEvents++;
+        const vagaro_customer_id = orNull(data.customerId ?? data.CustomerId);
+        const vagaro_appt_id     = orNull(data.appointmentId ?? data.AppointmentId ?? data.Id);
+        if (!vagaro_customer_id) { skippedNoClient++; continue; }
+        const clientId = clientMap.get(vagaro_customer_id);
+        if (!clientId) { skippedNoClient++; continue; }
 
-      latestByApptId.set(vagaro_appt_id, {
-        vagaro_appt_id,
-        client_id: clientId,
-        date:      apptDate,
-        time:      apptTime ?? null,
-        service:   service  ?? "Appointment",
-        duration:  duration ?? null,
-        therapist: therapist ?? null,
-        status,
-      });
-      affectedClientIds.add(clientId);
-      processed++;
+        const startRaw = str(data.startDateTime ?? data.StartDateTime ?? data.startTime ?? data.StartTime ?? data.startDate ?? data.StartDate ?? "");
+        const endRaw   = str(data.endDateTime   ?? data.EndDateTime   ?? data.endTime   ?? data.EndTime   ?? "");
+        const apptDate = startRaw ? startRaw.split("T")[0] : null;
+        const apptTime = startRaw.includes("T") ? startRaw.split("T")[1]?.slice(0, 5) : null;
+
+        const rawStatus = str(data.bookingStatus ?? data.BookingStatus ?? data.status ?? data.Status ?? "").toLowerCase().trim();
+        statusBreakdown[rawStatus || "(empty)"] = (statusBreakdown[rawStatus || "(empty)"] ?? 0) + 1;
+        const status = statusMap[rawStatus] ??
+          (event === "appointment.cancelled" ? "cancelled" :
+           event === "appointment.completed" ? "completed" :
+           event === "appointment.checkedin" ? "checked-in" :
+           event === "appointment.noshow"    ? "no-show"   : "scheduled");
+
+        const service = orNull(data.serviceTitle ?? data.ServiceTitle ?? data.serviceName ?? data.ServiceName ?? data.service);
+        const providerId = orNull(data.serviceProviderId ?? data.ServiceProviderId);
+        const therapist  = orNull(data.providerName ?? data.ProviderName ?? data.serviceProviderName)
+          ?? (providerId ? staffMap.get(providerId) ?? null : null);
+
+        let duration = num(data.duration ?? data.Duration);
+        if (duration == null && startRaw && endRaw) {
+          const ms = new Date(endRaw).getTime() - new Date(startRaw).getTime();
+          if (!isNaN(ms) && ms > 0) duration = Math.round(ms / 60000);
+        }
+
+        if (!apptDate || !vagaro_appt_id) { skippedNoApptId++; continue; }
+
+        latestApptById.set(vagaro_appt_id, {
+          vagaro_appt_id, client_id: clientId,
+          date: apptDate, time: apptTime ?? null,
+          service: service ?? "Appointment",
+          duration: duration ?? null, therapist: therapist ?? null, status,
+        });
+        affectedClientIds.add(clientId);
+        continue;
+      }
+
+      // ── transaction.* ──────────────────────────────────────────────────────
+      if (event.startsWith("transaction.")) {
+        const vagaro_transaction_id = orNull(data.transactionId ?? data.TransactionId ?? data.Id ?? data.id);
+        if (!vagaro_transaction_id) continue;
+        txEvents++;
+
+        const vagaro_customer_id = orNull(data.customerId ?? data.CustomerId);
+        const client_id = vagaro_customer_id ? clientMap.get(vagaro_customer_id) ?? null : null;
+
+        const dateRaw = str(data.checkoutDate ?? data.CheckoutDate ?? data.transactionDate ?? data.TransactionDate ?? data.createdDate ?? data.CreatedDate ?? "");
+        const transaction_date = dateRaw ? (dateRaw.includes("T") ? dateRaw : dateRaw + "T12:00:00Z") : null;
+        const item_sold = orNull(data.itemSold ?? data.ItemSold ?? data.serviceName ?? data.ServiceName ?? data.name ?? data.Name);
+
+        latestTxByKey.set(`${vagaro_transaction_id}|${item_sold ?? ""}`, {
+          vagaro_transaction_id, vagaro_customer_id,
+          vagaro_service_provider_id: orNull(
+            data.serviceProviderName ?? data.ServiceProviderName ??
+            data.providerName ?? data.ProviderName ??
+            data.serviceProviderId ?? data.ServiceProviderId ??
+            data.staffName ?? data.StaffName),
+          client_id, transaction_date, item_sold,
+          purchase_type: orNull(data.purchaseType ?? data.PurchaseType ?? data.transactionType ?? data.TransactionType ?? data.type ?? data.Type),
+          quantity: num(data.quantity ?? data.Quantity) ?? 1,
+          tax: num(data.tax ?? data.Tax),
+          tip: num(data.tip ?? data.Tip),
+          discount: num(data.discount ?? data.Discount),
+          cash_amount: num(data.cashAmount ?? data.CashAmount),
+          check_amount: num(data.checkAmount ?? data.CheckAmount),
+          gc_redemption: num(data.gcRedemption ?? data.GcRedemption ?? data.gcAmount ?? data.GcAmount ?? data.giftCardAmount ?? data.GiftCardAmount),
+          package_redemption: num(data.packageRedemption ?? data.PackageRedemption ?? data.packageAmount ?? data.PackageAmount),
+          membership_amount: num(data.membershipAmount ?? data.MembershipAmount ?? data.membershipRedemption),
+          cc_amount: num(data.ccAmount ?? data.CcAmount ?? data.creditCardAmount ?? data.CreditCardAmount),
+          bank_account_amount: num(data.bankAccountAmount ?? data.BankAccountAmount),
+          vagaro_pay_later_amount: num(data.vagaroPayLaterAmount ?? data.VagaroPayLaterAmount),
+          other_amount: num(data.otherAmount ?? data.OtherAmount),
+          created_by: orNull(data.checkedOutBy ?? data.CheckedOutBy ?? data.staffName ?? data.StaffName),
+        });
+        continue;
+      }
     }
 
     if (!rows || rows.length < PAGE) break;
   }
 
-  // Bulk upsert unique appointments in chunks
-  const uniqueRows = [...latestByApptId.values()];
-  let apptUpserts  = 0;
-  let upsertErrors = 0;
-  let firstUpsertError: string | null = null;
+  // ── Apply collected client profile updates ─────────────────────────────────
+  const updEntries = [...latestClientUpd.entries()];
+  for (let i = 0; i < updEntries.length; i += CONCURRENCY) {
+    const batch = updEntries.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(batch.map(async ([clientId, updates]) => {
+      const { error } = await sb.from("clients").update(updates).eq("id", clientId);
+      return !error;
+    }));
+    customersUpdated += results.filter(Boolean).length;
+  }
 
-  for (let i = 0; i < uniqueRows.length; i += UPSERT_CHUNK) {
-    const chunk = uniqueRows.slice(i, i + UPSERT_CHUNK);
-    const { error: uErr } = await sb.from("appointments")
-      .upsert(chunk, { onConflict: "vagaro_appt_id" });
-    if (uErr) {
-      upsertErrors += chunk.length;
-      if (!firstUpsertError) firstUpsertError = uErr.message;
-    } else {
-      apptUpserts += chunk.length;
+  // ── Bulk upsert appointments ────────────────────────────────────────────────
+  const apptRows = [...latestApptById.values()];
+  let apptUpserts = 0, upsertErrors = 0;
+  let firstUpsertError: string | null = null;
+  for (let i = 0; i < apptRows.length; i += CHUNK) {
+    const chunk = apptRows.slice(i, i + CHUNK);
+    const { error: uErr } = await sb.from("appointments").upsert(chunk, { onConflict: "vagaro_appt_id" });
+    if (uErr) { upsertErrors += chunk.length; if (!firstUpsertError) firstUpsertError = uErr.message; }
+    else apptUpserts += chunk.length;
+  }
+
+  // ── Insert missing transactions ─────────────────────────────────────────────
+  // Existing (vagaro_transaction_id, item_sold) pairs are skipped.
+  const existingTxKeys = new Set<string>();
+  for (let from = 0; ; from += PAGE) {
+    const { data: txs, error } = await sb
+      .from("transactions")
+      .select("vagaro_transaction_id, item_sold")
+      .not("vagaro_transaction_id", "is", null)
+      .range(from, from + PAGE - 1);
+    if (error) return json({ error: error.message }, 500);
+    for (const t of txs ?? []) existingTxKeys.add(`${str(t.vagaro_transaction_id)}|${str(t.item_sold)}`);
+    if (!txs || txs.length < PAGE) break;
+  }
+  const newTxRows = [...latestTxByKey.entries()]
+    .filter(([key]) => !existingTxKeys.has(key))
+    .map(([, row]) => row);
+  let txInserted = 0, txErrors = 0;
+  for (let i = 0; i < newTxRows.length; i += CHUNK) {
+    const chunk = newTxRows.slice(i, i + CHUNK);
+    const { error } = await sb.from("transactions").insert(chunk);
+    if (error) txErrors += chunk.length;
+    else txInserted += chunk.length;
+  }
+
+  // ── Link client_id on transactions that are missing it ─────────────────────
+  let txLinked = 0;
+  {
+    const unlinked: { id: string; vagaro_customer_id: string }[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data: txs, error } = await sb
+        .from("transactions")
+        .select("id, vagaro_customer_id")
+        .is("client_id", null)
+        .not("vagaro_customer_id", "is", null)
+        .range(from, from + PAGE - 1);
+      if (error) break;
+      for (const t of txs ?? []) unlinked.push({ id: str(t.id), vagaro_customer_id: str(t.vagaro_customer_id) });
+      if (!txs || txs.length < PAGE) break;
+    }
+    const linkable = unlinked.filter((t) => clientMap.has(t.vagaro_customer_id));
+    for (let i = 0; i < linkable.length; i += CONCURRENCY) {
+      const batch = linkable.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(batch.map(async (t) => {
+        const { error } = await sb.from("transactions")
+          .update({ client_id: clientMap.get(t.vagaro_customer_id) })
+          .eq("id", t.id);
+        return !error;
+      }));
+      txLinked += results.filter(Boolean).length;
     }
   }
 
-  // Compute per-client metrics from ONE pass over the appointments table
+  // ── Recalculate client metrics from ONE pass over appointments ─────────────
   type Metrics = { completed: number; noShows: number; lastVisit: string | null };
   const metrics = new Map<string, Metrics>();
   for (let from = 0; ; from += PAGE) {
@@ -179,7 +324,6 @@ Deno.serve(async (req) => {
       .select("client_id, date, status")
       .range(from, from + PAGE - 1);
     if (error) return json({ error: error.message }, 500);
-
     for (const a of appts ?? []) {
       const cid = str(a.client_id);
       if (!affectedClientIds.has(cid)) continue;
@@ -187,30 +331,25 @@ Deno.serve(async (req) => {
       if (a.status === "completed" || a.status === "checked-in") {
         m.completed++;
         if (!m.lastVisit || a.date > m.lastVisit) m.lastVisit = a.date;
-      } else if (a.status === "no-show") {
-        m.noShows++;
-      }
+      } else if (a.status === "no-show") m.noShows++;
       metrics.set(cid, m);
     }
     if (!appts || appts.length < PAGE) break;
   }
 
-  // Fetch current client values for affected clients (chunked .in() queries)
   const affected = [...affectedClientIds];
   const currentClients = new Map<string, { last_visit: string | null; completed_appointments_count: number | null; no_shows: number | null }>();
   for (let i = 0; i < affected.length; i += 200) {
-    const ids = affected.slice(i, i + 200);
     const { data: rows } = await sb
       .from("clients")
       .select("id, last_visit, completed_appointments_count, no_shows")
-      .in("id", ids);
+      .in("id", affected.slice(i, i + 200));
     for (const r of rows ?? []) currentClients.set(str(r.id), r);
   }
 
-  // Apply updates with limited concurrency
   let clientsUpdated = 0;
-  for (let i = 0; i < affected.length; i += UPDATE_CONCURRENCY) {
-    const batch = affected.slice(i, i + UPDATE_CONCURRENCY);
+  for (let i = 0; i < affected.length; i += CONCURRENCY) {
+    const batch = affected.slice(i, i + CONCURRENCY);
     const results = await Promise.all(batch.map(async (cid) => {
       const m   = metrics.get(cid) ?? { completed: 0, noShows: 0, lastVisit: null };
       const cur = currentClients.get(cid);
@@ -231,16 +370,22 @@ Deno.serve(async (req) => {
   return json({
     ok: true,
     logEntriesScanned: scanned,
-    processed,
-    uniqueAppointments: uniqueRows.length,
+    processed: apptEvents,
+    uniqueAppointments: apptRows.length,
     skipped: skippedNoClient,
     skippedNoApptId,
     apptUpserts,
     upsertErrors,
     firstUpsertError,
     statusBreakdown,
+    customersCreated,
+    customersUpdated,
+    txEvents,
+    txInserted,
+    txErrors,
+    txLinked,
     clientsUpdated,
-    message: `Processed ${processed} appointment events (${uniqueRows.length} unique appointments), wrote ${apptUpserts} appointment records, updated ${clientsUpdated} client profiles.`,
+    message: `Replayed ${scanned} webhooks oldest→newest: ${customersCreated} clients created, ${customersUpdated} profiles updated, ${apptUpserts} appointments written, ${txInserted} transactions added, ${clientsUpdated} client metrics refreshed.`,
   });
 });
 
