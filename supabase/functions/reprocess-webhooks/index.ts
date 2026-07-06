@@ -11,6 +11,7 @@
  *
  * Requires the appointments.vagaro_appt_id column + unique index
  * (migration 20260706_appointments_vagaro_appt_id.sql).
+ * Deployed via .github/workflows/deploy-functions.yml on merge to main.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
