@@ -4766,6 +4766,13 @@ function ReprocessWebhooksCard({ supabaseUrl, supabaseAnonKey }) {
           ) : (<>
             <strong>✓ {result.message}</strong><br />
             {result.logEntriesScanned} webhook entries scanned · {result.apptUpserts} appointment records written · {result.skipped} skipped (no matching client)
+            {result.upsertErrors > 0 && (
+              <div style={{ marginTop: 8, color: "#991b1b", background: "#fee2e2", borderRadius: 6, padding: "6px 10px" }}>
+                ⚠️ {result.upsertErrors} appointment writes failed. First error: <code style={{ fontSize: 11 }}>{result.firstUpsertError}</code>
+                <br />If it mentions <code style={{ fontSize: 11 }}>vagaro_appt_id</code>, run the migration in{" "}
+                <code style={{ fontSize: 11 }}>supabase/migrations/20260706_appointments_vagaro_appt_id.sql</code> in the SQL Editor, then rerun.
+              </div>
+            )}
           </>)}
         </div>
       )}

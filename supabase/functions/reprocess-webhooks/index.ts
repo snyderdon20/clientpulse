@@ -8,6 +8,9 @@
  *   - clients.no_shows
  *
  * Safe to run multiple times — all writes are idempotent.
+ *
+ * Requires the appointments.vagaro_appt_id column + unique index
+ * (migration 20260706_appointments_vagaro_appt_id.sql).
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -29,15 +32,36 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  // Load ALL appointment webhook_log entries
-  const { data: logRows, error: logErr } = await sb
-    .from("webhook_log")
-    .select("event_type, payload")
-    .like("event_type", "appointment.%")
-    .order("received_at", { ascending: true }); // oldest first so upserts land in order
+  // Load ALL appointment webhook_log entries — paginated, because PostgREST
+  // caps a single query at 1000 rows.
+  const PAGE = 1000;
+  const logRows: { event_type: string; payload: Record<string, unknown> }[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await sb
+      .from("webhook_log")
+      .select("event_type, payload")
+      .like("event_type", "appointment.%")
+      .order("received_at", { ascending: true }) // oldest first so upserts land in order
+      .range(from, from + PAGE - 1);
+    if (error) return json({ error: error.message }, 500);
+    logRows.push(...(data ?? []));
+    if (!data || data.length < PAGE) break;
+  }
 
-  if (logErr) return json({ error: logErr.message }, 500);
-  if (!logRows?.length) return json({ ok: true, processed: 0, message: "No appointment webhook entries found in webhook_log." });
+  if (!logRows.length) return json({ ok: true, processed: 0, message: "No appointment webhook entries found in webhook_log." });
+
+  // Prefetch all linked clients once (vagaro_id → id) instead of one query per event
+  const clientMap = new Map<string, string>();
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await sb
+      .from("clients")
+      .select("id, vagaro_id")
+      .not("vagaro_id", "is", null)
+      .range(from, from + PAGE - 1);
+    if (error) return json({ error: error.message }, 500);
+    for (const c of data ?? []) clientMap.set(str(c.vagaro_id), str(c.id));
+    if (!data || data.length < PAGE) break;
+  }
 
   const statusMap: Record<string, string> = {
     confirmed: "scheduled", pending: "scheduled",
@@ -46,9 +70,12 @@ Deno.serve(async (req) => {
     "no show": "no-show", noshow: "no-show",
   };
 
-  let processed   = 0;
-  let skipped     = 0;
-  let apptUpserts = 0;
+  let processed        = 0;
+  let skippedNoClient  = 0;
+  let skippedNoApptId  = 0;
+  let apptUpserts      = 0;
+  let upsertErrors     = 0;
+  let firstUpsertError: string | null = null;
 
   // Track which client IDs need their metrics recalculated
   const affectedClientIds = new Set<string>();
@@ -61,12 +88,10 @@ Deno.serve(async (req) => {
     const vagaro_customer_id = orNull(data.customerId ?? data.CustomerId);
     const vagaro_appt_id     = orNull(data.appointmentId ?? data.AppointmentId ?? data.Id);
 
-    if (!vagaro_customer_id) { skipped++; continue; }
+    if (!vagaro_customer_id) { skippedNoClient++; continue; }
 
-    // Resolve client
-    const { data: client } = await sb
-      .from("clients").select("id").eq("vagaro_id", vagaro_customer_id).maybeSingle();
-    if (!client) { skipped++; continue; }
+    const clientId = clientMap.get(vagaro_customer_id);
+    if (!clientId) { skippedNoClient++; continue; }
 
     // Parse date/time
     const startRaw = str(data.startDateTime ?? data.StartDateTime ?? data.startDate ?? data.StartDate ?? "");
@@ -90,7 +115,7 @@ Deno.serve(async (req) => {
     if (apptDate && vagaro_appt_id) {
       const { error: uErr } = await sb.from("appointments").upsert({
         vagaro_appt_id,
-        client_id: client.id,
+        client_id: clientId,
         date:      apptDate,
         time:      apptTime ?? null,
         service:   service  ?? "Appointment",
@@ -100,13 +125,16 @@ Deno.serve(async (req) => {
       }, { onConflict: "vagaro_appt_id" });
 
       if (uErr) {
-        console.error(`appt upsert ${vagaro_appt_id}:`, uErr.message);
+        upsertErrors++;
+        if (!firstUpsertError) firstUpsertError = uErr.message;
       } else {
         apptUpserts++;
       }
+    } else {
+      skippedNoApptId++;
     }
 
-    affectedClientIds.add(client.id);
+    affectedClientIds.add(clientId);
     processed++;
   }
 
@@ -170,10 +198,13 @@ Deno.serve(async (req) => {
     ok: true,
     logEntriesScanned: logRows.length,
     processed,
-    skipped,
+    skipped: skippedNoClient,
+    skippedNoApptId,
     apptUpserts,
+    upsertErrors,
+    firstUpsertError,
     clientsUpdated,
-    message: `Processed ${processed} appointment events, updated ${clientsUpdated} client profiles.`,
+    message: `Processed ${processed} appointment events, wrote ${apptUpserts} appointment records, updated ${clientsUpdated} client profiles.`,
   });
 });
 
