@@ -7281,6 +7281,54 @@ function App() {
     return () => { sb.removeChannel(channel); };
   }, [usingDB, supabaseUrl, supabaseAnonKey]);
 
+  // Realtime: pick up appointment inserts/updates from the Vagaro webhook
+  useEffect(() => {
+    if (!usingDB || !supabaseUrl || !supabaseAnonKey) return;
+    const sb = getSB(supabaseUrl, supabaseAnonKey);
+    if (!sb) return;
+
+    const apptChannel = sb
+      .channel("vagaro-appt-sync")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "appointments" },
+        (payload) => {
+          const row = payload.new;
+          setClients((cs) =>
+            cs.map((c) => {
+              if (c.id !== row.client_id) return c;
+              const appt = rowToAppt(row);
+              const already = c.appointments.some((a) => a.id === appt.id);
+              return already ? c : { ...c, appointments: [...c.appointments, appt] };
+            })
+          );
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "appointments" },
+        (payload) => {
+          const row = payload.new;
+          setClients((cs) =>
+            cs.map((c) => {
+              if (c.id !== row.client_id) return c;
+              const appt = rowToAppt(row);
+              const exists = c.appointments.some((a) => a.id === appt.id);
+              return {
+                ...c,
+                appointments: exists
+                  ? c.appointments.map((a) => (a.id === appt.id ? appt : a))
+                  : [...c.appointments, appt],
+              };
+            })
+          );
+        }
+      )
+      .subscribe();
+
+    return () => { sb.removeChannel(apptChannel); };
+  }, [usingDB, supabaseUrl, supabaseAnonKey]);
+
   const searchResults = useMemo(() => {
     if (!globalSearch.trim()) return [];
     const q = globalSearch.toLowerCase();
