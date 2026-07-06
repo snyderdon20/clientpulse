@@ -3272,16 +3272,15 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
       items.push({ type: "lapsed", priority: 2, client: c, reason: `Lapsed — ${ds} days since last visit`, icon: "🔴", color: "#991b1b", bg: "#fee2e2" });
     });
 
-    // 4. Reach out — overdue clients with no upcoming appointment (skip follow-up flagged)
+    // 4. Reach out — active-overdue clients (31–45 days, past cadence, no upcoming appointment)
     clients.forEach((c) => {
       if (c.needsFollowUp) return;
       const { layer2 } = clientStatus(c);
-      if (layer2 !== "overdue" && layer2 !== "overdue-with-package") return;
+      if (layer2 !== "active-overdue") return;
       const hasUpcoming = (c.appointments || []).some((a) => a.date >= selectedDate && a.status !== "cancelled");
       if (hasUpcoming) return;
       const ds = daysSince(lastCompletedDate(c));
-      const pkgNote = layer2 === "overdue-with-package" ? " — has unused package!" : "";
-      items.push({ type: "overdue", priority: 3, client: c, reason: `Overdue — ${ds} days since last visit${pkgNote}`, icon: layer2 === "overdue-with-package" ? "📦" : "🟡", color: "#92400e", bg: "#fef3c7" });
+      items.push({ type: "overdue", priority: 3, client: c, reason: `Overdue — ${ds} days since last visit`, icon: "🟡", color: "#92400e", bg: "#fef3c7" });
     });
 
     // 5. Red Light — considering but no booking after 7+ days
@@ -7356,8 +7355,23 @@ function App() {
     [usingDB, supabaseUrl, supabaseAnonKey]
   );
 
+  // Roll over any undone past-due tasks to today whenever the task list updates
+  useEffect(() => {
+    const overdue = tasks.filter((t) => !t.done && t.dueDate < TODAY);
+    if (!overdue.length) return;
+    setTasks((ts) =>
+      ts.map((t) => (!t.done && t.dueDate < TODAY ? { ...t, dueDate: TODAY } : t))
+    );
+    if (usingDB) {
+      overdue.forEach((t) =>
+        dbSaveTask(supabaseUrl, supabaseAnonKey, { ...t, dueDate: TODAY }).catch(
+          (e) => console.warn("DB task rollover:", e)
+        )
+      );
+    }
+  }, [tasks, usingDB, supabaseUrl, supabaseAnonKey]);
 
-    // Auth gate — only active when Supabase is configured
+
   if (!noSupabase) {
     if (auth.loading) {
       return (
