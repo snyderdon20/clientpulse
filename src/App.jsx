@@ -3092,7 +3092,7 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
         ))}
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto" }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
         {filtered.length === 0 && (
           <p style={{ padding: "20px 16px", fontSize: "13px", color: "#b0a090" }}>No clients match.</p>
         )}
@@ -7520,6 +7520,7 @@ function App() {
     button:hover { opacity: 0.88; }
     @keyframes fadeUp { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .app-root { height: 100vh; height: 100dvh; }
     .mobile-bottom-nav { display: none; }
     .header-search { display: flex; }
     .header-user-label { display: flex; }
@@ -7543,9 +7544,9 @@ function App() {
   `;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#faf8f5", fontFamily: "'DM Sans',sans-serif", color: "#2e2418", display: "flex", flexDirection: "column" }}>
+    <div className="app-root" style={{ background: "#faf8f5", fontFamily: "'DM Sans',sans-serif", color: "#2e2418", display: "flex", flexDirection: "column" }}>
       <style>{CSS}</style>
-      <header style={{ background: "#ffffff", borderBottom: "1px solid #e8e0d6", padding: "0 24px", height: "58px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 500, gap: "12px" }}>
+      <header style={{ background: "#ffffff", borderBottom: "1px solid #e8e0d6", padding: "0 24px", height: "58px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 500, gap: "12px" }}>
         <div onClick={() => setTab("dashboard")} style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0, cursor: "pointer" }}>
           <div style={{ width: "34px", height: "34px", background: "linear-gradient(135deg,#a0785a,#7a5640)", borderRadius: "9px", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 10px rgba(160,120,90,0.22)", flexShrink: 0 }}>
             <svg width="18" height="12" viewBox="0 0 32 20" fill="none">
@@ -7668,7 +7669,7 @@ function App() {
         </div>
       </header>
 
-      <main className="main-scroll" style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+      <main className="main-scroll" style={{ flex: 1, minHeight: 0, display: "flex", overflow: "hidden" }}>
         {tab === "dashboard" && <Dashboard clients={clients} tasks={tasks} onGoToClient={goToClient}
             onSaveTask={handleSaveTask}
             onToggleTask={handleToggleTask}
