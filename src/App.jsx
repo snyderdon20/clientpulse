@@ -2940,9 +2940,21 @@ const SIDEBAR_FILTERS = [
   { key: "waitlisted",     label: "Waitlist"   },
 ];
 
+const CONTACTED_FILTER_DAYS = 7;
+function contactedWithinDays(client, days) {
+  const cutoff = Date.now() - days * 86400000;
+  if (client.contactedAt && new Date(client.contactedAt).getTime() >= cutoff) return true;
+  return (client.history || []).some((h) => {
+    if (!h.type?.startsWith("comm.")) return false;
+    const ts = typeof h.ts === "number" ? h.ts : (h.ts ? new Date(h.ts).getTime() : 0);
+    return ts >= cutoff;
+  });
+}
+
 function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search, setSearch, tagFilter, setTagFilter, fullWidth, onAddClient, staffName = "Staff" }) {
   const [showNewClient, setShowNewClient] = useState(false);
   const [sort, setSort] = useState("name");
+  const [hideContacted, setHideContacted] = useState(false);
   const allTags = useMemo(
     () => [...new Set(clients.flatMap((c) => c.tags || []))].sort(),
     [clients]
@@ -2973,7 +2985,8 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
           cl.email?.toLowerCase().includes(q) ||
           cl.phone?.includes(q);
         const matchT = !tagFilter || (cl.tags || []).includes(tagFilter);
-        return matchF && matchS && matchT;
+        const matchC = !hideContacted || !contactedWithinDays(cl, CONTACTED_FILTER_DAYS);
+        return matchF && matchS && matchT && matchC;
       })
       .sort((a, b) => {
         if (sort === "recent") {
@@ -2989,7 +3002,13 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
         const last = (a.lastName || "").localeCompare(b.lastName || "");
         return last !== 0 ? last : (a.firstName || "").localeCompare(b.firstName || "");
       }),
-    [clients, filter, search, tagFilter, sort]
+    [clients, filter, search, tagFilter, sort, hideContacted]
+  );
+
+  // How many clients the toggle would hide (for the pill label)
+  const contactedCount = useMemo(
+    () => clients.filter((cl) => contactedWithinDays(cl, CONTACTED_FILTER_DAYS)).length,
+    [clients]
   );
 
   return (
@@ -3090,6 +3109,21 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
             {s.label}
           </button>
         ))}
+      </div>
+
+      <div style={{ padding: "0 12px 8px" }}>
+        <button onClick={() => setHideContacted((v) => !v)} style={{
+          width: "100%", fontSize: "11px", padding: "4px 10px", borderRadius: "8px",
+          cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontWeight: "700",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+          border: hideContacted ? "1px solid #86efac" : "1px solid #e8e0d6",
+          background: hideContacted ? "#dcf5ec" : "transparent",
+          color: hideContacted ? "#0f7a4a" : "#8a7a6a",
+        }}>
+          <span style={{ fontSize: "12px" }}>{hideContacted ? "✓" : "○"}</span>
+          Hide contacted in last {CONTACTED_FILTER_DAYS} days
+          {contactedCount > 0 && <span style={{ opacity: 0.65 }}>({contactedCount})</span>}
+        </button>
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
