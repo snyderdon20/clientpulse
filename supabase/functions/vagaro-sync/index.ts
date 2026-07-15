@@ -221,13 +221,36 @@ serve(async (req: Request) => {
     if (failSamples.length < 10) failSamples.push({ customerId, reason });
   };
 
-  for (const customerId of customerIds) {
-    // Skip if already linked — client was synced via webhook
-    const { data: alreadyDone } = await supabase
-      .from("clients").select("id").eq("vagaro_id", customerId).maybeSingle();
-    if (alreadyDone) { alreadyLinked++; continue; }
+  // Prefetch every linked vagaro_id in one paginated pass instead of one
+  // query per customerId — the per-customer lookups were the main reason
+  // the sync exceeded the request timeout.
+  const linkedIds = new Set<string>();
+  for (let from = 0; ; from += PAGE) {
+    const { data: rows, error: linkErr } = await supabase
+      .from("clients").select("vagaro_id")
+      .not("vagaro_id", "is", null)
+      .range(from, from + PAGE - 1);
+    if (linkErr) return json({ error: `Supabase error: ${linkErr.message}` }, 500);
+    for (const r of rows ?? []) linkedIds.add(str(r.vagaro_id));
+    if (!rows || rows.length < PAGE) break;
+  }
 
-    const { customer: vc, httpStatus } = await fetchCustomer(region, accessToken, businessId, customerId);
+  const unresolved = [...customerIds].filter((id) => !linkedIds.has(id));
+  alreadyLinked = customerIds.size - unresolved.length;
+
+  // Fetch unresolved customers from the Vagaro API in parallel batches of 5
+  // (network latency dominates), then apply DB matches/writes sequentially.
+  const fetchResults: { customerId: string; customer: VagaroCustomer | null; httpStatus: number }[] = [];
+  for (let i = 0; i < unresolved.length; i += 5) {
+    const batch = unresolved.slice(i, i + 5);
+    const results = await Promise.all(batch.map(async (customerId) => ({
+      customerId,
+      ...(await fetchCustomer(region, accessToken, businessId, customerId)),
+    })));
+    fetchResults.push(...results);
+  }
+
+  for (const { customerId, customer: vc, httpStatus } of fetchResults) {
     if (!vc) {
       if (httpStatus === 404)                            noteFailure(customerId, "notFound");
       else if (httpStatus === 401 || httpStatus === 403) noteFailure(customerId, "unauthorized");

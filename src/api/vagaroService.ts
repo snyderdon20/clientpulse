@@ -30,10 +30,10 @@ export interface SyncResult {
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
-function makeEdgeClient(supabaseUrl: string, supabaseAnonKey?: string): AxiosInstance {
+function makeEdgeClient(supabaseUrl: string, supabaseAnonKey?: string, timeout = 30_000): AxiosInstance {
   return axios.create({
     baseURL: `${supabaseUrl.replace(/\/$/, "")}/functions/v1`,
-    timeout: 30_000,
+    timeout,
     headers: {
       "Content-Type": "application/json",
       ...(supabaseAnonKey ? { "Authorization": `Bearer ${supabaseAnonKey}` } : {}),
@@ -85,7 +85,9 @@ export async function syncVagaroClients(
   if (!supabaseUrl) return { error: "Supabase URL is not configured." };
 
   try {
-    const { data } = await makeEdgeClient(supabaseUrl, supabaseAnonKey).post<SyncResult>(
+    // Full sync scans the whole webhook log and calls the Vagaro API per
+    // unresolved customer — allow up to 3 minutes.
+    const { data } = await makeEdgeClient(supabaseUrl, supabaseAnonKey, 180_000).post<SyncResult>(
       "/vagaro-sync",
       { businessId: businessId ?? "" },
     );
