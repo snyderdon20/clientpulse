@@ -75,7 +75,7 @@ async function fetchCustomer(
   accessToken: string,
   businessId: string,
   customerId: string,
-): Promise<VagaroCustomer | null> {
+): Promise<{ customer: VagaroCustomer | null; httpStatus: number }> {
   try {
     const res = await fetch(
       `https://api.vagaro.com/${region}/api/v2/customers`,
@@ -85,11 +85,11 @@ async function fetchCustomer(
         body: JSON.stringify({ businessId, customerId }),
       },
     );
-    if (!res.ok) return null;
+    if (!res.ok) return { customer: null, httpStatus: res.status };
     const body = await res.json();
-    return (body?.data as VagaroCustomer) ?? null;
+    return { customer: (body?.data as VagaroCustomer) ?? null, httpStatus: res.status };
   } catch {
-    return null;
+    return { customer: null, httpStatus: 0 }; // network error
   }
 }
 
@@ -206,14 +206,29 @@ serve(async (req: Request) => {
   let alreadyLinked  = 0;
   let created        = 0;
 
+  // Failure diagnostics — why a customerId could not be resolved
+  const failures = { notFound: 0, unauthorized: 0, serverError: 0, networkError: 0, otherError: 0, emptyName: 0 };
+  const failSamples: { customerId: string; reason: string }[] = [];
+  const noteFailure = (customerId: string, reason: keyof typeof failures) => {
+    failures[reason]++;
+    if (failSamples.length < 10) failSamples.push({ customerId, reason });
+  };
+
   for (const customerId of customerIds) {
     // Skip if already linked — client was synced via webhook
     const { data: alreadyDone } = await supabase
       .from("clients").select("id").eq("vagaro_id", customerId).maybeSingle();
     if (alreadyDone) { alreadyLinked++; continue; }
 
-    const vc = await fetchCustomer(region, accessToken, businessId, customerId);
-    if (!vc) continue;
+    const { customer: vc, httpStatus } = await fetchCustomer(region, accessToken, businessId, customerId);
+    if (!vc) {
+      if (httpStatus === 404)                            noteFailure(customerId, "notFound");
+      else if (httpStatus === 401 || httpStatus === 403) noteFailure(customerId, "unauthorized");
+      else if (httpStatus >= 500)                        noteFailure(customerId, "serverError");
+      else if (httpStatus === 0)                         noteFailure(customerId, "networkError");
+      else                                               noteFailure(customerId, "otherError");
+      continue;
+    }
 
     const firstName = str(vc.customerFirstName).trim();
     const lastName  = str(vc.customerLastName).trim();
@@ -261,7 +276,7 @@ serve(async (req: Request) => {
       matched++;
     } else {
       // No existing client found — create one from the Vagaro data
-      if (!firstName && !lastName) continue;
+      if (!firstName && !lastName) { noteFailure(customerId, "emptyName"); continue; }
 
       const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Denver" });
       const orNull = (v: string | undefined) => v?.trim() || null;
@@ -296,12 +311,16 @@ serve(async (req: Request) => {
     }
   }
 
+  const totalFailed = Object.values(failures).reduce((a, b) => a + b, 0);
   return json({
     success: true,
     scanned:       customerIds.size,
     alreadyLinked,
     matched,
     created,
+    failed: totalFailed,
+    failures,
+    failSamples,
   });
 });
 
