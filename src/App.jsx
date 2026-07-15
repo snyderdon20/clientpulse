@@ -4749,6 +4749,15 @@ function VagaroSyncCard({ supabaseUrl, supabaseAnonKey }) {
           ) : (<>
             <strong>✓ Sync complete</strong><br />
             {result.matched} linked to existing profiles.{result.created > 0 && <> {result.created} new clients created from Vagaro.</>}
+            {result.failed > 0 && (
+              <div style={{ marginTop: 8, color: "#92400e", background: "#fef3c7", borderRadius: 6, padding: "6px 10px" }}>
+                ⚠️ {result.failed} customer ID{result.failed !== 1 ? "s" : ""} could not be resolved:
+                {" "}{Object.entries(result.failures || {}).filter(([, v]) => v > 0).map(([k, v]) => `${k} (${v})`).join(" · ")}
+                <div style={{ marginTop: 4, fontSize: "11px" }}>
+                  notFound usually means the customer was deleted or merged in Vagaro.
+                </div>
+              </div>
+            )}
           </>)}
         </div>
       )}
