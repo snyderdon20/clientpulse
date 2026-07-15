@@ -6856,6 +6856,147 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB, clients = [] })
   );
 }
 
+// ─── REBOOK VIEW — therapists' recent clients who haven't rebooked ───────────
+function RebookView({ clients, staffName = "Staff", onGoToClient }) {
+  const [windowKey, setWindowKey] = useState("14");
+  const [hideContacted, setHideContacted] = useState(true);
+
+  // Every therapist name that appears on a completed appointment
+  const therapists = useMemo(() => {
+    const names = new Set();
+    for (const c of clients)
+      for (const a of c.appointments || [])
+        if (a.therapist && (a.status === "completed" || a.status === "checked-in")) names.add(a.therapist);
+    return [...names].sort();
+  }, [clients]);
+
+  const [therapist, setTherapist] = useState("");
+  // Default to the logged-in user once the therapist list is available
+  useEffect(() => {
+    if (!therapist && therapists.includes(staffName)) setTherapist(staffName);
+  }, [therapists, staffName, therapist]);
+
+  const WINDOWS = [
+    { key: "7",    label: "Last 7 days"   },
+    { key: "8-14", label: "8–14 days ago" },
+    { key: "14",   label: "Last 14 days"  },
+  ];
+
+  const rows = useMemo(() => {
+    if (!therapist) return [];
+    const out = [];
+    for (const c of clients) {
+      const visits = (c.appointments || []).filter(
+        (a) => a.therapist === therapist && (a.status === "completed" || a.status === "checked-in")
+      );
+      if (!visits.length) continue;
+      const last = [...visits].sort((a, b) => b.date.localeCompare(a.date))[0];
+      const ds = daysSince(last.date);
+      const inWindow =
+        windowKey === "7"    ? ds >= 0 && ds <= 7  :
+        windowKey === "8-14" ? ds >= 8 && ds <= 14 :
+                               ds >= 0 && ds <= 14;
+      if (!inWindow) continue;
+      // Skip clients who already rebooked — the whole point is catching the ones who didn't
+      const hasUpcoming = (c.appointments || []).some((a) => a.date >= TODAY && a.status !== "cancelled");
+      if (hasUpcoming) continue;
+      const contacted = contactedWithinDays(c, 7);
+      if (hideContacted && contacted) continue;
+      out.push({ client: c, last, ds, contacted });
+    }
+    // Oldest visit first — those are running out of rebooking window
+    return out.sort((a, b) => b.ds - a.ds);
+  }, [clients, therapist, windowKey, hideContacted]);
+
+  const pill = (active) => ({
+    fontSize: "12px", padding: "5px 12px", borderRadius: "100px",
+    cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontWeight: "700",
+    border: active ? "1px solid #d4bfaa" : "1px solid #e8e0d6",
+    background: active ? "#f5ede4" : "transparent",
+    color: active ? "#7a5640" : "#8a7a6a",
+  });
+
+  return (
+    <div className="page-pad" style={{ flex: 1, overflowY: "auto", padding: "28px 32px", maxWidth: 760 }}>
+      <h2 style={{ margin: "0 0 2px", fontSize: "21px", fontWeight: "800", color: "#1a120b" }}>Rebook Outreach</h2>
+      <p style={{ margin: "0 0 18px", fontSize: "13px", color: "#8a7a6a" }}>
+        Clients seen recently who haven't booked their next visit — reach out while the experience is fresh.
+      </p>
+
+      {/* Controls */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 18, flexWrap: "wrap", alignItems: "center" }}>
+        <select value={therapist} onChange={(e) => setTherapist(e.target.value)}
+          style={{ ...S.inp, width: "auto", padding: "7px 12px", fontSize: "13px", fontWeight: "700", cursor: "pointer" }}>
+          <option value="">— Select therapist —</option>
+          {therapists.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <div style={{ display: "flex", gap: 4 }}>
+          {WINDOWS.map((w) => (
+            <button key={w.key} onClick={() => setWindowKey(w.key)} style={pill(windowKey === w.key)}>{w.label}</button>
+          ))}
+        </div>
+        <button onClick={() => setHideContacted((v) => !v)} style={{
+          ...pill(hideContacted),
+          ...(hideContacted ? { border: "1px solid #86efac", background: "#dcf5ec", color: "#0f7a4a" } : {}),
+        }}>
+          {hideContacted ? "✓ " : ""}Hide contacted (7d)
+        </button>
+      </div>
+
+      {!therapist ? (
+        <div style={{ ...S.card, textAlign: "center", color: "#8a7a6a", fontSize: "13px", padding: "28px" }}>
+          Select a therapist to see their recent clients.
+        </div>
+      ) : rows.length === 0 ? (
+        <div style={{ ...S.card, textAlign: "center", padding: "28px" }}>
+          <div style={{ fontSize: 26, marginBottom: 6 }}>🎉</div>
+          <div style={{ fontSize: "13px", fontWeight: "700", color: "#0f7a4a" }}>All caught up!</div>
+          <div style={{ fontSize: "12px", color: "#8a7a6a", marginTop: 4 }}>
+            Every client {therapist} saw in this window has either rebooked or been contacted.
+          </div>
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 10 }}>
+            {rows.length} client{rows.length !== 1 ? "s" : ""} to reach out to — oldest visit first
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {rows.map(({ client: c, last, ds, contacted }) => {
+              const { layer2 } = clientStatus(c);
+              const l2 = LAYER2_CFG[layer2] ?? { label: layer2, bg: "#e8e0d6", color: "#8a7a6a" };
+              return (
+                <div key={c.id} style={{ ...S.card, padding: "14px 16px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 180 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: "14px", fontWeight: "800", color: "#1a120b" }}>{fullName(c)}</span>
+                      <span style={{ fontSize: "10px", fontWeight: "700", background: l2.bg, color: l2.color, borderRadius: 99, padding: "2px 8px" }}>{l2.label}</span>
+                      {contacted && (
+                        <span style={{ fontSize: "10px", fontWeight: "700", background: "#dcf5ec", color: "#0f7a4a", borderRadius: 99, padding: "2px 8px" }}>Contacted</span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#8a7a6a", marginTop: 3 }}>
+                      {last.service || "Visit"} · {fmtDate(last.date)} · <strong style={{ color: ds >= 10 ? "#991b1b" : "#5a4a3a" }}>{ds} day{ds !== 1 ? "s" : ""} ago</strong>
+                    </div>
+                    {(c.phone || c.email) && (
+                      <div style={{ fontSize: "11px", color: "#b0a090", marginTop: 2 }}>
+                        {[c.phone, c.email].filter(Boolean).join(" · ")}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => onGoToClient(c.id)}
+                    style={{ ...S.btn("primary"), fontSize: "12px", padding: "8px 14px", whiteSpace: "nowrap", flexShrink: 0 }}>
+                    Open profile →
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── NAV CONFIG ───────────────────────────────────────────────────────────────
 const NAV_ITEMS = [
   {
@@ -6870,6 +7011,10 @@ const NAV_ITEMS = [
   {
     id: "clients", label: "Clients", short: "Clients",
     icon: "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z",
+  },
+  {
+    id: "rebook", label: "Rebook", short: "Rebook",
+    icon: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15",
   },
   {
     id: "settings", label: "Settings", short: "Settings",
@@ -7722,6 +7867,7 @@ function App() {
             staffName={auth.staff?.full_name || "Staff"}
           />}
         {tab === "pulse"     && <PulsePage clients={clients} templates={templates} onGoToClient={goToClient} onUpdateClient={updateClient} staffName={auth.staff?.full_name || "Staff"} />}
+        {tab === "rebook"    && <RebookView clients={clients} staffName={auth.staff?.full_name || "Staff"} onGoToClient={goToClient} />}
         {tab === "sales"     && <SalesDashboard supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} clients={clients} />}
         {tab === "settings"  && (
           <SettingsPage
