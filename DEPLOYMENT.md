@@ -2,7 +2,7 @@
 
 ## What you need
 - GitHub account (github.com — free)
-- AWS account (aws.amazon.com — free, requires credit card)
+- Cloudflare account (dash.cloudflare.com — free, no credit card required)
 
 ---
 
@@ -30,25 +30,25 @@ Replace `YOUR_USERNAME` with your GitHub username.
 
 ---
 
-## Step 2 — Deploy to AWS Amplify
+## Step 2 — Deploy to Cloudflare Pages
 
-1. Go to **aws.amazon.com** → sign in → search for **Amplify** in the top search bar
-2. Click **AWS Amplify** → **Get Started**
-3. Choose **Host your web app**
-4. Select **GitHub** → click **Continue**
-5. Authorize AWS to access your GitHub
-6. Select your `clientpulse` repository
-7. Select branch: `main`
-8. Build settings — Amplify will auto-detect the `amplify.yml` file. Leave everything as-is.
-9. Click **Save and deploy**
+1. Go to **dash.cloudflare.com** → sign in (or create a free account)
+2. In the left sidebar, click **Workers & Pages** → **Create** → **Pages** tab
+3. Click **Connect to Git** → authorize Cloudflare to access your GitHub
+4. Select your `clientpulse` repository
+5. Build settings:
+   - **Framework preset:** Vite
+   - **Build command:** `npm run build`
+   - **Build output directory:** `dist`
+   - **Production branch:** `main`
+6. Click **Save and Deploy**
 
-Amplify will:
+Cloudflare will:
 - Pull your code from GitHub
-- Install dependencies (`npm ci`)
-- Build the app (`npm run build`)
-- Deploy to a URL like `https://main.xxxxxxxxxx.amplifyapp.com`
+- Install dependencies and build the app
+- Deploy to a URL like `https://clientpulse.pages.dev`
 
-This takes about 3-5 minutes.
+This takes about 2 minutes.
 
 ---
 
@@ -56,10 +56,12 @@ This takes about 3-5 minutes.
 
 If you want `clientpulse.rctmassage.com`:
 
-1. In Amplify → your app → **Domain management**
-2. Click **Add domain**
+1. In Cloudflare → your Pages project → **Custom domains**
+2. Click **Set up a custom domain**
 3. Enter your domain
-4. Follow the DNS instructions (add CNAME records at your domain registrar)
+4. Follow the DNS instructions (add a CNAME record at your domain registrar pointing to your `pages.dev` URL)
+
+SSL is automatic and free.
 
 ---
 
@@ -68,6 +70,10 @@ If you want `clientpulse.rctmassage.com`:
 Follow the instructions in Settings → Database inside the app.
 
 Add your Supabase URL and anon key — they're stored in your browser's localStorage and never leave your device.
+
+Supabase Edge Functions deploy automatically via GitHub Actions
+(`.github/workflows/deploy-functions.yml`) whenever a change to
+`supabase/functions/**` is merged to main.
 
 ---
 
@@ -81,7 +87,7 @@ git commit -m "describe what changed"
 git push
 ```
 
-Amplify automatically detects the push and redeploys. Takes 2-3 minutes. Zero downtime.
+Cloudflare Pages automatically detects the push to `main` and redeploys. Takes 1-2 minutes. Zero downtime.
 
 ---
 
@@ -89,10 +95,19 @@ Amplify automatically detects the push and redeploys. Takes 2-3 minutes. Zero do
 
 | Service | Cost |
 |---|---|
-| AWS Amplify (free tier) | $0 for first 1,000 build minutes/month |
-| AWS Amplify hosting | ~$0.01/GB served — effectively $0 at your scale |
+| Cloudflare Pages (free plan) | $0 — unlimited bandwidth, 500 builds/month |
 | GitHub (private repo) | $0 |
 | Supabase (free tier) | $0 |
 | **Total** | **$0/month** |
 
-You'll stay on free tiers indefinitely at a massage clinic's traffic level.
+Cloudflare's free plan allows commercial use, so you'll stay at $0 indefinitely at a massage clinic's traffic level.
+
+---
+
+## Migrating away from AWS Amplify (one-time)
+
+If the app was previously hosted on AWS Amplify:
+
+1. Complete Steps 2–3 above and confirm the app works at the new URL
+2. If you had a custom domain on Amplify, update the CNAME at your registrar to point to your `pages.dev` URL instead
+3. In the AWS console → Amplify → your app → **Actions → Delete app** to stop any billing
