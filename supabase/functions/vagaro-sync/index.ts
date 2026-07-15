@@ -168,17 +168,24 @@ serve(async (req: Request) => {
     return json({ error: String(e) }, 502);
   }
 
-  // Collect all unique customerIds from webhook_log
-  const { data: logRows } = await supabase
-    .from("webhook_log")
-    .select("payload")
-    .eq("source", "vagaro")
-    .not("payload->payload->customerId", "is", null);
-
+  // Collect all unique customerIds from webhook_log — paginated, because
+  // PostgREST caps a single query at 1000 rows and the log is much bigger.
+  // Select only the extracted customerId string to keep pages light.
   const customerIds = new Set<string>();
-  for (const row of logRows ?? []) {
-    const cid = str((row.payload as Record<string, unknown>)?.payload?.customerId ?? "");
-    if (cid) customerIds.add(cid);
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data: logRows, error: logErr } = await supabase
+      .from("webhook_log")
+      .select("cid:payload->payload->>customerId")
+      .eq("source", "vagaro")
+      .not("payload->payload->customerId", "is", null)
+      .range(from, from + PAGE - 1);
+    if (logErr) return json({ error: `Supabase error: ${logErr.message}` }, 500);
+    for (const row of logRows ?? []) {
+      const cid = str((row as { cid?: unknown }).cid ?? "");
+      if (cid) customerIds.add(cid);
+    }
+    if (!logRows || logRows.length < PAGE) break;
   }
 
   if (customerIds.size === 0) {
