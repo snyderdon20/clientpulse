@@ -164,11 +164,15 @@ async function handleAppointment(
     .from("clients").select("id").eq("vagaro_id", vagaro_customer_id).maybeSingle();
   if (!client) return; // Customer not yet in ClientPulse — sync will catch them later
 
-  // Parse date/time — Vagaro sends startTime/endTime as full datetimes
+  // Parse date/time — Vagaro sends startTime/endTime as full datetimes.
+  // The values carry a "Z" suffix but are actually business-local Mountain
+  // time shifted by a FIXED +7 hours year-round (no DST) — verified against
+  // live calendar data. Subtract 7h to recover the wall-clock date/time.
   const startRaw = str(data.startDateTime ?? data.StartDateTime ?? data.startTime ?? data.StartTime ?? data.startDate ?? data.StartDate ?? "");
   const endRaw   = str(data.endDateTime   ?? data.EndDateTime   ?? data.endTime   ?? data.EndTime   ?? "");
-  const apptDate = startRaw ? startRaw.split("T")[0] : null;
-  const apptTime = startRaw.includes("T") ? startRaw.split("T")[1]?.slice(0, 5) : null;
+  const startLoc = vagaroLocal(startRaw);
+  const apptDate = startLoc?.date ?? null;
+  const apptTime = startLoc?.time ?? null;
 
   // Vagaro bookingStatus vocabulary observed in live webhook data:
   // accepted, confirmed, need acceptance, awaiting confirmation,
@@ -394,6 +398,18 @@ async function handleTransaction(
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Vagaro appointment timestamps have a "Z" suffix but are really the studio's
+// Mountain Standard wall clock + a fixed 7 hours (no DST). Subtracting 7h
+// recovers the local date and HH:MM.
+const VAGARO_OFFSET_MS = 7 * 60 * 60 * 1000;
+function vagaroLocal(raw: string): { date: string; time: string } | null {
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return null;
+  const shifted = new Date(d.getTime() - VAGARO_OFFSET_MS).toISOString();
+  return { date: shifted.split("T")[0], time: shifted.split("T")[1].slice(0, 5) };
+}
 
 function formatTime(t: string): string {
   const [h, m] = t.split(":").map(Number);
