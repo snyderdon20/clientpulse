@@ -6857,9 +6857,12 @@ function SalesDashboard({ supabaseUrl, supabaseAnonKey, usingDB, clients = [] })
 }
 
 // ─── REBOOK VIEW — therapists' recent clients who haven't rebooked ───────────
-function RebookView({ clients, staffName = "Staff", onGoToClient }) {
+function RebookView({ clients, staffName = "Staff", onUpdate, templates, supabaseUrl, supabaseAnonKey, usingDB, onSaveTask }) {
+  const isMobile = useIsMobile();
   const [windowKey, setWindowKey] = useState("14");
   const [hideContacted, setHideContacted] = useState(true);
+  const [selectedId, setSelectedId] = useState(null);
+  const selectedClient = selectedId ? clients.find((c) => c.id === selectedId) : null;
 
   // Every therapist name that appears on a completed appointment
   const therapists = useMemo(() => {
@@ -6916,8 +6919,16 @@ function RebookView({ clients, staffName = "Staff", onGoToClient }) {
     color: active ? "#7a5640" : "#8a7a6a",
   });
 
+  const showList   = !isMobile || !selectedId;
+  const showDetail = !isMobile || !!selectedId;
+
   return (
-    <div className="page-pad" style={{ flex: 1, overflowY: "auto", padding: "28px 32px", maxWidth: 760 }}>
+    <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+      {showList && (
+      <div className="page-pad" style={{
+        width: isMobile ? "100%" : 470, flexShrink: 0, overflowY: "auto",
+        padding: "28px 24px", borderRight: isMobile ? "none" : "1px solid #e8e0d6",
+      }}>
       <h2 style={{ margin: "0 0 2px", fontSize: "21px", fontWeight: "800", color: "#1a120b" }}>Rebook Outreach</h2>
       <p style={{ margin: "0 0 18px", fontSize: "13px", color: "#8a7a6a" }}>
         Clients seen recently who haven't booked their next visit — reach out while the experience is fresh.
@@ -6964,8 +6975,13 @@ function RebookView({ clients, staffName = "Staff", onGoToClient }) {
             {rows.map(({ client: c, last, ds, contacted }) => {
               const { layer2 } = clientStatus(c);
               const l2 = LAYER2_CFG[layer2] ?? { label: layer2, bg: "#e8e0d6", color: "#8a7a6a" };
+              const isSel = selectedId === c.id;
               return (
-                <div key={c.id} style={{ ...S.card, padding: "14px 16px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                <div key={c.id} onClick={() => setSelectedId(c.id)} style={{
+                  ...S.card, padding: "14px 16px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap",
+                  cursor: "pointer",
+                  ...(isSel ? { border: "2px solid #a0785a", background: "#fdf6ef" } : {}),
+                }}>
                   <div style={{ flex: 1, minWidth: 180 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <span style={{ fontSize: "14px", fontWeight: "800", color: "#1a120b" }}>{fullName(c)}</span>
@@ -6983,15 +6999,42 @@ function RebookView({ clients, staffName = "Staff", onGoToClient }) {
                       </div>
                     )}
                   </div>
-                  <button onClick={() => onGoToClient(c.id)}
-                    style={{ ...S.btn("primary"), fontSize: "12px", padding: "8px 14px", whiteSpace: "nowrap", flexShrink: 0 }}>
-                    Open profile →
-                  </button>
+                  <span style={{ fontSize: "16px", color: isSel ? "#a0785a" : "#d4bfaa", flexShrink: 0 }}>›</span>
                 </div>
               );
             })}
           </div>
         </>
+      )}
+      </div>
+      )}
+
+      {/* Right pane — live client profile */}
+      {showDetail && (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: "#fdfbf8" }}>
+          {selectedClient ? (
+            <ClientDetail
+              key={selectedClient.id}
+              client={selectedClient}
+              onUpdate={onUpdate}
+              templates={templates}
+              allClients={clients}
+              onBack={isMobile ? () => setSelectedId(null) : null}
+              supabaseUrl={supabaseUrl}
+              supabaseAnonKey={supabaseAnonKey}
+              usingDB={usingDB}
+              staffName={staffName}
+              onSaveTask={onSaveTask}
+            />
+          ) : (
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px", color: "#b0a090" }}>
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              <span style={{ fontSize: "14px", fontWeight: "600" }}>Select a client to view their profile and log outreach</span>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -7867,7 +7910,7 @@ function App() {
             staffName={auth.staff?.full_name || "Staff"}
           />}
         {tab === "pulse"     && <PulsePage clients={clients} templates={templates} onGoToClient={goToClient} onUpdateClient={updateClient} staffName={auth.staff?.full_name || "Staff"} />}
-        {tab === "rebook"    && <RebookView clients={clients} staffName={auth.staff?.full_name || "Staff"} onGoToClient={goToClient} />}
+        {tab === "rebook"    && <RebookView clients={clients} staffName={auth.staff?.full_name || "Staff"} onUpdate={updateClient} templates={templates} supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} onSaveTask={handleSaveTask} />}
         {tab === "sales"     && <SalesDashboard supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} clients={clients} />}
         {tab === "settings"  && (
           <SettingsPage
