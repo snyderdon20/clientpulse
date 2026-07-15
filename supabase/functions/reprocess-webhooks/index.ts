@@ -51,6 +51,7 @@ Deno.serve(async (req) => {
     const { data, error } = await sb
       .from("clients").select("id, vagaro_id")
       .not("vagaro_id", "is", null)
+      .order("id", { ascending: true }) // stable order — unordered range pagination skips/repeats rows
       .range(from, from + PAGE - 1);
     if (error) return json({ error: error.message }, 500);
     for (const c of data ?? []) clientMap.set(str(c.vagaro_id), str(c.id));
@@ -102,6 +103,7 @@ Deno.serve(async (req) => {
       .from("webhook_log")
       .select("event_type, payload")
       .order("received_at", { ascending: true })
+      .order("id", { ascending: true }) // tie-breaker so pagination is fully stable
       .range(from, from + PAGE - 1);
     if (error) return json({ error: error.message }, 500);
 
@@ -279,6 +281,7 @@ Deno.serve(async (req) => {
       .from("transactions")
       .select("vagaro_transaction_id, item_sold")
       .not("vagaro_transaction_id", "is", null)
+      .order("id", { ascending: true })
       .range(from, from + PAGE - 1);
     if (error) return json({ error: error.message }, 500);
     for (const t of txs ?? []) existingTxKeys.add(`${str(t.vagaro_transaction_id)}|${str(t.item_sold)}`);
@@ -305,6 +308,7 @@ Deno.serve(async (req) => {
         .select("id, vagaro_customer_id")
         .is("client_id", null)
         .not("vagaro_customer_id", "is", null)
+        .order("id", { ascending: true })
         .range(from, from + PAGE - 1);
       if (error) break;
       for (const t of txs ?? []) unlinked.push({ id: str(t.id), vagaro_customer_id: str(t.vagaro_customer_id) });
@@ -330,6 +334,7 @@ Deno.serve(async (req) => {
     const { data: appts, error } = await sb
       .from("appointments")
       .select("client_id, date, status")
+      .order("id", { ascending: true })
       .range(from, from + PAGE - 1);
     if (error) return json({ error: error.message }, 500);
     for (const a of appts ?? []) {

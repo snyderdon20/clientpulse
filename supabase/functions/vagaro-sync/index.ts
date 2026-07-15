@@ -179,6 +179,7 @@ serve(async (req: Request) => {
       .select("cid:payload->payload->>customerId")
       .eq("source", "vagaro")
       .not("payload->payload->customerId", "is", null)
+      .order("id", { ascending: true }) // stable order — unordered range pagination skips/repeats rows
       .range(from, from + PAGE - 1);
     if (logErr) return json({ error: `Supabase error: ${logErr.message}` }, 500);
     for (const row of logRows ?? []) {
@@ -229,6 +230,7 @@ serve(async (req: Request) => {
     const { data: rows, error: linkErr } = await supabase
       .from("clients").select("vagaro_id")
       .not("vagaro_id", "is", null)
+      .order("id", { ascending: true })
       .range(from, from + PAGE - 1);
     if (linkErr) return json({ error: `Supabase error: ${linkErr.message}` }, 500);
     for (const r of rows ?? []) linkedIds.add(str(r.vagaro_id));
