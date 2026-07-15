@@ -37,6 +37,18 @@ const PAGE = 1000;
 const CHUNK = 500;
 const CONCURRENCY = 20;
 
+// Vagaro appointment timestamps have a "Z" suffix but are really the studio's
+// Mountain Standard wall clock + a fixed 7 hours (no DST). Subtracting 7h
+// recovers the local date and HH:MM.
+const VAGARO_OFFSET_MS = 7 * 60 * 60 * 1000;
+function vagaroLocal(raw: string): { date: string; time: string } | null {
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return null;
+  const shifted = new Date(d.getTime() - VAGARO_OFFSET_MS).toISOString();
+  return { date: shifted.split("T")[0], time: shifted.split("T")[1].slice(0, 5) };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return json({ ok: true }, 200);
 
@@ -173,8 +185,9 @@ Deno.serve(async (req) => {
 
         const startRaw = str(data.startDateTime ?? data.StartDateTime ?? data.startTime ?? data.StartTime ?? data.startDate ?? data.StartDate ?? "");
         const endRaw   = str(data.endDateTime   ?? data.EndDateTime   ?? data.endTime   ?? data.EndTime   ?? "");
-        const apptDate = startRaw ? startRaw.split("T")[0] : null;
-        const apptTime = startRaw.includes("T") ? startRaw.split("T")[1]?.slice(0, 5) : null;
+        const startLoc = vagaroLocal(startRaw);
+        const apptDate = startLoc?.date ?? null;
+        const apptTime = startLoc?.time ?? null;
 
         const rawStatus = str(data.bookingStatus ?? data.BookingStatus ?? data.status ?? data.Status ?? "").toLowerCase().trim();
         statusBreakdown[rawStatus || "(empty)"] = (statusBreakdown[rawStatus || "(empty)"] ?? 0) + 1;
