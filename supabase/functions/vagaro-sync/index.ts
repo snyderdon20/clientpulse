@@ -343,6 +343,38 @@ serve(async (req: Request) => {
     }
   }
 
+  // Refresh placeholder clients auto-created from appointment webhooks
+  // ("Vagaro Client xxxxxx") with their real details from the Vagaro API.
+  let placeholdersUpdated = 0;
+  {
+    const { data: placeholders } = await supabase
+      .from("clients").select("id, vagaro_id")
+      .eq("first_name", "Vagaro")
+      .ilike("last_name", "Client %")
+      .not("vagaro_id", "is", null);
+    const list = placeholders ?? [];
+    for (let i = 0; i < list.length; i += 5) {
+      const batch = list.slice(i, i + 5);
+      const results = await Promise.all(batch.map(async (p) => {
+        const { customer: vc } = await fetchCustomer(region, accessToken, businessId, str(p.vagaro_id));
+        const firstName = str(vc?.customerFirstName ?? "").trim();
+        const lastName  = str(vc?.customerLastName ?? "").trim();
+        if (!firstName && !lastName) return false;
+        const orN = (v: string | undefined) => v?.trim() || null;
+        const { error } = await supabase.from("clients").update({
+          first_name: firstName,
+          last_name:  lastName,
+          email:      orN(vc?.email),
+          phone:      orN(vc?.mobilePhone) ?? orN(vc?.dayPhone),
+          birthday:   orN(vc?.birthday),
+          updated_at: new Date().toISOString(),
+        }).eq("id", p.id);
+        return !error;
+      }));
+      placeholdersUpdated += results.filter(Boolean).length;
+    }
+  }
+
   const totalFailed = Object.values(failures).reduce((a, b) => a + b, 0);
   return json({
     success: true,
@@ -350,6 +382,7 @@ serve(async (req: Request) => {
     alreadyLinked,
     matched,
     created,
+    placeholdersUpdated,
     failed: totalFailed,
     failures,
     failSamples,

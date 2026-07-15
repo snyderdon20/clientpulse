@@ -98,6 +98,7 @@ Deno.serve(async (req) => {
 
   // ── Counters ────────────────────────────────────────────────────────────────
   let scanned = 0;
+  let placeholdersCreated = 0;
   let customersCreated = 0, customersUpdated = 0;
   let apptEvents = 0, skippedNoClient = 0, skippedNoApptId = 0;
   let txEvents = 0;
@@ -180,8 +181,23 @@ Deno.serve(async (req) => {
         const vagaro_customer_id = orNull(data.customerId ?? data.CustomerId);
         const vagaro_appt_id     = orNull(data.appointmentId ?? data.AppointmentId ?? data.Id);
         if (!vagaro_customer_id) { skippedNoClient++; continue; }
-        const clientId = clientMap.get(vagaro_customer_id);
-        if (!clientId) { skippedNoClient++; continue; }
+        let clientId = clientMap.get(vagaro_customer_id);
+        if (!clientId) {
+          // Unknown customer — create a placeholder so the appointment isn't
+          // dropped. "Sync all clients from Vagaro" fills in real details.
+          const suffix = vagaro_customer_id.replace(/[^a-zA-Z0-9]/g, "").slice(-6);
+          const today  = new Date().toLocaleDateString("en-CA", { timeZone: "America/Denver" });
+          const { data: createdRow, error: createErr } = await sb.from("clients").insert({
+            vagaro_id: vagaro_customer_id, vagaro_synced: true,
+            first_name: "Vagaro", last_name: `Client ${suffix}`,
+            customer_since: today, avg_visit_interval_days: 30,
+            waitlisted: false, tags: [], golden_nuggets: [],
+          }).select("id").single();
+          if (createErr || !createdRow) { skippedNoClient++; continue; }
+          clientId = str(createdRow.id);
+          clientMap.set(vagaro_customer_id, clientId);
+          placeholdersCreated++;
+        }
 
         const startRaw = str(data.startDateTime ?? data.StartDateTime ?? data.startTime ?? data.StartTime ?? data.startDate ?? data.StartDate ?? "");
         const endRaw   = str(data.endDateTime   ?? data.EndDateTime   ?? data.endTime   ?? data.EndTime   ?? "");
@@ -405,13 +421,14 @@ Deno.serve(async (req) => {
     firstUpsertError,
     statusBreakdown,
     customersCreated,
+    placeholdersCreated,
     customersUpdated,
     txEvents,
     txInserted,
     txErrors,
     txLinked,
     clientsUpdated,
-    message: `Replayed ${scanned} webhooks oldest→newest: ${customersCreated} clients created, ${customersUpdated} profiles updated, ${apptUpserts} appointments written, ${txInserted} transactions added, ${clientsUpdated} client metrics refreshed.`,
+    message: `Replayed ${scanned} webhooks oldest→newest: ${customersCreated + placeholdersCreated} clients created${placeholdersCreated > 0 ? ` (${placeholdersCreated} placeholders pending sync)` : ""}, ${customersUpdated} profiles updated, ${apptUpserts} appointments written, ${txInserted} transactions added, ${clientsUpdated} client metrics refreshed.`,
   });
 });
 

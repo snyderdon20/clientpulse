@@ -159,10 +159,16 @@ async function handleAppointment(
   const vagaro_appt_id     = orNull(data.appointmentId ?? data.AppointmentId ?? data.Id);
   if (!vagaro_customer_id) return;
 
-  // Resolve client by vagaro_id
-  const { data: client } = await sb
-    .from("clients").select("id").eq("vagaro_id", vagaro_customer_id).maybeSingle();
-  if (!client) return; // Customer not yet in ClientPulse — sync will catch them later
+  // Resolve client by vagaro_id — if unknown, create one so the appointment
+  // is never dropped. Real details come from the Vagaro API when reachable;
+  // otherwise a placeholder that the next customer webhook / sync fills in.
+  let client = (await sb
+    .from("clients").select("id").eq("vagaro_id", vagaro_customer_id).maybeSingle()).data;
+  if (!client) {
+    const businessId = orNull(data.businessId ?? data.BusinessId);
+    client = await createClientForCustomer(sb, vagaro_customer_id, businessId);
+    if (!client) return; // creation failed — logged inside
+  }
 
   // Parse date/time — Vagaro sends startTime/endTime as full datetimes.
   // The values carry a "Z" suffix but are actually business-local Mountain
@@ -395,6 +401,95 @@ async function handleTransaction(
   // Insert new row
   const { error } = await sb.from("transactions").insert(row);
   if (error) throw error;
+}
+
+// ─── Client auto-creation for unknown customers ──────────────────────────────
+
+// Fetch real customer details from the Vagaro V2 API (best effort).
+async function fetchVagaroCustomerDetails(
+  customerId: string,
+  businessId: string | null,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const region          = Deno.env.get("VAGARO_REGION");
+    const clientId        = Deno.env.get("VAGARO_CLIENT_ID");
+    const clientSecretKey = Deno.env.get("VAGARO_CLIENT_SECRET_KEY");
+    if (!region || !clientId || !clientSecretKey || !businessId) return null;
+
+    const tokenRes = await fetch(
+      `https://api.vagaro.com/${region}/api/v2/merchants/generate-access-token`,
+      { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, clientSecretKey, scope: "read access" }) },
+    );
+    if (!tokenRes.ok) return null;
+    const accessToken = (await tokenRes.json())?.data?.access_token;
+    if (!accessToken) return null;
+
+    const res = await fetch(
+      `https://api.vagaro.com/${region}/api/v2/customers`,
+      { method: "POST", headers: { "Content-Type": "application/json", accessToken },
+        body: JSON.stringify({ businessId, customerId }) },
+    );
+    if (!res.ok) return null;
+    return ((await res.json())?.data as Record<string, unknown>) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Create a client for a Vagaro customer we've never seen. Uses real details
+// from the API when possible, otherwise a recognizable placeholder that gets
+// corrected by the next customer webhook or "Sync all clients from Vagaro".
+async function createClientForCustomer(
+  sb: ReturnType<typeof createClient>,
+  vagaroCustomerId: string,
+  businessId: string | null,
+): Promise<{ id: string } | null> {
+  const vc = await fetchVagaroCustomerDetails(vagaroCustomerId, businessId);
+  const firstName = str(vc?.customerFirstName ?? "").trim();
+  const lastName  = str(vc?.customerLastName ?? "").trim();
+  const suffix    = vagaroCustomerId.replace(/[^a-zA-Z0-9]/g, "").slice(-6);
+  const today     = new Date().toLocaleDateString("en-CA", { timeZone: "America/Denver" });
+
+  const { data: inserted, error } = await sb.from("clients").insert({
+    vagaro_id:     vagaroCustomerId,
+    vagaro_synced: true,
+    first_name:    firstName || "Vagaro",
+    last_name:     lastName  || `Client ${suffix}`,
+    email:         orNull(vc?.email),
+    phone:         orNull(vc?.mobilePhone) ?? orNull(vc?.dayPhone),
+    birthday:      orNull(vc?.birthday),
+    address:       orNull(vc?.streetAddress),
+    city:          orNull(vc?.city),
+    state:         orNull(vc?.regionCode),
+    zip:           orNull(vc?.postalCode),
+    customer_since: orNull(str(vc?.createdDate ?? "").split("T")[0]) ?? today,
+    avg_visit_interval_days: 30,
+    waitlisted: false, tags: [], golden_nuggets: [],
+  }).select("id").single();
+
+  if (error) {
+    // Possible race with a concurrent customer webhook — re-check
+    const { data: existing } = await sb
+      .from("clients").select("id").eq("vagaro_id", vagaroCustomerId).maybeSingle();
+    if (existing) return existing as { id: string };
+    console.error(`auto-create client ${vagaroCustomerId}:`, error.message);
+    return null;
+  }
+
+  await sb.from("history").insert({
+    client_id: inserted.id,
+    type: "client.created",
+    detail: firstName || lastName
+      ? "Created automatically from a Vagaro appointment webhook"
+      : "Created as a placeholder from a Vagaro appointment webhook — details pending sync",
+    by: "Vagaro",
+    ts: Date.now(),
+    source: "vagaro",
+    direction: "internal",
+  });
+
+  return inserted as { id: string };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
