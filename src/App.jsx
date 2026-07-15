@@ -4748,7 +4748,8 @@ function VagaroSyncCard({ supabaseUrl, supabaseAnonKey }) {
             <>⚠️ {result.error}</>
           ) : (<>
             <strong>✓ Sync complete</strong><br />
-            {result.matched} linked to existing profiles.{result.created > 0 && <> {result.created} new clients created from Vagaro.</>}
+            {result.scanned != null && <>{result.scanned} unique Vagaro customers scanned · {result.alreadyLinked ?? 0} already linked · </>}
+            {result.matched} newly linked.{result.created > 0 && <> {result.created} new clients created from Vagaro.</>}
             {result.failed > 0 && (
               <div style={{ marginTop: 8, color: "#92400e", background: "#fef3c7", borderRadius: 6, padding: "6px 10px" }}>
                 ⚠️ {result.failed} customer ID{result.failed !== 1 ? "s" : ""} could not be resolved:
