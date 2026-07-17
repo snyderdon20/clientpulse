@@ -3175,11 +3175,36 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask, onDeleteTask, onFilterClients, staffName = "Staff" }) {
+const ACTION_CATEGORIES = [
+  { key: "reminders", icon: "⏰", label: "Appointment Reminders", types: ["reminder"] },
+  { key: "followups", icon: "📋", label: "Follow-ups",            types: ["followUp", "postVisit"] },
+  { key: "rebook",    icon: "🔄", label: "New Client Rebooking",  types: ["newNoRebook"], rebookLink: true },
+  { key: "winback",   icon: "🔴", label: "Win-back",              types: ["lapsed", "overdue"] },
+  { key: "leads",     icon: "🚫", label: "Lead Recovery",         types: ["noShowRecovery", "lostLead"] },
+  { key: "redlight",  icon: "💡", label: "Red Light Therapy",     types: ["redLightFollow", "redLightOffer"] },
+  { key: "packages",  icon: "📦", label: "Packages & Waitlist",   types: ["packageExpiring", "waitlisted"] },
+  { key: "birthdays", icon: "🎂", label: "Birthdays",             types: ["birthday"] },
+];
+
+const NEEDS_OUTREACH_L2 = new Set([
+  "active-overdue", "overdue", "overdue-with-package", "overdue-contacted",
+  "stale", "stale-contacted", "first-session-no-show", "lost-lead",
+]);
+
+const APPT_CHIP = {
+  "scheduled":  { label: "Scheduled",  bg: "#dbeafe", color: "#1d5fa8" },
+  "checked-in": { label: "Checked in", bg: "#a5f3fc", color: "#0e7490" },
+  "completed":  { label: "Completed",  bg: "#dcf5ec", color: "#0f7a4a" },
+  "no-show":    { label: "No-show",    bg: "#fee2e2", color: "#991b1b" },
+};
+
+function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask, onDeleteTask, onFilterClients, staffName = "Staff", currentUserRoles = [], onOpenRebook }) {
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [editTask, setEditTask] = useState(null);
   const [selectedDate, setSelectedDate] = useState(TODAY);
-  const [sortBy, setSortBy] = useState("priority");
+  const [catOpen, setCatOpen] = useState({});
+  const isTherapist = currentUserRoles.includes("therapist") || currentUserRoles.includes("therapist_rlt");
+  const isAdmin     = currentUserRoles.includes("admin");
 
   const [snoozed, setSnoozed] = useState(() => {
     try {
@@ -3223,13 +3248,6 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
     : selectedDate === prevStr
     ? "Yesterday"
     : selDateObj.toLocaleDateString("en-US", { timeZone: TZ, weekday: "long", month: "long", day: "numeric" });
-
-  // Weekday-specific context banner
-  const weekdayContext = {
-    Monday:    { msg: "Monday — new client review day. Check last week's new clients. Did they rebook?", color: "#1d5fa8", bg: "#dbeafe" },
-    Wednesday: { msg: "Wednesday — lapsed client outreach day. Make 5–10 warm calls or texts.", color: "#065f46", bg: "#d1fae5" },
-    Friday:    { msg: "Friday — data & metrics review. Update your tracking spreadsheets.", color: "#6d28d9", bg: "#ede9fe" },
-  }[weekday];
 
   const counts = useMemo(() => {
     const c = { lead: 0, active: 0, lapsed: 0, inactive: 0, restricted: 0 };
@@ -3381,22 +3399,8 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
       }
     });
 
-    if (sortBy === "oldest") {
-      return items.sort((a, b) => {
-        const da = daysSince(lastCompletedDate(a.client)) ?? -1;
-        const db = daysSince(lastCompletedDate(b.client)) ?? -1;
-        return db - da;
-      });
-    }
-    if (sortBy === "recent") {
-      return items.sort((a, b) => {
-        const da = daysSince(lastCompletedDate(a.client)) ?? Infinity;
-        const db = daysSince(lastCompletedDate(b.client)) ?? Infinity;
-        return da - db;
-      });
-    }
     return items.sort((a, b) => a.priority - b.priority);
-  }, [clients, selectedDate, weekday, sortBy]);
+  }, [clients, selectedDate, weekday]);
 
   const PRESET_MAP = {
     reminder: { type: "Texted",  template: "Appointment Reminder", templateKey: null         },
@@ -3410,6 +3414,65 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
   const dueTasks = tasks.filter((t) => !t.done && t.dueDate <= selectedDate);
   const visibleActions = actions.filter((item) => !isSnoozed(item.client.id, item.type));
   const totalActionCount = visibleActions.length + dueTasks.length;
+
+  // Action items grouped into collapsible categories (empty ones hidden)
+  const groupedActions = ACTION_CATEGORIES
+    .map((cat) => ({ ...cat, items: visibleActions.filter((i) => cat.types.includes(i.type)) }))
+    .filter((g) => g.items.length > 0);
+  const isCatOpen = (g) => catOpen[g.key] ?? g.items.some((i) => i.priority === 0);
+
+  // Today's schedule — appointments on the selected date, grouped by therapist
+  const daySchedule = useMemo(() => {
+    const rows = [];
+    for (const c of clients) {
+      for (const a of c.appointments || []) {
+        if (a.date !== selectedDate || a.status === "cancelled") continue;
+        rows.push({ appt: a, client: c });
+      }
+    }
+    rows.sort((a, b) => (a.appt.time || "99:99").localeCompare(b.appt.time || "99:99"));
+    const groups = new Map();
+    for (const r of rows) {
+      const t = r.appt.therapist || "Unassigned";
+      if (!groups.has(t)) groups.set(t, []);
+      groups.get(t).push(r);
+    }
+    let names = [...groups.keys()].sort();
+    // Logged-in therapist sees their own column first
+    if (isTherapist && groups.has(staffName)) names = [staffName, ...names.filter((n) => n !== staffName)];
+    return names.map((n) => ({ therapist: n, rows: groups.get(n) }));
+  }, [clients, selectedDate, isTherapist, staffName]);
+  const scheduleCount = daySchedule.reduce((s, g) => s + g.rows.length, 0);
+
+  // Outreach progress — coverage of clients needing contact + per-staff stats
+  const outreach = useMemo(() => {
+    let need = 0, contacted = 0;
+    for (const c of clients) {
+      const { layer2 } = clientStatus(c);
+      if (!NEEDS_OUTREACH_L2.has(layer2) && !c.needsFollowUp) continue;
+      need++;
+      if (contactedWithinDays(c, 7)) contacted++;
+    }
+    const cutoff = Date.now() - 7 * 86400000;
+    const staffStats = new Map();
+    for (const c of clients) {
+      for (const h of c.history || []) {
+        if (!h.type?.startsWith("comm.")) continue;
+        const by = h.by;
+        if (!by || by === "System" || by === "Vagaro") continue;
+        const ts = typeof h.ts === "number" ? h.ts : (h.ts ? new Date(h.ts).getTime() : 0);
+        if (ts < cutoff) continue;
+        const s = staffStats.get(by) ?? { contacts: 0, wins: 0 };
+        s.contacts++;
+        if (/Outcome: (Booked|Rebooked)/.test(h.detail || "")) s.wins++;
+        staffStats.set(by, s);
+      }
+    }
+    const staff = [...staffStats.entries()]
+      .map(([name, s]) => ({ name, ...s }))
+      .sort((a, b) => b.contacts - a.contacts);
+    return { need, contacted, staff };
+  }, [clients]);
 
   // Referral milestones — clients who have hit 3 referrals
   const referralMilestones = useMemo(() => {
@@ -3472,37 +3535,46 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
       </div>
       <div style={{ marginBottom: 22 }} />
 
-      {/* Weekday context banner */}
-      {isToday && weekdayContext && (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 12, background: weekdayContext.bg, border: `1px solid ${weekdayContext.color}33`, marginBottom: 16 }}>
-          <span style={{ fontSize: 16 }}>📅</span>
-          <span style={{ fontSize: "12px", fontWeight: "600", color: weekdayContext.color }}>{weekdayContext.msg}</span>
+      {/* Today's schedule */}
+      <div style={{ ...S.card, marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: scheduleCount > 0 ? 12 : 0, flexWrap: "wrap", gap: 8 }}>
+          <label style={{ ...S.lbl, marginBottom: 0 }}>{isToday ? "Today's Schedule" : `Schedule — ${dayLabel}`}</label>
+          <span style={{ fontSize: "11px", fontWeight: "700", color: "#5a4a3a", background: "#f5f0ea", padding: "2px 10px", borderRadius: "100px" }}>
+            {scheduleCount} appointment{scheduleCount !== 1 ? "s" : ""}
+          </span>
         </div>
-      )}
-
-      {/* Referral milestones */}
-      {referralMilestones.length > 0 && (
-        <div style={{ ...S.card, marginBottom: 16, border: "1px solid #f0d9b0", background: "linear-gradient(135deg,#fffbf5,#fef9ef)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
-            <span style={{ fontSize: 16 }}>🏆</span>
-            <label style={{ ...S.lbl, marginBottom: 0, color: "#92400e" }}>Referral milestones — reward these clients!</label>
+        {scheduleCount === 0 ? (
+          <p style={{ margin: "10px 0 0", fontSize: "13px", color: "#b0a090" }}>No appointments on this day.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {daySchedule.map(({ therapist, rows }) => {
+              const isMine = isTherapist && therapist === staffName;
+              return (
+                <div key={therapist} style={isMine ? { background: "#fdf6ef", border: "1px solid #e8d5c0", borderRadius: 12, padding: "10px 12px" } : {}}>
+                  <div style={{ fontSize: "11px", fontWeight: "800", color: isMine ? "#7a5640" : "#8a7a6a", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 6 }}>
+                    {therapist}{isMine ? " (you)" : ""} · {rows.length}
+                  </div>
+                  {rows.map(({ appt: a, client: c }) => {
+                    const chip = APPT_CHIP[a.status] ?? { label: a.status, bg: "#f1f5f9", color: "#64748b" };
+                    return (
+                      <div key={a.id} onClick={() => onGoToClient(c.id)}
+                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 4px", borderBottom: "1px solid #f5f0e8", cursor: "pointer" }}>
+                        <span style={{ fontSize: "12px", fontWeight: "800", color: "#1a120b", width: 66, flexShrink: 0 }}>{a.time ? fmtTime(a.time) : "—"}</span>
+                        <Avatar client={c} size={26} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <span style={{ fontSize: "13px", fontWeight: "700", color: "#1a120b" }}>{fullName(c)}</span>
+                          <span style={{ fontSize: "12px", color: "#8a7a6a", marginLeft: 8 }}>{a.service}{a.duration ? ` · ${a.duration} min` : ""}</span>
+                        </div>
+                        <span style={{ fontSize: "10px", fontWeight: "700", background: chip.bg, color: chip.color, borderRadius: 99, padding: "2px 8px", flexShrink: 0 }}>{chip.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
           </div>
-          {referralMilestones.map(({ client: c, count }) => (
-            <div key={c.id} onClick={() => onGoToClient(c.id)}
-              style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 10, background: "#fffdf5", border: "1px solid #f0e0b0", marginBottom: 6, cursor: "pointer" }}>
-              <Avatar client={c} size={30} />
-              <div style={{ flex: 1 }}>
-                <span style={{ fontSize: "13px", fontWeight: "700", color: "#1a120b" }}>{fullName(c)}</span>
-                <span style={{ fontSize: "12px", color: "#92400e", marginLeft: 8 }}>{count} referrals — send a complimentary half-hour!</span>
-              </div>
-              <button onClick={(e) => { e.stopPropagation(); onGoToClient(c.id); }}
-                style={{ fontSize: "11px", fontWeight: "700", color: "#92400e", background: "#fef3c7", border: "1px solid #f0d090", borderRadius: 8, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
-                Open →
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Stat cards */}
       <div className="grid-4col" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "12px", marginBottom: "28px" }}>
@@ -3525,9 +3597,43 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
         ))}
       </div>
 
+      {/* Outreach progress */}
+      <div style={{ ...S.card, marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+          <label style={{ ...S.lbl, marginBottom: 0 }}>Outreach Progress — last 7 days</label>
+          <span style={{ fontSize: "11px", fontWeight: "700",
+            color: outreach.need - outreach.contacted > 0 ? "#991b1b" : "#0f7a4a" }}>
+            {outreach.contacted} of {outreach.need} contacted
+            {outreach.need - outreach.contacted > 0 ? ` · ${outreach.need - outreach.contacted} remaining` : " ✓"}
+          </span>
+        </div>
+        <SalesBar value={outreach.need > 0 ? (outreach.contacted / outreach.need) * 100 : 100} color="#0f7a4a" bg="#e8e0d6" h={8} />
+        <div style={{ marginTop: 6, fontSize: "11px", color: "#8a7a6a" }}>
+          Clients currently overdue, stale, no-show, lost, or flagged for follow-up who've had outreach logged this week.
+        </div>
+        {isAdmin && outreach.staff.length > 0 && (
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #f0e8de" }}>
+            <div style={{ fontSize: "10px", fontWeight: "700", color: "#b0a090", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>By staff member</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {outreach.staff.map((s) => (
+                <div key={s.name} style={{ background: "#f5f0ea", borderRadius: 10, padding: "6px 12px", display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: "12px", fontWeight: "700", color: "#2e2418" }}>{s.name}</span>
+                  <span style={{ fontSize: "11px", color: "#5a4a3a" }}>{s.contacts} contact{s.contacts !== 1 ? "s" : ""}</span>
+                  {s.wins > 0 && (
+                    <span style={{ fontSize: "10px", fontWeight: "700", background: "#dcf5ec", color: "#0f7a4a", borderRadius: 99, padding: "1px 7px" }}>
+                      {s.wins} booked 🎉
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Daily action list */}
       <div style={S.card}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: actions.length > 0 ? 10 : 16, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: totalActionCount > 0 ? 14 : 16, flexWrap: "wrap", gap: 8 }}>
           <label style={{ ...S.lbl, marginBottom: 0 }}>Today's action list</label>
           <span style={{ fontSize: "11px", fontWeight: "700",
             color: totalActionCount > 0 ? "#991b1b" : "#0f7a4a",
@@ -3536,25 +3642,6 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
             {totalActionCount > 0 ? `${totalActionCount} need attention` : "All clear ✓"}
           </span>
         </div>
-        {actions.length > 0 && (
-          <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
-            {[
-              { key: "priority", label: "Priority" },
-              { key: "oldest",   label: "Overdue first" },
-              { key: "recent",   label: "Recent first" },
-            ].map((s) => (
-              <button key={s.key} onClick={() => setSortBy(s.key)} style={{
-                fontSize: "11px", padding: "3px 10px", borderRadius: "100px",
-                cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontWeight: "700",
-                border: sortBy === s.key ? "1px solid #d4bfaa" : "1px solid #e8e0d6",
-                background: sortBy === s.key ? "#f5ede4" : "transparent",
-                color: sortBy === s.key ? "#7a5640" : "#8a7a6a",
-              }}>
-                {s.label}
-              </button>
-            ))}
-          </div>
-        )}
 
         {totalActionCount === 0 ? (
           <div style={{ textAlign: "center", padding: "32px 20px" }}>
@@ -3604,10 +3691,29 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
               );
             })}
 
-            {/* Auto-generated client action items */}
-            {visibleActions.map((item) => {
-              const c = item.client;
+            {/* Auto-generated client action items, grouped by category */}
+            {groupedActions.map((g) => {
+              const open = isCatOpen(g);
               return (
+                <div key={g.key} style={{ border: "1px solid #e8e0d6", borderRadius: 12, overflow: "hidden" }}>
+                  <button onClick={() => setCatOpen((o) => ({ ...o, [g.key]: !open }))}
+                    style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "#faf8f5", border: "none", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                    <span style={{ fontSize: 15 }}>{g.icon}</span>
+                    <span style={{ fontSize: "12px", fontWeight: "800", color: "#2e2418", flex: 1, textAlign: "left" }}>{g.label}</span>
+                    {g.rebookLink && onOpenRebook && (
+                      <span onClick={(e) => { e.stopPropagation(); onOpenRebook(); }}
+                        style={{ fontSize: "11px", fontWeight: "700", color: "#7a5640", textDecoration: "underline" }}>
+                        Rebook tab →
+                      </span>
+                    )}
+                    <span style={{ fontSize: "11px", fontWeight: "700", background: "#fee2e2", color: "#991b1b", borderRadius: 99, padding: "1px 8px" }}>{g.items.length}</span>
+                    <span style={{ fontSize: "12px", color: "#8a7a6a" }}>{open ? "▾" : "▸"}</span>
+                  </button>
+                  {open && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px" }}>
+                      {g.items.map((item) => {
+                        const c = item.client;
+                        return (
                 <div key={`${item.type}-${c.id}`} style={{
                   display: "flex", alignItems: "center", gap: 12,
                   padding: "12px 14px", borderRadius: 12,
@@ -3642,6 +3748,11 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
                     </button>
                   </div>
                 </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -3670,6 +3781,30 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
           </div>
         )}
       </div>
+
+      {/* Referral milestones */}
+      {referralMilestones.length > 0 && (
+        <div style={{ ...S.card, marginTop: 16, border: "1px solid #f0d9b0", background: "linear-gradient(135deg,#fffbf5,#fef9ef)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
+            <span style={{ fontSize: 16 }}>🏆</span>
+            <label style={{ ...S.lbl, marginBottom: 0, color: "#92400e" }}>Referral milestones — reward these clients!</label>
+          </div>
+          {referralMilestones.map(({ client: c, count }) => (
+            <div key={c.id} onClick={() => onGoToClient(c.id)}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 10, background: "#fffdf5", border: "1px solid #f0e0b0", marginBottom: 6, cursor: "pointer" }}>
+              <Avatar client={c} size={30} />
+              <div style={{ flex: 1 }}>
+                <span style={{ fontSize: "13px", fontWeight: "700", color: "#1a120b" }}>{fullName(c)}</span>
+                <span style={{ fontSize: "12px", color: "#92400e", marginLeft: 8 }}>{count} referrals — send a complimentary half-hour!</span>
+              </div>
+              <button onClick={(e) => { e.stopPropagation(); onGoToClient(c.id); }}
+                style={{ fontSize: "11px", fontWeight: "700", color: "#92400e", background: "#fef3c7", border: "1px solid #f0d090", borderRadius: 8, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                Open →
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -7909,6 +8044,8 @@ function App() {
             onDeleteTask={handleDeleteTask}
             onFilterClients={(f) => { setFilter(f); setTab("clients"); }}
             staffName={auth.staff?.full_name || "Staff"}
+            currentUserRoles={auth.staff?.roles || (auth.staff?.role ? [auth.staff.role] : [])}
+            onOpenRebook={() => setTab("rebook")}
           />}
         {tab === "pulse"     && <PulsePage clients={clients} templates={templates} onGoToClient={goToClient} onUpdateClient={updateClient} staffName={auth.staff?.full_name || "Staff"} />}
         {tab === "rebook"    && <RebookView clients={clients} staffName={auth.staff?.full_name || "Staff"} onUpdate={updateClient} templates={templates} supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} onSaveTask={handleSaveTask} />}
