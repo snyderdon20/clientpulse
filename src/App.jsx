@@ -3203,6 +3203,7 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
   const [editTask, setEditTask] = useState(null);
   const [selectedDate, setSelectedDate] = useState(TODAY);
   const [catOpen, setCatOpen] = useState({});
+  const [schedOpen, setSchedOpen] = useState(true);
   const isTherapist = currentUserRoles.includes("therapist") || currentUserRoles.includes("therapist_rlt");
   const isAdmin     = currentUserRoles.includes("admin");
 
@@ -3537,13 +3538,17 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
 
       {/* Today's schedule */}
       <div style={{ ...S.card, marginBottom: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: scheduleCount > 0 ? 12 : 0, flexWrap: "wrap", gap: 8 }}>
-          <label style={{ ...S.lbl, marginBottom: 0 }}>{isToday ? "Today's Schedule" : `Schedule — ${dayLabel}`}</label>
-          <span style={{ fontSize: "11px", fontWeight: "700", color: "#5a4a3a", background: "#f5f0ea", padding: "2px 10px", borderRadius: "100px" }}>
-            {scheduleCount} appointment{scheduleCount !== 1 ? "s" : ""}
-          </span>
+        <div onClick={() => setSchedOpen((v) => !v)}
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: schedOpen && scheduleCount > 0 ? 12 : 0, flexWrap: "wrap", gap: 8, cursor: "pointer", userSelect: "none" }}>
+          <label style={{ ...S.lbl, marginBottom: 0, cursor: "pointer" }}>{isToday ? "Today's Schedule" : `Schedule — ${dayLabel}`}</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#5a4a3a", background: "#f5f0ea", padding: "2px 10px", borderRadius: "100px" }}>
+              {scheduleCount} appointment{scheduleCount !== 1 ? "s" : ""}
+            </span>
+            <span style={{ fontSize: "12px", color: "#8a7a6a" }}>{schedOpen ? "▾" : "▸"}</span>
+          </div>
         </div>
-        {scheduleCount === 0 ? (
+        {!schedOpen ? null : scheduleCount === 0 ? (
           <p style={{ margin: "10px 0 0", fontSize: "13px", color: "#b0a090" }}>No appointments on this day.</p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
