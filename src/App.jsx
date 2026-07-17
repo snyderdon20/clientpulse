@@ -3203,7 +3203,8 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
   const [editTask, setEditTask] = useState(null);
   const [selectedDate, setSelectedDate] = useState(TODAY);
   const [catOpen, setCatOpen] = useState({});
-  const [schedOpen, setSchedOpen] = useState(true);
+  const [schedOpen, setSchedOpen] = useState(false);
+  const [outreachOpen, setOutreachOpen] = useState(false);
   const isTherapist = currentUserRoles.includes("therapist") || currentUserRoles.includes("therapist_rlt");
   const isAdmin     = currentUserRoles.includes("admin");
 
@@ -3420,7 +3421,7 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
   const groupedActions = ACTION_CATEGORIES
     .map((cat) => ({ ...cat, items: visibleActions.filter((i) => cat.types.includes(i.type)) }))
     .filter((g) => g.items.length > 0);
-  const isCatOpen = (g) => catOpen[g.key] ?? g.items.some((i) => i.priority === 0);
+  const isCatOpen = (g) => catOpen[g.key] ?? false; // all categories start collapsed
 
   // Today's schedule — appointments on the selected date, grouped by therapist
   const daySchedule = useMemo(() => {
@@ -3604,14 +3605,19 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
 
       {/* Outreach progress */}
       <div style={{ ...S.card, marginBottom: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
-          <label style={{ ...S.lbl, marginBottom: 0 }}>Outreach Progress — last 7 days</label>
-          <span style={{ fontSize: "11px", fontWeight: "700",
-            color: outreach.need - outreach.contacted > 0 ? "#991b1b" : "#0f7a4a" }}>
-            {outreach.contacted} of {outreach.need} contacted
-            {outreach.need - outreach.contacted > 0 ? ` · ${outreach.need - outreach.contacted} remaining` : " ✓"}
-          </span>
+        <div onClick={() => setOutreachOpen((v) => !v)}
+          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: outreachOpen ? 8 : 0, flexWrap: "wrap", gap: 8, cursor: "pointer", userSelect: "none" }}>
+          <label style={{ ...S.lbl, marginBottom: 0, cursor: "pointer" }}>Outreach Progress — last 7 days</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: "11px", fontWeight: "700",
+              color: outreach.need - outreach.contacted > 0 ? "#991b1b" : "#0f7a4a" }}>
+              {outreach.contacted} of {outreach.need} contacted
+              {outreach.need - outreach.contacted > 0 ? ` · ${outreach.need - outreach.contacted} remaining` : " ✓"}
+            </span>
+            <span style={{ fontSize: "12px", color: "#8a7a6a" }}>{outreachOpen ? "▾" : "▸"}</span>
+          </div>
         </div>
+        {outreachOpen && (<>
         <SalesBar value={outreach.need > 0 ? (outreach.contacted / outreach.need) * 100 : 100} color="#0f7a4a" bg="#e8e0d6" h={8} />
         <div style={{ marginTop: 6, fontSize: "11px", color: "#8a7a6a" }}>
           Clients currently overdue, stale, no-show, lost, or flagged for follow-up who've had outreach logged this week.
@@ -3634,6 +3640,7 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
             </div>
           </div>
         )}
+        </>)}
       </div>
 
       {/* Daily action list */}
