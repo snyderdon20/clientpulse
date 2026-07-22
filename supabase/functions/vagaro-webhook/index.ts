@@ -20,6 +20,16 @@ const num = (v: unknown) => (v != null && v !== "" ? Number(v) : null);
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
+  // Signature verification (opt-in). Vagaro sends the webhook's Verification
+  // Token in the X-Vagaro-Signature header. If VAGARO_WEBHOOK_TOKEN is set we
+  // require a match; a mismatch returns 401 (non-recoverable, so Vagaro won't
+  // retry an unauthorized call). If the secret is unset, accept as before.
+  const expectedToken = Deno.env.get("VAGARO_WEBHOOK_TOKEN");
+  if (expectedToken) {
+    const sig = req.headers.get("x-vagaro-signature") ?? req.headers.get("X-Vagaro-Signature");
+    if (sig !== expectedToken) return json({ error: "Invalid signature" }, 401);
+  }
+
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -32,20 +42,29 @@ Deno.serve(async (req) => {
     return json({ error: "Invalid JSON" }, 400);
   }
 
-  const type   = str(body.Type   ?? body.type   ?? "");
-  const action = str(body.Action ?? body.action ?? "");
-  const event  = type && action ? `${type}.${action}` : str(body.Event ?? body.event ?? "unknown");
-  const data   = (body.payload ?? body.Payload ?? body.Data ?? body.data ?? {}) as Record<string, unknown>;
+  const type    = str(body.Type   ?? body.type   ?? "");
+  const action  = str(body.Action ?? body.action ?? "");
+  const event   = type && action ? `${type}.${action}` : str(body.Event ?? body.event ?? "unknown");
+  const data    = (body.payload ?? body.Payload ?? body.Data ?? body.data ?? {}) as Record<string, unknown>;
+  const eventId = orNull(body.id ?? body.Id ?? body.eventId ?? body.EventId);
 
-  // Log every received webhook immediately — this feeds the Settings log
-  // and gives vagaro-sync the customerId values it needs for matching.
-  await supabase.from("webhook_log").insert({
+  // Log every received webhook immediately, claiming its event_id. Vagaro
+  // retries failed deliveries up to 5×/15min; a duplicate event_id means this
+  // is a retry — skip reprocessing so no_shows aren't double-counted and
+  // history rows aren't duplicated. (Rows with no event_id are never deduped.)
+  const { error: logErr } = await supabase.from("webhook_log").insert({
     source: "vagaro",
     event_type: event,
     payload: body,
-  }).then(({ error }) => {
-    if (error) console.error("webhook_log insert:", error.message);
+    event_id: eventId,
   });
+  if (logErr) {
+    // 23505 = unique_violation on webhook_log_event_id_idx → already processed
+    if ((logErr as { code?: string }).code === "23505") {
+      return json({ received: true, event, duplicate: true });
+    }
+    console.error("webhook_log insert:", logErr.message);
+  }
 
   try {
     if (type === "customer") {
@@ -189,7 +208,7 @@ async function handleAppointment(
     confirmed: "scheduled", pending: "scheduled", rescheduled: "scheduled",
     "need acceptance": "scheduled", "awaiting confirmation": "scheduled",
     "checked in": "checked-in", checkedin: "checked-in", "checked-in": "checked-in",
-    "service in progress": "checked-in",
+    "service in progress": "checked-in", "ready to start": "checked-in",
     completed: "completed", serviced: "completed", show: "completed",
     "service completed": "completed",
     cancelled: "cancelled", canceled: "cancelled", cancel: "cancelled",
