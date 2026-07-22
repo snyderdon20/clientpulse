@@ -3048,10 +3048,13 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
           cl.phone?.includes(q);
         const matchT = !tagFilter || (cl.tags || []).includes(tagFilter);
         const matchC = !hideContacted || !contactedWithinDays(cl, CONTACTED_FILTER_DAYS);
-        // Hide inactive/restricted by default, unless toggled on, that status is
-        // explicitly filtered for, or there's an active search query.
+        // Inactive/restricted are hidden by default. When the toggle is on,
+        // show ONLY those. When off, hide them unless that status is explicitly
+        // filtered for or there's an active search query.
         const isHiddenStatus = s.layer1 === "inactive" || s.layer1 === "restricted";
-        const matchI = showInactive || !isHiddenStatus || filter === "inactive" || filter === "restricted" || !!q;
+        const matchI = showInactive
+          ? isHiddenStatus
+          : (!isHiddenStatus || filter === "inactive" || filter === "restricted" || !!q);
         return matchF && matchS && matchT && matchC && matchI;
       })
       .sort((a, b) => {
