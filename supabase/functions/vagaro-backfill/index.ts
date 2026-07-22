@@ -30,8 +30,21 @@ const orNull = (v: unknown) => str(v).trim() || null;
 const num    = (v: unknown) => (v != null && v !== "" ? Number(v) : null);
 
 const PAGE = 1000;
-const CLIENT_LIMIT = 60;   // clients processed per invocation
-const API_CONCURRENCY = 5; // parallel Vagaro API calls
+const CLIENT_LIMIT = 8;    // clients processed per invocation (kept small so each
+                           // call finishes well under the Edge Function time limit)
+const API_CONCURRENCY = 4; // parallel Vagaro API calls
+const FETCH_TIMEOUT_MS = 12000; // per Vagaro API request — a hang can't stall the worker
+
+// fetch with a hard timeout via AbortController
+async function tfetch(url: string, init: RequestInit): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
 
 // Vagaro appointment timestamps carry a "Z" suffix but are the studio's
 // Mountain wall clock + a fixed 7h. Subtract 7h for local date/HH:MM.
@@ -58,7 +71,7 @@ const STATUS_MAP: Record<string, string> = {
 };
 
 async function getAccessToken(region: string, clientId: string, clientSecretKey: string): Promise<string> {
-  const res = await fetch(
+  const res = await tfetch(
     `https://api.vagaro.com/${region}/api/v2/merchants/generate-access-token`,
     { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ clientId, clientSecretKey, scope: "read access" }) },
@@ -72,12 +85,15 @@ async function getAccessToken(region: string, clientId: string, clientSecretKey:
 // deno-lint-ignore no-explicit-any
 async function fetchAppointments(region: string, accessToken: string, businessId: string, customerId: string): Promise<any[]> {
   const all: unknown[] = [];
-  for (let page = 1; ; page++) {
-    const res = await fetch(
-      `https://api.vagaro.com/${region}/api/v2/appointments?pageNumber=${page}&pageSize=100&orderBy=asc`,
-      { method: "POST", headers: { "Content-Type": "application/json", accessToken },
-        body: JSON.stringify({ businessId, customerId }) },
-    );
+  for (let page = 1; page <= 20; page++) {
+    let res: Response;
+    try {
+      res = await tfetch(
+        `https://api.vagaro.com/${region}/api/v2/appointments?pageNumber=${page}&pageSize=100&orderBy=asc`,
+        { method: "POST", headers: { "Content-Type": "application/json", accessToken },
+          body: JSON.stringify({ businessId, customerId }) },
+      );
+    } catch { break; } // timeout/abort — stop paging this customer
     if (!res.ok) break;
     const rows = (await res.json())?.data;
     if (!Array.isArray(rows) || rows.length === 0) break;
@@ -90,7 +106,7 @@ async function fetchAppointments(region: string, accessToken: string, businessId
 // deno-lint-ignore no-explicit-any
 async function fetchCustomer(region: string, accessToken: string, businessId: string, customerId: string): Promise<any | null> {
   try {
-    const res = await fetch(
+    const res = await tfetch(
       `https://api.vagaro.com/${region}/api/v2/customers`,
       { method: "POST", headers: { "Content-Type": "application/json", accessToken },
         body: JSON.stringify({ businessId, customerId }) },
@@ -133,7 +149,8 @@ serve(async (req: Request) => {
 
   let accessToken: string;
   try { accessToken = await getAccessToken(region, clientId, clientSecretKey); }
-  catch (e) { return json({ error: String(e) }, 502); }
+  catch (e) { console.error("token error:", String(e)); return json({ error: String(e) }, 502); }
+  console.log(`backfill start: offset=${offset} limit=${limit} businessId=${businessId.slice(0, 8)}…`);
 
   // Total linked-client count (for progress reporting)
   const { count: totalClients } = await sb
@@ -264,6 +281,7 @@ serve(async (req: Request) => {
 
   const processedThrough = offset + clients.length;
   const nextOffset = processedThrough < (totalClients ?? 0) && clients.length > 0 ? processedThrough : null;
+  console.log(`backfill done: through=${processedThrough}/${totalClients ?? 0} appts=${apptsUpserted} placeholders=${placeholdersEnriched} next=${nextOffset}`);
 
   return json({
     ok: true,
