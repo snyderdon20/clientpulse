@@ -1000,7 +1000,7 @@ function TaskModal({ clients, task, onSave, onClose, staffName = "Staff" }) {
 
 
 // ─── GMAIL INTEGRATION ───────────────────────────────────────────────────────
-// Module-level ref so LogModal/OutreachComposer can access Gmail without prop drilling
+// Module-level ref so LogModal can access Gmail without prop drilling
 let _gmailClientId = "";
 const getGmailClientId = () => _gmailClientId;
 const setGlobalGmailClientId = (id) => { _gmailClientId = id; };
@@ -3198,13 +3198,18 @@ const APPT_CHIP = {
   "no-show":    { label: "No-show",    bg: "#fee2e2", color: "#991b1b" },
 };
 
-function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask, onDeleteTask, onFilterClients, staffName = "Staff", currentUserRoles = [], onOpenRebook }) {
+function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask, onDeleteTask, onFilterClients, staffName = "Staff", currentUserRoles = [], onOpenRebook, templates = {} }) {
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [editTask, setEditTask] = useState(null);
   const [selectedDate, setSelectedDate] = useState(TODAY);
   const [catOpen, setCatOpen] = useState({});
   const [schedOpen, setSchedOpen] = useState(false);
   const [outreachOpen, setOutreachOpen] = useState(false);
+  // Bulk-select outreach (folded in from the retired Pulse page)
+  const [bulkCat, setBulkCat] = useState(null);          // category key in select mode
+  const [bulkSelected, setBulkSelected] = useState(() => new Set());
+  const [bulkTplKey, setBulkTplKey] = useState("rebooking");
+  const [showBulkModal, setShowBulkModal] = useState(false);
   const isTherapist = currentUserRoles.includes("therapist") || currentUserRoles.includes("therapist_rlt");
   const isAdmin     = currentUserRoles.includes("admin");
 
@@ -3498,6 +3503,15 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
           staffName={staffName}
         />
       )}
+      {showBulkModal && bulkCat && (
+        <GroupOutreachModal
+          clients={clients.filter((c) => bulkSelected.has(c.id))}
+          templates={templates}
+          tplKey={bulkTplKey}
+          onTplKey={setBulkTplKey}
+          onClose={() => setShowBulkModal(false)}
+        />
+      )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, gap: 12, flexWrap: "wrap" }}>
         <div>
           <h2 style={{ margin: "0 0 2px", fontSize: "21px", fontWeight: "800", color: "#1a120b" }}>
@@ -3718,11 +3732,47 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
                         Rebook tab →
                       </span>
                     )}
+                    {(g.key === "winback" || g.key === "birthdays") && (
+                      <span onClick={(e) => {
+                          e.stopPropagation();
+                          if (bulkCat === g.key) { setBulkCat(null); setBulkSelected(new Set()); }
+                          else {
+                            setBulkCat(g.key); setBulkSelected(new Set());
+                            setBulkTplKey(g.key === "birthdays" ? "birthday" : "rebooking");
+                            setCatOpen((o) => ({ ...o, [g.key]: true }));
+                          }
+                        }}
+                        style={{ fontSize: "11px", fontWeight: "700", color: bulkCat === g.key ? "#991b1b" : "#7a5640",
+                          background: bulkCat === g.key ? "#fee2e2" : "#f5ede4", border: "1px solid #e8d5c0",
+                          borderRadius: 8, padding: "2px 9px" }}>
+                        {bulkCat === g.key ? "Cancel" : "Select"}
+                      </span>
+                    )}
                     <span style={{ fontSize: "11px", fontWeight: "700", background: "#fee2e2", color: "#991b1b", borderRadius: 99, padding: "1px 8px" }}>{g.items.length}</span>
                     <span style={{ fontSize: "12px", color: "#8a7a6a" }}>{open ? "▾" : "▸"}</span>
                   </button>
                   {open && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px" }}>
+                      {bulkCat === g.key && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "2px 4px", flexWrap: "wrap" }}>
+                          <button
+                            onClick={() => {
+                              const all = g.items.map((i) => i.client.id);
+                              const allSel = all.every((id) => bulkSelected.has(id));
+                              setBulkSelected(allSel ? new Set() : new Set(all));
+                            }}
+                            style={{ fontSize: "11px", fontWeight: "700", color: "#7a5640", background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: 8, padding: "4px 10px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                            Select all
+                          </button>
+                          <span style={{ fontSize: "12px", color: "#8a7a6a" }}>{bulkSelected.size} selected</span>
+                          <button
+                            disabled={bulkSelected.size === 0}
+                            onClick={() => setShowBulkModal(true)}
+                            style={{ ...S.sm("primary"), marginLeft: "auto", opacity: bulkSelected.size > 0 ? 1 : 0.5, cursor: bulkSelected.size > 0 ? "pointer" : "default" }}>
+                            Group outreach →
+                          </button>
+                        </div>
+                      )}
                       {g.items.map((item) => {
                         const c = item.client;
                         return (
@@ -3736,6 +3786,16 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
                   onMouseEnter={(e) => e.currentTarget.style.filter = "brightness(0.97)"}
                   onMouseLeave={(e) => e.currentTarget.style.filter = "none"}
                 >
+                  {bulkCat === g.key && (
+                    <input type="checkbox" checked={bulkSelected.has(c.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => setBulkSelected((s) => {
+                        const n = new Set(s);
+                        n.has(c.id) ? n.delete(c.id) : n.add(c.id);
+                        return n;
+                      })}
+                      style={{ width: 15, height: 15, accentColor: "#a0785a", cursor: "pointer", flexShrink: 0 }} />
+                  )}
                   <span style={{ fontSize: 18, flexShrink: 0 }}>{item.icon}</span>
                   <Avatar client={c} size={36} />
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -3822,401 +3882,57 @@ function Dashboard({ clients, tasks = [], onGoToClient, onSaveTask, onToggleTask
 }
 
 
-// ─── OUTREACH COMPOSER ────────────────────────────────────────────────────────
-function OutreachComposer({ client, triggerId, templates, onLog, onClose, staffName = "Staff" }) {
-  const tpl = templates[triggerId] || templates["rebooking"];
-  const [channel,      setChannel]      = useState("sms");
-  const [editedSms,    setEditedSms]    = useState(fillTemplate(tpl?.sms || "", client));
-  const [editedSubject,setEditedSubject] = useState(fillTemplate(tpl?.email?.subject || "", client));
-  const [editedBody,   setEditedBody]   = useState(fillTemplate(tpl?.email?.body || "", client));
-  const [gmailSending, setGmailSending] = useState(false);
-  const [gmailSent,    setGmailSent]    = useState(false);
-  const [gmailError,   setGmailError]   = useState(null);
-  const gmail = useGmail(getGmailClientId());
-
-  const doLog = () => {
-    onLog && onLog({
-      id: uid(),
-      type: channel === "sms" ? "Texted" : "Emailed",
-      template: "Rebooking Outreach",
-      outcome: "Sent",
-      notes: channel === "sms"
-        ? `${tpl?.label} sent via SMS: "${editedSms.slice(0, 80)}${editedSms.length > 80 ? "…" : ""}"`
-        : `${tpl?.label} sent via Gmail — Subject: "${editedSubject}"`,
-      date: TODAY,
-      timestamp: new Date().toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit", hour12: true }),
-      logTime: Date.now(),
-      createdBy: staffName,
-    });
-  };
-
-  const handleSendGmail = async () => {
-    if (!client.email) return;
-    setGmailSending(true); setGmailError(null);
-    try {
-      await gmail.sendEmail({ to: client.email, subject: editedSubject, body: editedBody });
-      setGmailSent(true);
-      doLog();
-      setTimeout(onClose, 1500);
-    } catch (e) {
-      setGmailError(e.message || "Send failed");
-      setGmailSending(false);
-    }
-  };
-
+// ─── GROUP OUTREACH MODAL ─────────────────────────────────────────────────────
+// Select-many outreach: personalized template preview + contact list.
+function GroupOutreachModal({ clients, templates, tplKey, onTplKey, onClose }) {
+  const tpl = templates[tplKey];
+  const previewText = tpl && clients[0] ? fillTemplate(tpl.sms, clients[0]) : "";
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(46,36,24,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 600, padding: "16px" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="cp-modal" style={{ ...S.card, width: 520, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", animation: "fadeUp 0.15s ease" }}>
-        {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
-          <div>
-            <div style={{ fontSize: "15px", fontWeight: "800", color: "#1a120b" }}>Send Outreach</div>
-            <div style={{ fontSize: "12px", color: "#8a7a6a", marginTop: 2 }}>{client.firstName} {client.lastName}</div>
+    <div
+      style={{ position: "fixed", inset: 0, background: "rgba(46,36,24,0.4)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 400 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="cp-modal" style={{ ...S.card, width: 500, maxWidth: "100vw", maxHeight: "92vh", overflowY: "auto", animation: "fadeUp 0.15s ease", borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontSize: "15px", fontWeight: "800", color: "#1a120b" }}>
+            Group outreach — {tpl?.label}
           </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: "22px", cursor: "pointer", color: "#8a7a6a", lineHeight: 1 }}>×</button>
+          <button
+            onClick={onClose}
+            style={{ background: "none", border: "none", fontSize: "22px", cursor: "pointer", color: "#8a7a6a", lineHeight: 1 }}
+          >×</button>
         </div>
-
-        {/* Template badge */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 13px", background: "#fdf6ef", border: "1px solid #e8d5c0", borderRadius: 10, marginBottom: 16 }}>
-          <span style={{ fontSize: "15px" }}>{tpl?.icon}</span>
-          <span style={{ fontSize: "12px", fontWeight: "700", color: "#7a5640" }}>{tpl?.label}</span>
+        {onTplKey && (
+          <div style={{ marginBottom: 12 }}>
+            <label style={S.lbl}>Template</label>
+            <select value={tplKey} onChange={(e) => onTplKey(e.target.value)} style={{ ...S.inp, fontSize: "12px" }}>
+              {Object.entries(templates).map(([k, t]) => (
+                <option key={k} value={k}>{t.icon} {t.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div style={{ marginBottom: 12, fontSize: "12px", color: "#8a7a6a" }}>
+          Sending to <strong style={{ color: "#2e2418" }}>{clients.length} clients</strong>: {clients.map((c) => c.firstName).join(", ")}
         </div>
-
-        {/* Channel toggle */}
-        <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
-          {[{ v: "sms", l: "💬 Text/SMS" }, { v: "email", l: "✉️ Email" }].map((c) => (
-            <button key={c.v} onClick={() => setChannel(c.v)} style={{
-              padding: "7px 16px", borderRadius: "8px", fontSize: "13px", fontWeight: "700",
-              cursor: "pointer", border: "none", fontFamily: "'DM Sans',sans-serif",
-              background: channel === c.v ? "linear-gradient(135deg,#a0785a,#7a5640)" : "#f5ede4",
-              color: channel === c.v ? "#fff" : "#7a5640",
-            }}>{c.l}</button>
+        <label style={S.lbl}>Message preview (first client)</label>
+        <div style={{ ...S.inp, minHeight: 80, whiteSpace: "pre-wrap", lineHeight: "1.6", color: "#2e2418", marginBottom: 14 }}>
+          {previewText}
+        </div>
+        <div style={{ background: "#fff8f0", border: "1px solid #f0e0c8", borderRadius: "10px", padding: "10px 12px", fontSize: "12px", color: "#92400e", marginBottom: 16 }}>
+          Copy and send individually via Vagaro, your texting app, or email. Each message will be personalized.
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+          {clients.map((c) => (
+            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", background: "#faf8f5", borderRadius: "8px", border: "1px solid #f0e8de" }}>
+              <Avatar client={c} size={26} />
+              <span style={{ fontSize: "13px", fontWeight: "600", flex: 1 }}>{fullName(c)}</span>
+              <span style={{ fontSize: "11px", color: "#8a7a6a" }}>{c.phone || c.email}</span>
+            </div>
           ))}
         </div>
-
-        {/* SMS */}
-        {channel === "sms" && (
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-              <label style={S.lbl}>Message</label>
-              <span style={{ fontSize: "11px", color: editedSms.length > 160 ? "#c0392b" : "#b0a090" }}>{editedSms.length}/160</span>
-            </div>
-            <textarea style={{ ...S.inp, minHeight: 120, resize: "vertical", lineHeight: "1.6" }}
-              value={editedSms} onChange={(e) => setEditedSms(e.target.value)} />
-            <div style={{ fontSize: "11px", color: "#b0a090", marginTop: 6 }}>To: {client.phone || "No phone on file"}</div>
-          </div>
-        )}
-
-        {/* Email */}
-        {channel === "email" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div>
-              <label style={S.lbl}>Subject</label>
-              <input style={S.inp} value={editedSubject} onChange={(e) => setEditedSubject(e.target.value)} />
-            </div>
-            <div>
-              <label style={S.lbl}>Body</label>
-              <textarea style={{ ...S.inp, minHeight: 180, resize: "vertical", lineHeight: "1.7" }}
-                value={editedBody} onChange={(e) => setEditedBody(e.target.value)} />
-            </div>
-            <div style={{ fontSize: "11px", color: "#b0a090" }}>To: {client.email || "No email on file"}</div>
-          </div>
-        )}
-
-        {/* Merge tags */}
-        <div style={{ background: "#faf8f5", border: "1px solid #f0e8de", borderRadius: 8, padding: "10px 14px", marginTop: 14 }}>
-          <div style={{ fontSize: "10px", fontWeight: "700", color: "#b0a090", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 6 }}>Merge tags — click to insert</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {["{{firstName}}", "{{lastName}}", "{{bookingLink}}"].map((tag) => (
-              <span key={tag} onClick={() => {
-                if (channel === "sms") setEditedSms((s) => s + " " + tag);
-                else setEditedBody((s) => s + " " + tag);
-              }} style={{ fontSize: "11px", fontWeight: "600", color: "#7a5640", background: "#f5ede4", padding: "2px 8px", borderRadius: 6, cursor: "pointer", fontFamily: "monospace" }}>
-                {tag}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 18 }}>
-          <button style={S.btn()} onClick={onClose}>Cancel</button>
-          {channel === "email" && gmail.isConnected && !gmailSent && (
-            <div style={{ marginBottom: 8 }}>
-              {gmailError && <div style={{ fontSize: "11px", color: "#dc2626", marginBottom: 6 }}>⚠️ {gmailError}</div>}
-              <button style={{ ...S.btn("primary"), width: "100%", justifyContent: "center", background: "linear-gradient(135deg,#4285f4,#1a73e8)" }}
-                onClick={handleSendGmail} disabled={gmailSending || !client.email}>
-                {gmailSending ? "Sending…" : `📧 Send via Gmail to ${client.email || "no email on file"}`}
-              </button>
-              <div style={{ fontSize: "10px", color: "#b0a090", marginTop: 4, textAlign: "center" }}>Sending as {gmail.gmailUser}</div>
-            </div>
-          )}
-          {gmailSent && (
-            <div style={{ fontSize: "12px", color: "#065f46", background: "#d1fae5", padding: "8px 12px", borderRadius: 8, marginBottom: 8, fontWeight: "600" }}>
-              ✓ Sent via Gmail — logged automatically
-            </div>
-          )}
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button style={S.btn()} onClick={onClose}>Cancel</button>
-            <button style={S.btn("primary")} onClick={() => { doLog(); onClose(); }}>
-              {channel === "email" && gmail.isConnected ? "Log only" : `Send ${channel === "sms" ? "Text" : "Email"}`}
-            </button>
-          </div>
-        </div>
+        <button style={S.btn("ghost")} onClick={onClose}>Close</button>
       </div>
-    </div>
-  );
-}
-
-// ─── PULSE PAGE ───────────────────────────────────────────────────────────────
-function PulsePage({ clients, templates, onGoToClient, onUpdateClient, staffName = "Staff" }) {
-  const [groupTab, setGroupTab] = useState("lapsed");
-  const [selected, setSelected] = useState(new Set());
-  const [showGroupTpl, setShowGroupTpl] = useState(false);
-  const [groupTplKey, setGroupTplKey] = useState("rebooking");
-  const [composer, setComposer] = useState(null); // { client, triggerId }
-  const [sortDir, setSortDir] = useState("desc"); // desc = longest since first, asc = most recent first
-
-  const visitSort = (a, b) => {
-    const da = daysSince(lastCompletedDate(a)) ?? (sortDir === "desc" ? -1 : Infinity);
-    const db = daysSince(lastCompletedDate(b)) ?? (sortDir === "desc" ? -1 : Infinity);
-    return sortDir === "desc" ? db - da : da - db;
-  };
-
-  const lapsed = clients
-    .filter((c) => {
-      if (c.needsFollowUp) return false;
-      const { layer1, layer2 } = clientStatus(c);
-      return layer1 === "lapsed"
-        && layer2 !== "stale-contacted"
-        && layer2 !== "overdue-contacted"
-        && !(c.appointments || []).some((a) => a.date >= TODAY && a.status !== "cancelled");
-    })
-    .sort(visitSort);
-
-  const overdue = clients
-    .filter((c) => {
-      if (c.needsFollowUp) return false;
-      const { layer2 } = clientStatus(c);
-      return (layer2 === "overdue" || layer2 === "overdue-with-package") &&
-        !(c.appointments || []).some((a) => a.date >= TODAY && a.status !== "cancelled");
-    })
-    .sort(visitSort);
-
-  const now2 = new Date();
-  const in14 = new Date(now2.getTime() + 14 * 86400000);
-  const birthdays = clients.filter((c) => {
-    if (!c.birthday) return false;
-    const bm = +c.birthday.slice(5, 7) - 1;
-    const bd = +c.birthday.slice(8, 10);
-    const bDate = new Date(now2.getFullYear(), bm, bd);
-    if (bDate < new Date(now2.getFullYear(), now2.getMonth(), now2.getDate())) {
-      bDate.setFullYear(now2.getFullYear() + 1);
-    }
-    return bDate <= in14;
-  });
-
-  const groupMap = { lapsed, overdue, birthdays };
-  const activeGroup = groupMap[groupTab] || [];
-  const allSelected = activeGroup.length > 0 && activeGroup.every((c) => selected.has(c.id));
-
-  const toggleAll = () =>
-    setSelected(allSelected ? new Set() : new Set(activeGroup.map((c) => c.id)));
-
-  const toggleOne = (id) =>
-    setSelected((s) => {
-      const n = new Set(s);
-      n.has(id) ? n.delete(id) : n.add(id);
-      return n;
-    });
-
-  const selectedClients = activeGroup.filter((c) => selected.has(c.id));
-  const tpl = templates[groupTplKey];
-  const previewText = tpl && selectedClients[0] ? fillTemplate(tpl.sms, selectedClients[0]) : "";
-
-  const groupTabs = [
-    { key: "lapsed",    label: `Lapsed (${lapsed.length})`      },
-    { key: "overdue",   label: `Overdue (${overdue.length})`     },
-    { key: "birthdays", label: `Birthdays (${birthdays.length})` },
-  ];
-
-  return (
-    <div className="page-pad" style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
-      <h2 style={{ margin: "0 0 4px", fontSize: "21px", fontWeight: "800", color: "#1a120b" }}>Client Pulse</h2>
-      <p style={{ margin: "0 0 16px", fontSize: "13px", color: "#8a7a6a" }}>
-        Clients that need your personal attention today.
-      </p>
-
-      <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-        {groupTabs.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => { setGroupTab(t.key); setSelected(new Set()); }}
-            style={{
-              fontSize: "12px", padding: "6px 14px", borderRadius: "100px",
-              cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontWeight: "700",
-              border: groupTab === t.key ? "1px solid #d4bfaa" : "1px solid #e8e0d6",
-              background: groupTab === t.key ? "#f5ede4" : "transparent",
-              color: groupTab === t.key ? "#7a5640" : "#8a7a6a",
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-        {groupTab !== "birthdays" && (
-          <button
-            onClick={() => setSortDir((d) => d === "desc" ? "asc" : "desc")}
-            style={{
-              marginLeft: "auto", fontSize: "11px", padding: "5px 11px", borderRadius: "100px",
-              cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontWeight: "700",
-              border: "1px solid #e8e0d6", background: "transparent", color: "#8a7a6a",
-              display: "flex", alignItems: "center", gap: 4,
-            }}
-            title="Toggle sort order"
-          >
-            {sortDir === "desc" ? "↓ Longest since" : "↑ Most recent"}
-          </button>
-        )}
-      </div>
-
-      {activeGroup.length > 0 && (
-        <div style={{ ...S.card, marginBottom: 14, padding: "14px 18px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", fontSize: "13px", fontWeight: "700", color: "#2e2418" }}>
-              <input
-                type="checkbox"
-                checked={allSelected}
-                onChange={toggleAll}
-                style={{ width: 14, height: 14, accentColor: "#a0785a", cursor: "pointer" }}
-              />
-              {allSelected ? "Deselect all" : "Select all"} ({activeGroup.length})
-            </label>
-            {selected.size > 0 && (
-              <>
-                <span style={{ fontSize: "12px", color: "#8a7a6a" }}>{selected.size} selected</span>
-                <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-                  <select
-                    value={groupTplKey}
-                    onChange={(e) => setGroupTplKey(e.target.value)}
-                    style={{ ...S.inp, width: "auto", fontSize: "12px", padding: "5px 10px" }}
-                  >
-                    {Object.entries(templates).map(([k, t]) => (
-                      <option key={k} value={k}>{t.icon} {t.label}</option>
-                    ))}
-                  </select>
-                  <button style={S.sm("primary")} onClick={() => setShowGroupTpl(true)}>
-                    Preview message
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {showGroupTpl && (
-        <div
-          style={{ position: "fixed", inset: 0, background: "rgba(46,36,24,0.4)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 400 }}
-          onClick={(e) => { if (e.target === e.currentTarget) setShowGroupTpl(false); }}
-        >
-          <div className="cp-modal" style={{ ...S.card, width: 500, maxWidth: "100vw", maxHeight: "92vh", overflowY: "auto", animation: "fadeUp 0.15s ease", borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <div style={{ fontSize: "15px", fontWeight: "800", color: "#1a120b" }}>
-                Group outreach — {tpl?.label}
-              </div>
-              <button
-                onClick={() => setShowGroupTpl(false)}
-                style={{ background: "none", border: "none", fontSize: "22px", cursor: "pointer", color: "#8a7a6a", lineHeight: 1 }}
-              >×</button>
-            </div>
-            <div style={{ marginBottom: 12, fontSize: "12px", color: "#8a7a6a" }}>
-              Sending to <strong style={{ color: "#2e2418" }}>{selectedClients.length} clients</strong>: {selectedClients.map((c) => c.firstName).join(", ")}
-            </div>
-            <label style={S.lbl}>Message preview (first client)</label>
-            <div style={{ ...S.inp, minHeight: 80, whiteSpace: "pre-wrap", lineHeight: "1.6", color: "#2e2418", marginBottom: 14 }}>
-              {previewText}
-            </div>
-            <div style={{ background: "#fff8f0", border: "1px solid #f0e0c8", borderRadius: "10px", padding: "10px 12px", fontSize: "12px", color: "#92400e", marginBottom: 16 }}>
-              Copy and send individually via Vagaro, your texting app, or email. Each message will be personalized.
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
-              {selectedClients.map((c) => (
-                <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", background: "#faf8f5", borderRadius: "8px", border: "1px solid #f0e8de" }}>
-                  <Avatar client={c} size={26} />
-                  <span style={{ fontSize: "13px", fontWeight: "600", flex: 1 }}>{fullName(c)}</span>
-                  <span style={{ fontSize: "11px", color: "#8a7a6a" }}>{c.phone || c.email}</span>
-                </div>
-              ))}
-            </div>
-            <button style={S.btn("ghost")} onClick={() => setShowGroupTpl(false)}>Close</button>
-          </div>
-        </div>
-      )}
-
-      <div style={S.card}>
-        <label style={S.lbl}>{activeGroup.length} clients</label>
-        {activeGroup.length === 0 ? (
-          <p style={{ margin: 0, fontSize: "13px", color: "#b0a090" }}>None in this group right now.</p>
-        ) : (
-          activeGroup.map((c, i) => {
-            const ds = daysSince(lastCompletedDate(c));
-            const ivl = c.avgVisitIntervalDays || 30;
-            return (
-              <div key={c.id} style={{ display: "flex", gap: "12px", alignItems: "center", padding: "12px 0", borderBottom: i < activeGroup.length - 1 ? "1px solid #f0e8de" : "none" }}>
-                <input
-                  type="checkbox"
-                  checked={selected.has(c.id)}
-                  onChange={() => toggleOne(c.id)}
-                  style={{ width: 14, height: 14, accentColor: "#a0785a", cursor: "pointer", flexShrink: 0 }}
-                />
-                <Avatar client={c} size={38} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: "13px", fontWeight: "700", color: "#2e2418" }}>{fullName(c)}</span>
-                    <StatusPill client={c} />
-                    {(c.tags || []).slice(0, 2).map((t) => <TagChip key={t} label={t} />)}
-                  </div>
-                  <div style={{ fontSize: "12px", color: "#8a7a6a" }}>
-                    Last visit {ds ? `${ds}d ago` : "—"} · usual interval {ivl}d
-                  </div>
-
-                </div>
-                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                  {(groupTab === "lapsed" || groupTab === "overdue") && (
-                    <button style={{ ...S.sm("primary"), fontSize: "11px" }}
-                      onClick={(e) => { e.stopPropagation(); setComposer({ client: c, triggerId: groupTab === "lapsed" ? "lapsed" : "rebooking" }); }}>
-                      💬 Reach out
-                    </button>
-                  )}
-                  {groupTab === "birthdays" && (
-                    <button style={{ ...S.sm("primary"), fontSize: "11px", background: "linear-gradient(135deg,#f59e0b,#d97706)", border: "none", color: "#fff" }}
-                      onClick={(e) => { e.stopPropagation(); setComposer({ client: c, triggerId: "birthday" }); }}>
-                      🎂 Send offer
-                    </button>
-                  )}
-                  <button style={S.sm("ghost")} onClick={() => onGoToClient(c.id)}>View</button>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-      {composer && (
-        <OutreachComposer
-          client={composer.client}
-          triggerId={composer.triggerId}
-          templates={templates}
-          onLog={(entry) => {
-            if (onUpdateClient) {
-              const c = composer.client;
-              const newHistory = [...(c.history || []), mkEvent("comm.text", entry.notes, { by: entry.createdBy })];
-              onUpdateClient(c.id, { history: newHistory });
-            }
-          }}
-          onClose={() => setComposer(null)}
-          staffName={staffName}
-        />
-      )}
     </div>
   );
 }
@@ -7194,7 +6910,6 @@ const NAV_ITEMS = [
     id: "dashboard", label: "Overview", short: "Home",
     icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6",
   },
-  { id: "pulse",     label: "Pulse",     short: "Pulse",     isPulse: true },
   {
     id: "sales", label: "Sales", short: "Sales",
     icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
@@ -7214,13 +6929,6 @@ const NAV_ITEMS = [
 ];
 
 function NavIcon({ item, size = 15 }) {
-  if (item.isPulse) {
-    return (
-      <svg width={size} height={Math.round(size * 0.7)} viewBox="0 0 32 20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-        <path d="M2 10 Q6 2 10 10 Q14 18 18 10 Q22 2 26 10 Q28 14 30 10" />
-      </svg>
-    );
-  }
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d={item.icon} />
@@ -7650,14 +7358,6 @@ function App() {
   const noSupabase = !supabaseUrl || !supabaseAnonKey;
   const auth = useInternalAuth();
 
-  const lapseCount = useMemo(
-    () => clients.filter((c) => {
-      const { layer1, layer2 } = clientStatus(c);
-      return layer1 === "lapsed" || layer2 === "overdue" || layer2 === "overdue-with-package";
-    }).length,
-    [clients]
-  );
-
   // Load from Supabase on mount / when credentials change
   useEffect(() => {
     if (usingDB) return;
@@ -7989,11 +7689,6 @@ function App() {
             >
               <NavIcon item={item} size={15} />
               <span className="nav-label">{item.label}</span>
-              {item.isPulse && lapseCount > 0 && (
-                <span style={{ position: "absolute", top: "3px", right: "3px", width: "15px", height: "15px", background: "#c0392b", borderRadius: "50%", fontSize: "9px", fontWeight: "800", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {lapseCount}
-                </span>
-              )}
             </button>
           ))}
         </nav>
@@ -8058,8 +7753,8 @@ function App() {
             staffName={auth.staff?.full_name || "Staff"}
             currentUserRoles={auth.staff?.roles || (auth.staff?.role ? [auth.staff.role] : [])}
             onOpenRebook={() => setTab("rebook")}
+            templates={templates}
           />}
-        {tab === "pulse"     && <PulsePage clients={clients} templates={templates} onGoToClient={goToClient} onUpdateClient={updateClient} staffName={auth.staff?.full_name || "Staff"} />}
         {tab === "rebook"    && <RebookView clients={clients} staffName={auth.staff?.full_name || "Staff"} onUpdate={updateClient} templates={templates} supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} onSaveTask={handleSaveTask} />}
         {tab === "sales"     && <SalesDashboard supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} usingDB={usingDB} clients={clients} />}
         {tab === "settings"  && (
@@ -8129,11 +7824,6 @@ function App() {
           >
             <NavIcon item={item} size={20} />
             <span style={{ fontSize: "10px", fontWeight: "700", letterSpacing: "0.2px" }}>{item.short}</span>
-            {item.isPulse && lapseCount > 0 && (
-              <span style={{ position: "absolute", top: "4px", left: "50%", marginLeft: "4px", width: "14px", height: "14px", background: "#c0392b", borderRadius: "50%", fontSize: "8px", fontWeight: "800", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {lapseCount}
-              </span>
-            )}
           </button>
         ))}
       </nav>
