@@ -291,6 +291,79 @@ function getLastSent(client, category) {
   return `${Math.floor(daysAgo / 365)}y ago`;
 }
 
+// Decides which outreach categories are timely for a client right now.
+// Returns a map: category -> { relevant, reason, priority } (lower priority = higher up).
+function relevantTouchpoints(client) {
+  const appts = client.appointments || [];
+  const dayDiff = (dateStr) => Math.floor((new Date(dateStr + "T12:00:00") - new Date(TODAY + "T12:00:00")) / 86400000);
+  const out = {};
+
+  // Appointment Reminder — upcoming appt within 2 days
+  const nextAppt = appts
+    .filter((a) => a.date >= TODAY && (a.status === "scheduled" || a.status === "checked-in"))
+    .sort((a, b) => a.date.localeCompare(b.date))[0];
+  if (nextAppt) {
+    const d = dayDiff(nextAppt.date);
+    if (d <= 2) {
+      const when = d <= 0 ? "today" : d === 1 ? "tomorrow" : `in ${d} days`;
+      const last = getLastSent(client, "Appointment Reminder");
+      if (last !== "today" && last !== "yesterday")
+        out["Appointment Reminder"] = { relevant: true, reason: `Appointment ${when}`, priority: 0 };
+    }
+  }
+
+  // Post Visit Follow Up — completed/checked-in visit 1–3 days ago, none logged since
+  const recentVisit = appts.find((a) => {
+    if (a.status !== "completed" && a.status !== "checked-in") return false;
+    const d = -dayDiff(a.date);
+    return d >= 1 && d <= 3;
+  });
+  if (recentVisit) {
+    const last = getLastSent(client, "Post Visit Follow Up");
+    if (last !== "today" && last !== "yesterday") {
+      const d = -dayDiff(recentVisit.date);
+      out["Post Visit Follow Up"] = { relevant: true, reason: `Visited ${d} day${d !== 1 ? "s" : ""} ago`, priority: 1 };
+    }
+  }
+
+  // No Show — a no-show in the last 14 days
+  const recentNoShow = appts.find((a) => {
+    if (a.status !== "no-show") return false;
+    const d = -dayDiff(a.date);
+    return d >= 0 && d <= 14;
+  });
+  if (recentNoShow) {
+    const d = -dayDiff(recentNoShow.date);
+    out["No Show"] = { relevant: true, reason: d === 0 ? "No-showed today" : `No-showed ${d} day${d !== 1 ? "s" : ""} ago`, priority: 0 };
+  }
+
+  // Rebooking Outreach — overdue/stale/lapsed with no upcoming appointment
+  const { layer1, layer2 } = clientStatus(client);
+  const hasUpcoming = appts.some((a) => a.date >= TODAY && a.status !== "cancelled");
+  const rebookStatuses = new Set(["active-overdue", "overdue", "overdue-with-package", "overdue-contacted", "stale", "stale-contacted"]);
+  if (!hasUpcoming && (layer1 === "lapsed" || rebookStatuses.has(layer2))) {
+    const ds = daysSince(lastCompletedDate(client));
+    out["Rebooking Outreach"] = { relevant: true, reason: ds ? `${ds} days since last visit` : "Due to rebook", priority: 2 };
+  }
+
+  // Birthday — within 14 days
+  if (client.birthday) {
+    const now = new Date();
+    const bm = +client.birthday.slice(5, 7) - 1;
+    const bd = +client.birthday.slice(8, 10);
+    let bDate = new Date(now.getFullYear(), bm, bd);
+    if (bDate < new Date(now.getFullYear(), now.getMonth(), now.getDate())) bDate.setFullYear(now.getFullYear() + 1);
+    const until = Math.ceil((bDate - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000);
+    if (until <= 14) {
+      const last = getLastSent(client, "Birthday");
+      if (last !== "today" && last !== "yesterday")
+        out["Birthday"] = { relevant: true, reason: until <= 0 ? "Birthday today 🎂" : `Birthday in ${until} day${until !== 1 ? "s" : ""}`, priority: 1 };
+    }
+  }
+
+  return out;
+}
+
 const pastTS = (daysAgo, hour = 10, min = 0) => {
   const d = new Date();
   d.setDate(d.getDate() - daysAgo);
@@ -427,51 +500,6 @@ const OUTCOMES = {
   "Emailed":     ["Sent", "Replied", "No Reply", "Booked", "Rebooked", "Opt-Out", "Follow Up Needed"],
   "Postal Mail": ["Sent", "Returned to Sender"],
 };
-
-const TOUCHPOINTS_BY_CATEGORY = {
-  default: [
-    { key: "reminder",  label: "Appointment Reminder",    icon: "⏰", logPreset: { type: "Texted",  template: "Appointment Reminder" }, templateKey: null          },
-    { key: "postVisit", label: "Post Visit Follow Up",    icon: "❤️", logPreset: { type: "Texted",  template: "Post Visit Follow Up" }, templateKey: "post-visit"  },
-    { key: "rebooking", label: "Rebooking Outreach",      icon: "📅", logPreset: { type: "Texted",  template: "Rebooking Outreach"   }, templateKey: "rebooking"   },
-    { key: "birthday",  label: "Birthday",                icon: "🎂", logPreset: { type: "Emailed", template: "Birthday"             }, templateKey: "birthday"    },
-    { key: "promo",     label: "Promotional Offer",       icon: "🎁", logPreset: { type: "Emailed", template: "Promotional Offer"    }, templateKey: "promo"       },
-  ],
-  syndrome: [
-    { key: "reminder",     label: "Appointment Reminder",    icon: "⏰", logPreset: { type: "Texted", template: "Appointment Reminder" }, templateKey: null         },
-    { key: "postVisit",    label: "Post Visit Follow Up",    icon: "❤️", logPreset: { type: "Texted", template: "Post Visit Follow Up" }, templateKey: "post-visit" },
-    { key: "treatmentPlan",label: "Treatment Plan Check-In", icon: "🩺", logPreset: { type: "Called", template: "Post Visit Follow Up" }, templateKey: "rebooking"  },
-    { key: "nextSession",  label: "Next Session Scheduling", icon: "📅", logPreset: { type: "Texted", template: "Rebooking Outreach"   }, templateKey: "rebooking"  },
-    { key: "redLight",     label: "Red Light Therapy Intro", icon: "💡", logPreset: { type: "Texted", template: "Rebooking Outreach"   }, templateKey: "red-light"  },
-  ],
-  stress: [
-    { key: "reminder",  label: "Appointment Reminder",    icon: "⏰", logPreset: { type: "Texted", template: "Appointment Reminder" }, templateKey: null         },
-    { key: "postVisit", label: "Post Visit Follow Up",    icon: "❤️", logPreset: { type: "Texted", template: "Post Visit Follow Up" }, templateKey: "post-visit" },
-    { key: "rebooking", label: "Rebooking Outreach",      icon: "📅", logPreset: { type: "Texted", template: "Rebooking Outreach"   }, templateKey: "rebooking"  },
-    { key: "package",   label: "Buy 5 Get 1 Free Offer",  icon: "🎁", logPreset: { type: "Texted", template: "Promotional Offer"    }, templateKey: "promo"      },
-    { key: "redLight",  label: "Red Light Therapy Intro", icon: "💡", logPreset: { type: "Texted", template: "Rebooking Outreach"   }, templateKey: "red-light"  },
-  ],
-  occasional: [
-    { key: "reminder",     label: "Appointment Reminder",    icon: "⏰", logPreset: { type: "Texted",  template: "Appointment Reminder" }, templateKey: null         },
-    { key: "postVisit",    label: "Post Visit Follow Up",    icon: "❤️", logPreset: { type: "Texted",  template: "Post Visit Follow Up" }, templateKey: "post-visit" },
-    { key: "monthlyInvite",label: "Monthly Care Invitation", icon: "🌱", logPreset: { type: "Texted",  template: "Rebooking Outreach"   }, templateKey: "rebooking"  },
-    { key: "redLight",     label: "Red Light Therapy Intro", icon: "💡", logPreset: { type: "Texted",  template: "Rebooking Outreach"   }, templateKey: "red-light"  },
-    { key: "birthday",     label: "Birthday",                icon: "🎂", logPreset: { type: "Emailed", template: "Birthday"             }, templateKey: "birthday"   },
-  ],
-  prenatal: [
-    { key: "reminder",    label: "Appointment Reminder",   icon: "⏰", logPreset: { type: "Texted", template: "Appointment Reminder" }, templateKey: null         },
-    { key: "postVisit",   label: "Post Visit Follow Up",   icon: "❤️", logPreset: { type: "Texted", template: "Post Visit Follow Up" }, templateKey: "post-visit" },
-    { key: "prenatalPkg", label: "Prenatal Package Offer", icon: "🤰", logPreset: { type: "Texted", template: "Promotional Offer"    }, templateKey: "prenatal"   },
-    { key: "trimester",   label: "Trimester Check-In",     icon: "🌙", logPreset: { type: "Texted", template: "Post Visit Follow Up" }, templateKey: "post-visit" },
-    { key: "postpartum",  label: "Postpartum Follow-Up",   icon: "👶", logPreset: { type: "Texted", template: "Post Visit Follow Up" }, templateKey: "post-visit" },
-  ],
-};
-
-// Get the right touchpoints for a client based on their care category
-const getTouchpoints = (client) =>
-  TOUCHPOINTS_BY_CATEGORY[client.careCategory] || TOUCHPOINTS_BY_CATEGORY.default;
-
-// Keep a flat reference for Pulse page doneTP lookup compatibility
-const TOUCHPOINTS = TOUCHPOINTS_BY_CATEGORY.default;
 
 const apptStatusStyle = (s) =>
   s === "scheduled"  ? { bg: "#ede9fe", c: "#5b21b6" } :
@@ -2333,6 +2361,7 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
   const [showLogAppt,  setShowLogAppt]  = useState(false);
   const [showLogTx,    setShowLogTx]    = useState(false);
   const [saveError,    setSaveError]    = useState(null);
+  const [moreOutreach, setMoreOutreach] = useState(false);
 
   useEffect(() => {
     if (!usingDB || !supabaseUrl || !supabaseAnonKey || !client.id) return;
@@ -2845,17 +2874,30 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
                 onLog={(preset) => setShowLog(preset)}
                 onStageChange={updateRedLight}
               />
-              {/* One row per template defined in Settings */}
-              {Object.entries(templates)
-                .filter(([key]) => key !== "red-light")
-                .map(([key, tpl]) => {
+              {/* Contextual touchpoints — suggested for this client vs. the rest */}
+              {(() => {
+                const verdicts = relevantTouchpoints(client);
+                const rows = Object.entries(templates).filter(([key]) => key !== "red-light");
+                const suggested = [];
+                const more = [];
+                for (const [key, tpl] of rows) {
+                  const v = tpl.category ? verdicts[tpl.category] : null;
+                  (v?.relevant ? suggested : more).push({ key, tpl, reason: v?.reason || null, priority: v?.priority ?? 99 });
+                }
+                suggested.sort((a, b) => a.priority - b.priority);
+
+                const renderRow = ({ key, tpl, reason }, highlighted) => {
                   const lastSent = tpl.category ? getLastSent(client, tpl.category) : null;
                   const defaultType = tpl.sms ? "Texted" : tpl.email ? "Emailed" : "Called";
                   return (
-                    <div key={key} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 12px", borderRadius: "10px", background: "#faf8f5", border: "1px solid #f0e8de" }}>
+                    <div key={key} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 12px", borderRadius: "10px",
+                      background: highlighted ? "#fdf6ef" : "#faf8f5", border: `1px solid ${highlighted ? "#e8d5c0" : "#f0e8de"}` }}>
                       <span style={{ fontSize: "15px", flexShrink: 0 }}>{tpl.icon}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: "13px", fontWeight: "600", color: "#4a3828" }}>{tpl.label}</div>
+                        {highlighted && reason && (
+                          <div style={{ fontSize: "11px", fontWeight: "700", color: "#a0785a", marginTop: 1 }}>{reason}</div>
+                        )}
                         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, flexWrap: "wrap" }}>
                           {tpl.category && (
                             <span style={{ fontSize: "10px", fontWeight: "700", color: "#a0785a", background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: "100px", padding: "1px 7px" }}>
@@ -2870,12 +2912,31 @@ function ClientDetail({ client, onUpdate, templates, allClients, onBack, supabas
                       </div>
                       <button
                         onClick={() => setShowLog({ type: defaultType, template: tpl.category || null, templateKey: key })}
-                        style={{ fontSize: "11px", fontWeight: "700", color: "#7a5640", background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0, whiteSpace: "nowrap" }}>
+                        style={{ fontSize: "11px", fontWeight: "700", color: "#7a5640", background: highlighted ? "#fff" : "#f5ede4", border: "1px solid #e8d5c0", borderRadius: "8px", padding: "5px 12px", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", flexShrink: 0, whiteSpace: "nowrap" }}>
                         Log →
                       </button>
                     </div>
                   );
-                })}
+                };
+
+                return (
+                  <>
+                    {suggested.length > 0
+                      ? suggested.map((r) => renderRow(r, true))
+                      : <div style={{ fontSize: "11px", color: "#8a7a6a", padding: "2px 4px" }}>No timely touchpoints for {client.firstName || "this client"} right now.</div>
+                    }
+                    {more.length > 0 && (
+                      <>
+                        <button onClick={() => setMoreOutreach((v) => !v)}
+                          style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontSize: "11px", fontWeight: "700", color: "#8a7a6a", padding: "4px 2px", marginTop: 2 }}>
+                          {moreOutreach ? "▾" : "▸"} More outreach ({more.length})
+                        </button>
+                        {moreOutreach && more.map((r) => renderRow(r, false))}
+                      </>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
 
@@ -2955,6 +3016,7 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
   const [showNewClient, setShowNewClient] = useState(false);
   const [sort, setSort] = useState("name");
   const [hideContacted, setHideContacted] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
   const allTags = useMemo(
     () => [...new Set(clients.flatMap((c) => c.tags || []))].sort(),
     [clients]
@@ -2986,7 +3048,11 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
           cl.phone?.includes(q);
         const matchT = !tagFilter || (cl.tags || []).includes(tagFilter);
         const matchC = !hideContacted || !contactedWithinDays(cl, CONTACTED_FILTER_DAYS);
-        return matchF && matchS && matchT && matchC;
+        // Hide inactive/restricted by default, unless toggled on, that status is
+        // explicitly filtered for, or there's an active search query.
+        const isHiddenStatus = s.layer1 === "inactive" || s.layer1 === "restricted";
+        const matchI = showInactive || !isHiddenStatus || filter === "inactive" || filter === "restricted" || !!q;
+        return matchF && matchS && matchT && matchC && matchI;
       })
       .sort((a, b) => {
         if (sort === "recent") {
@@ -3002,7 +3068,15 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
         const last = (a.lastName || "").localeCompare(b.lastName || "");
         return last !== 0 ? last : (a.firstName || "").localeCompare(b.firstName || "");
       }),
-    [clients, filter, search, tagFilter, sort, hideContacted]
+    [clients, filter, search, tagFilter, sort, hideContacted, showInactive]
+  );
+
+  const inactiveCount = useMemo(
+    () => clients.filter((cl) => {
+      const l1 = clientStatus(cl).layer1;
+      return l1 === "inactive" || l1 === "restricted";
+    }).length,
+    [clients]
   );
 
   // How many clients the toggle would hide (for the pill label)
@@ -3124,6 +3198,20 @@ function ClientSidebar({ clients, selected, onSelect, filter, setFilter, search,
           Hide contacted in last {CONTACTED_FILTER_DAYS} days
           {contactedCount > 0 && <span style={{ opacity: 0.65 }}>({contactedCount})</span>}
         </button>
+        {inactiveCount > 0 && (
+          <button onClick={() => setShowInactive((v) => !v)} style={{
+            width: "100%", marginTop: 6, fontSize: "11px", padding: "4px 10px", borderRadius: "8px",
+            cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontWeight: "700",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            border: showInactive ? "1px solid #cbd5e1" : "1px solid #e8e0d6",
+            background: showInactive ? "#f1f5f9" : "transparent",
+            color: showInactive ? "#475569" : "#8a7a6a",
+          }}>
+            <span style={{ fontSize: "12px" }}>{showInactive ? "✓" : "○"}</span>
+            {showInactive ? "Showing" : "Show"} inactive &amp; restricted
+            <span style={{ opacity: 0.65 }}>({inactiveCount})</span>
+          </button>
+        )}
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
