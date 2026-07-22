@@ -87,7 +87,7 @@ Deno.serve(async (req) => {
     confirmed: "scheduled", pending: "scheduled", rescheduled: "scheduled",
     "need acceptance": "scheduled", "awaiting confirmation": "scheduled",
     "checked in": "checked-in", checkedin: "checked-in", "checked-in": "checked-in",
-    "service in progress": "checked-in",
+    "service in progress": "checked-in", "ready to start": "checked-in",
     completed: "completed", serviced: "completed", show: "completed",
     "service completed": "completed",
     cancelled: "cancelled", canceled: "cancelled", cancel: "cancelled",

@@ -4721,6 +4721,70 @@ function VagaroSyncCard({ supabaseUrl, supabaseAnonKey }) {
   );
 }
 
+function BackfillApiCard({ supabaseUrl, supabaseAnonKey }) {
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState(null); // { processed, total }
+  const [result, setResult] = useState(null);
+
+  const run = async () => {
+    if (!supabaseUrl) { setResult({ error: "Connect to Supabase first (Database tab)." }); return; }
+    setRunning(true); setResult(null); setProgress(null);
+    const base = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/vagaro-backfill`;
+    const headers = { "Content-Type": "application/json", apikey: supabaseAnonKey, Authorization: `Bearer ${supabaseAnonKey}` };
+    let offset = 0;
+    const totals = { appts: 0, placeholders: 0, clients: 0 };
+    try {
+      // Loop until the function reports there are no more clients to process.
+      // Guard against runaway loops with a generous cap.
+      for (let i = 0; i < 200; i++) {
+        const res = await fetch(base, { method: "POST", headers, body: JSON.stringify({ offset }) });
+        const data = await res.json();
+        if (data.error) { setResult({ error: data.error }); setRunning(false); return; }
+        totals.appts += data.apptsUpserted || 0;
+        totals.placeholders += data.placeholdersEnriched || 0;
+        totals.clients += data.clientsProcessed || 0;
+        setProgress({ processed: data.processedThrough || totals.clients, total: data.totalClients || 0 });
+        if (data.nextOffset == null) break;
+        offset = data.nextOffset;
+      }
+      setResult({ ok: true, ...totals });
+    } catch (e) {
+      setResult({ error: String(e) });
+    }
+    setRunning(false);
+  };
+
+  return (
+    <div style={{ ...S.card, marginBottom: "14px" }}>
+      <div style={{ fontSize: "14px", fontWeight: "700", color: "#2e2418", marginBottom: 3 }}>Backfill Full History from Vagaro API</div>
+      <div style={{ fontSize: "12px", color: "#8a7a6a", marginBottom: 14 }}>
+        Pulls every client's complete appointment history directly from the Vagaro API — including visits from
+        before the webhook was connected — and fills in real names for any placeholder clients. Recalculates last
+        visit and visit counts. Runs in batches; safe to run multiple times.
+      </div>
+      <button style={S.btn("primary")} onClick={run} disabled={running}>
+        {running ? "Backfilling…" : "Backfill full history"}
+      </button>
+      {running && progress && (
+        <div style={{ marginTop: 12, fontSize: "12px", color: "#7a5640" }}>
+          Processed {progress.processed}{progress.total ? ` / ${progress.total}` : ""} clients…
+        </div>
+      )}
+      {result && (
+        <div style={{ marginTop: 14, fontSize: "12px", borderRadius: 10, padding: "12px 14px",
+          background: result.error ? "#fee2e2" : "#dcf5ec",
+          border: `1px solid ${result.error ? "#fca5a5" : "#86efac"}`,
+          color: result.error ? "#991b1b" : "#065f46", lineHeight: 1.7 }}>
+          {result.error ? (<>⚠️ {result.error}</>) : (<>
+            <strong>✓ Backfill complete</strong><br />
+            {result.clients} clients processed · {result.appts} appointments written · {result.placeholders} placeholder{result.placeholders !== 1 ? "s" : ""} enriched
+          </>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReprocessWebhooksCard({ supabaseUrl, supabaseAnonKey }) {
   const [running, setRunning] = useState(false);
   const [result,  setResult]  = useState(null);
@@ -5341,8 +5405,6 @@ function SettingsPage({ webhookLog, templates, onSaveTemplate, gmailClientId, se
   const [testResult, setTestResult] = useState(null);
   const [testing, setTesting] = useState(false);
   const [showImport, setShowImport] = useState(false);
-  const [webhookSecret, setWebhookSecret] = useState(() => localStorage.getItem("cp_webhook_secret") || "");
-  const [showWebhookSecret, setShowWebhookSecret] = useState(false);
   const [liveWebhookLog, setLiveWebhookLog] = useState(null);
   const [webhookLogLoading, setWebhookLogLoading] = useState(false);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
@@ -5541,6 +5603,7 @@ function SettingsPage({ webhookLog, templates, onSaveTemplate, gmailClientId, se
       {/* Vagaro ID sync */}
       <VagaroSyncCard supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} />
       <ReprocessWebhooksCard supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} />
+      <BackfillApiCard supabaseUrl={supabaseUrl} supabaseAnonKey={supabaseAnonKey} />
 
       {/* Webhook receiver */}
       <div style={{ ...S.card, marginBottom: "14px" }}>
@@ -5572,31 +5635,21 @@ function SettingsPage({ webhookLog, templates, onSaveTemplate, gmailClientId, se
           </div>
         )}
 
-        {/* Webhook secret */}
-        <label style={S.lbl}>Webhook secret <span style={{ fontWeight: 400, color: "#b0a090", textTransform: "none", letterSpacing: 0 }}>(optional but recommended)</span></label>
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <input
-            type={showWebhookSecret ? "text" : "password"}
-            value={webhookSecret}
-            onChange={(e) => { setWebhookSecret(e.target.value); localStorage.setItem("cp_webhook_secret", e.target.value); }}
-            placeholder="Any strong random string"
-            style={{ ...S.inp, fontFamily: "monospace", flex: 1 }}
-          />
-          <button style={S.sm("ghost")} onClick={() => setShowWebhookSecret((s) => !s)}>
-            {showWebhookSecret ? "Hide" : "Show"}
-          </button>
-          <button style={S.sm("ghost")} onClick={() => {
-            const s = crypto.randomUUID().replace(/-/g, "");
-            setWebhookSecret(s);
-            localStorage.setItem("cp_webhook_secret", s);
-            setShowWebhookSecret(true);
-          }}>Generate</button>
-        </div>
-        {webhookSecret && (
-          <div style={{ fontSize: "12px", color: "#8a7a6a", background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: 10, padding: "10px 14px", marginBottom: 16, lineHeight: 1.6 }}>
-            Enter this value in Vagaro when creating the webhook (Header: <code style={{ fontFamily: "monospace" }}>x-webhook-secret</code>).
+        {/* Webhook signature verification */}
+        <label style={S.lbl}>Webhook signature verification <span style={{ fontWeight: 400, color: "#b0a090", textTransform: "none", letterSpacing: 0 }}>(optional but recommended)</span></label>
+        <div style={{ fontSize: "12px", color: "#5a4a3a", background: "#f5ede4", border: "1px solid #e8d5c0", borderRadius: 10, padding: "12px 14px", marginBottom: 16, lineHeight: 1.7 }}>
+          Vagaro signs every webhook with a <strong>Verification Token</strong> in the{" "}
+          <code style={{ fontFamily: "monospace" }}>X-Vagaro-Signature</code> header (find it under the webhook's{" "}
+          <em>View Details</em> in Vagaro → Settings → APIs &amp; Webhooks). To have ClientPulse reject any request
+          that isn't from Vagaro, store that token as a Supabase secret:
+          <div style={{ fontFamily: "monospace", fontSize: "11px", background: "#fff", border: "1px solid #e8d5c0", borderRadius: 8, padding: "8px 10px", marginTop: 8, overflowX: "auto", whiteSpace: "pre" }}>
+            supabase secrets set VAGARO_WEBHOOK_TOKEN=your-token \{"\n"}  --project-ref dewsznqxagzahtkpriuk
           </div>
-        )}
+          <div style={{ marginTop: 8, color: "#8a7a6a" }}>
+            Until this secret is set, all webhooks are accepted (no verification). Once set, requests without a
+            matching signature are rejected with 401.
+          </div>
+        </div>
 
         {/* Events handled */}
         <div style={{ marginTop: 16 }}>
