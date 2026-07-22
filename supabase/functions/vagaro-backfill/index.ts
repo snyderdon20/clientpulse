@@ -22,7 +22,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  // Must include apikey — the Settings card sends it, and the browser preflight
+  // rejects the request if it isn't allowed here (was the "Failed to fetch" cause).
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
 const str    = (v: unknown): string => (v == null ? "" : String(v));
